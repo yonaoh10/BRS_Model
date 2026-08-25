@@ -32,7 +32,6 @@ from callqa.models import (
     Features,
     RedactedTranscript,
     ScoreCard,
-    Transcript,
     TranscriptBundle,
 )
 from callqa.reporting.call_report import render_call_report
