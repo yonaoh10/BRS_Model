@@ -1,0 +1,80 @@
+{% extends "base.html.j2" %}
+{% block title %}דוח בנקאי {{ agg.banker_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>דוח התפתחות לבנקאי</h1>
+  <div class="muted">מזהה בנקאי: {{ agg.banker_id }} · מספר שיחות שנותחו: {{ agg.n_calls }}</div>
+</div>
+
+<div class="card">
+  <h2>ציון כולל</h2>
+  <div style="display:flex; align-items:center; gap:24px;">
+    <div class="score-big" style="color: {{ total_color }};">{{ agg.mean_total }}</div>
+    <div>
+      <div>ממוצע הציון המשוקלל של הבנקאי (0–100)</div>
+      <div class="muted">{{ group_label }} קבוצתי: {{ group_total }}</div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>השוואה לפי ממד ({{ group_label }} קבוצתי מסומן בקו)</h2>
+  {% for dim in dimensions %}
+  {% set value = agg.dim_means[dim.id] %}
+  <div class="bar-row">
+    <div class="bar-label">{{ dim.name_he }}</div>
+    <div class="bar-track">
+      <div class="bar-fill" style="width: {{ (value / 5 * 100) | round(1) }}%; background: {{ dim_colors[dim.id] }};"></div>
+      <div class="bar-marker" style="right: {{ (group_dim[dim.id] / 5 * 100) | round(1) }}%;"></div>
+    </div>
+    <div class="bar-value">{{ value }} / {{ group_dim[dim.id] }}</div>
+  </div>
+  {% endfor %}
+  <div class="muted">ערך ראשון: ממוצע הבנקאי; ערך שני: {{ group_label }} הקבוצתי (סולם 1–5).</div>
+</div>
+
+{% if agg.strength_evidence %}
+<div class="card">
+  <h2>נקודת חוזק: {{ dim_names[agg.strongest_dim] }}</h2>
+  <div class="quote">
+    <span class="ts">[{{ agg.strength_evidence.evidence.timestamp }}]
+      {{ speaker_he[agg.strength_evidence.evidence.speaker] }} ·
+      שיחה <a href="../calls/{{ agg.strength_evidence.call_id }}.html">{{ agg.strength_evidence.call_id }}</a>:</span>
+    "{{ agg.strength_evidence.evidence.quote }}"
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>תחום לפיתוח: {{ dim_names[agg.weakest_dim] }}</h2>
+  {% if agg.development_evidence %}
+  <div class="quote">
+    <span class="ts">[{{ agg.development_evidence.evidence.timestamp }}]
+      {{ speaker_he[agg.development_evidence.evidence.speaker] }} ·
+      שיחה <a href="../calls/{{ agg.development_evidence.call_id }}.html">{{ agg.development_evidence.call_id }}</a>:</span>
+    "{{ agg.development_evidence.evidence.quote }}"
+  </div>
+  {% endif %}
+  {% if recommendation %}
+  <h3>המלצת אימון</h3>
+  <div class="rec">{{ recommendation }}</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>שיחות שנכללו בדוח</h2>
+  <table>
+    <tr><th>שיחה</th><th>ציון משוקלל</th><th>שער</th>
+    {% for dim in dimensions %}<th>{{ dim.name_he }}</th>{% endfor %}</tr>
+    {% for card in agg.cards %}
+    <tr>
+      <td><a href="../calls/{{ card.call_id }}.html">{{ card.call_id }}</a></td>
+      <td>{{ card.weighted_total }}</td>
+      <td>{% if card.gate_failed %}<span class="badge badge-fail">חריגה</span>{% else %}<span class="badge badge-ok">תקין</span>{% endif %}</td>
+      {% for dim in dimensions %}<td>{{ card.scores[dim.id].score }}</td>{% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}
+{% block footer %}{{ footer_meta }}{% endblock %}

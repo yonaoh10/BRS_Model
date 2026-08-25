@@ -1,0 +1,67 @@
+{% extends "base.html.j2" %}
+{% block title %}דוח כיול השופט{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>דוח כיול: השופט האוטומטי מול הערכה אנושית</h1>
+  <div class="muted">שיחות משותפות: {{ result.n_calls }} · שיחות עם שני מעריכים: {{ result.n_doubly_rated }}</div>
+</div>
+
+<div class="card">
+  <h2>מסקנה</h2>
+  <div style="display:flex; align-items:center; gap:24px;">
+    <div class="score-big">{{ result.overall_qwk if result.overall_qwk is not none else "—" }}</div>
+    <div>
+      <div>QWK כולל (קאפא משוקללת ריבועית, מערכת מול אדם)</div>
+      {% if result.overall_pass %}
+        <span class="badge badge-ok">עובר (סף: 0.70)</span>
+      {% else %}
+        <span class="badge badge-fail">לא עובר (סף: 0.70)</span>
+      {% endif %}
+    </div>
+  </div>
+  {% if result.flagged_dimensions %}
+  <p><strong>ממדים עם QWK מתחת ל-0.60:</strong> {{ flagged_names | join(", ") }} —
+  אין לפרוס ממדים אלה ללא בקרה אנושית.</p>
+  {% endif %}
+  <p class="muted">הסכמה בין מעריכים (אדם מול אדם): QWK
+    {{ result.human_vs_human_qwk if result.human_vs_human_qwk is not none else "—" }},
+    קאפא של כהן {{ result.human_vs_human_kappa if result.human_vs_human_kappa is not none else "—" }}
+    (על {{ result.n_doubly_rated }} שיחות עם שני מעריכים).</p>
+</div>
+
+<div class="card">
+  <h2>לפי ממד</h2>
+  <table>
+    <tr><th>ממד</th><th>n</th><th>QWK</th><th>MAE</th><th>סטטוס</th></tr>
+    {% for d in result.dimensions %}
+    <tr>
+      <td>{{ dim_names[d.dimension_id] }}</td>
+      <td>{{ d.n }}</td>
+      <td>{{ d.qwk if d.qwk is not none else "—" }}</td>
+      <td>{{ d.mae if d.mae is not none else "—" }}</td>
+      <td>{% if d.flagged %}<span class="badge badge-fail">דורש בקרה אנושית</span>
+          {% elif d.qwk is none %}<span class="badge badge-warn">אין מספיק נתונים</span>
+          {% else %}<span class="badge badge-ok">תקין</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% for d in result.dimensions %}
+<div class="card">
+  <h2>מטריצת בלבול — {{ dim_names[d.dimension_id] }}</h2>
+  <div class="muted">שורות: הערכה אנושית · עמודות: המערכת</div>
+  <table>
+    <tr><th></th>{% for s in [1,2,3,4,5] %}<th>מערכת {{ s }}</th>{% endfor %}</tr>
+    {% for row in d.confusion %}
+    <tr><th>אדם {{ loop.index }}</th>
+      {% for cell in row %}
+      <td style="{% if cell > 0 %}background:#eef6ef;font-weight:600;{% endif %}">{{ cell }}</td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+{% endblock %}
+{% block footer %}{{ footer_meta }}{% endblock %}

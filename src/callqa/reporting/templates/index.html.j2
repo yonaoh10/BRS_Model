@@ -1,0 +1,47 @@
+{% extends "base.html.j2" %}
+{% block title %}מדד איכות שיחות — דף ראשי{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>ניתוח איכות שיחות — דף ראשי</h1>
+  <div class="muted">נוצר: {{ generated_at }} · שיחות: {{ n_calls }} · בנקאים: {{ bankers | length }}</div>
+</div>
+
+<div class="card">
+  <h2>דוחות בנקאים</h2>
+  <table>
+    <tr><th>מזהה בנקאי</th><th>שיחות</th><th>ציון ממוצע</th><th>דוח</th></tr>
+    {% for agg in bankers %}
+    <tr>
+      <td>{{ agg.banker_id }}</td>
+      <td>{{ agg.n_calls }}</td>
+      <td>{{ agg.mean_total }}</td>
+      <td><a href="bankers/{{ agg.banker_id }}.html">פתח דוח</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>דוחות שיחות</h2>
+  <table>
+    <tr><th>שיחה</th><th>בנקאי</th><th>ציון</th><th>שער</th><th>דוח</th></tr>
+    {% for card in cards %}
+    <tr>
+      <td>{{ card.call_id }}</td>
+      <td>{{ card.banker_id }}</td>
+      <td>{{ card.weighted_total }}</td>
+      <td>{% if card.gate_failed %}<span class="badge badge-fail">חריגה</span>{% else %}<span class="badge badge-ok">תקין</span>{% endif %}</td>
+      <td><a href="calls/{{ card.call_id }}.html">פתח דוח</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if calibration_exists %}
+<div class="card">
+  <h2>כיול מול הערכה אנושית</h2>
+  <p><a href="calibration.html">דוח כיול (QWK)</a></p>
+</div>
+{% endif %}
+{% endblock %}
+{% block footer %}{{ footer_meta }}{% endblock %}
