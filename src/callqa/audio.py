@@ -1,0 +1,233 @@
+"""Audio preparation (stage 2): conversion to 16 kHz WAV, stereo channel
+split, and VAD speech-segment detection.
+
+Uses ffmpeg when available; falls back to a pure-Python path for WAV inputs.
+VAD engines: 'energy' (dependency-free, default in mock) and 'silero'
+(lazy import; model ships inside the silero-vad wheel - no download at runtime).
+"""
+
+from __future__ import annotations
+
+import logging
+import shutil
+import subprocess
+import wave
+from pathlib import Path
+
+import numpy as np
+
+from callqa.config import Config
+from callqa.models import AudioArtifact, CallInput, CallMeta, VADSegment
+
+logger = logging.getLogger(__name__)
+
+
+class AudioError(RuntimeError):
+    pass
+
+
+def _have_ffmpeg() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
+def _run_ffmpeg(args: list[str]) -> None:
+    proc = subprocess.run(["ffmpeg", "-y", "-v", "error", *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise AudioError(f"ffmpeg failed: {proc.stderr.strip()[:500]}")
+
+
+def _read_wav(path: Path) -> tuple[np.ndarray, int]:
+    """Read a PCM WAV into float32 [-1, 1], shape (n_samples, n_channels)."""
+    with wave.open(str(path), "rb") as wf:
+        n_channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        rate = wf.getframerate()
+        raw = wf.readframes(wf.getnframes())
+    if sampwidth == 2:
+        data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    elif sampwidth == 1:
+        data = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    elif sampwidth == 4:
+        data = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+    else:
+        raise AudioError(f"unsupported WAV sample width: {sampwidth}")
+    return data.reshape(-1, n_channels), rate
+
+
+def _write_wav(path: Path, samples: np.ndarray, rate: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    clipped = np.clip(samples, -1.0, 1.0)
+    pcm = (clipped * 32767.0).astype(np.int16)
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(pcm.tobytes())
+
+
+def _resample_linear(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
+    if src_rate == dst_rate:
+        return samples
+    n_dst = int(round(len(samples) * dst_rate / src_rate))
+    src_t = np.arange(len(samples)) / src_rate
+    dst_t = np.arange(n_dst) / dst_rate
+    return np.interp(dst_t, src_t, samples).astype(np.float32)
+
+
+def _extract_channel(
+    src: Path, dst: Path, channel: int | None, target_rate: int
+) -> None:
+    """Extract one channel (or downmix if channel is None) to 16 kHz mono WAV."""
+    if _have_ffmpeg():
+        if channel is None:
+            _run_ffmpeg(["-i", str(src), "-ac", "1", "-ar", str(target_rate), str(dst)])
+        else:
+            pan = f"pan=mono|c0=c{channel}"
+            _run_ffmpeg(["-i", str(src), "-af", pan, "-ar", str(target_rate), str(dst)])
+        return
+    # Pure-Python fallback (WAV inputs only).
+    if src.suffix.lower() != ".wav":
+        raise AudioError("ffmpeg is required for non-WAV inputs")
+    data, rate = _read_wav(src)
+    mono = data.mean(axis=1) if channel is None else data[:, min(channel, data.shape[1] - 1)]
+    _write_wav(dst, _resample_linear(mono, rate, target_rate), target_rate)
+
+
+# -- VAD ---------------------------------------------------------------------
+
+def energy_vad(
+    wav_path: Path,
+    min_speech_ms: int = 250,
+    frame_ms: int = 20,
+    merge_gap_ms: int = 150,
+) -> list[VADSegment]:
+    """Dependency-free energy-based VAD over a 16 kHz mono WAV."""
+    data, rate = _read_wav(wav_path)
+    mono = data[:, 0]
+    frame_len = max(1, int(rate * frame_ms / 1000))
+    n_frames = len(mono) // frame_len
+    if n_frames == 0:
+        return []
+    frames = mono[: n_frames * frame_len].reshape(n_frames, frame_len)
+    rms = np.sqrt((frames ** 2).mean(axis=1))
+    floor = float(np.percentile(rms, 10))
+    peak = float(np.percentile(rms, 95))
+    threshold = max(1e-4, floor + 0.15 * (peak - floor))
+    speech = rms > threshold
+
+    segments: list[VADSegment] = []
+    start: int | None = None
+    for i, is_speech in enumerate(speech):
+        if is_speech and start is None:
+            start = i
+        elif not is_speech and start is not None:
+            segments.append(VADSegment(start=start * frame_ms / 1000, end=i * frame_ms / 1000))
+            start = None
+    if start is not None:
+        segments.append(VADSegment(start=start * frame_ms / 1000, end=n_frames * frame_ms / 1000))
+
+    # Merge segments separated by tiny gaps, then drop too-short segments.
+    merged: list[VADSegment] = []
+    for seg in segments:
+        if merged and (seg.start - merged[-1].end) * 1000 <= merge_gap_ms:
+            merged[-1] = VADSegment(start=merged[-1].start, end=seg.end)
+        else:
+            merged.append(seg)
+    min_len = min_speech_ms / 1000
+    return [s for s in merged if s.duration >= min_len]
+
+
+def silero_vad(wav_path: Path, min_speech_ms: int = 250) -> list[VADSegment]:
+    """Silero VAD (lazy import; weights ship inside the silero-vad wheel)."""
+    from silero_vad import get_speech_timestamps, load_silero_vad, read_audio
+
+    model = _get_silero_model(load_silero_vad)
+    audio = read_audio(str(wav_path))
+    stamps = get_speech_timestamps(
+        audio, model, return_seconds=True, min_speech_duration_ms=min_speech_ms
+    )
+    return [VADSegment(start=float(s["start"]), end=float(s["end"])) for s in stamps]
+
+
+_SILERO_MODEL = None
+
+
+def _get_silero_model(loader):  # noqa: ANN001 - loader typed by lazy import
+    global _SILERO_MODEL
+    if _SILERO_MODEL is None:
+        _SILERO_MODEL = loader()
+    return _SILERO_MODEL
+
+
+def run_vad(wav_path: Path, config: Config) -> tuple[str, list[VADSegment]]:
+    engine = config.audio.vad
+    if engine == "silero" and not config.run.mock:
+        try:
+            return "silero", silero_vad(wav_path, config.audio.min_speech_ms)
+        except ImportError:
+            logger.warning("silero-vad not installed; falling back to energy VAD")
+    return "energy", energy_vad(wav_path, config.audio.min_speech_ms)
+
+
+# -- stage entrypoint --------------------------------------------------------
+
+def resolve_banker_channel(call: CallInput, config: Config) -> int:
+    """Return the 0-based channel index for the banker (0=L, 1=R)."""
+    setting = config.speakers.banker_channel
+    if setting == "from_metadata":
+        channel = call.banker_channel or "L"
+        if call.banker_channel is None:
+            logger.warning(
+                "call_id=%s: banker_channel not in metadata; defaulting to L", call.call_id
+            )
+    else:
+        channel = setting
+    return 0 if channel == "L" else 1
+
+
+def prepare_audio(
+    call: CallInput, meta: CallMeta, config: Config, wav_dir: Path
+) -> AudioArtifact:
+    """Convert / split audio to 16 kHz mono WAV(s) and run VAD per channel."""
+    rate = config.audio.target_sample_rate
+    wav_dir.mkdir(parents=True, exist_ok=True)
+
+    if meta.channels >= 2:
+        banker_idx = resolve_banker_channel(call, config)
+        customer_idx = 1 - banker_idx
+        banker_wav = wav_dir / f"{call.call_id}.banker.wav"
+        customer_wav = wav_dir / f"{call.call_id}.customer.wav"
+        _extract_channel(call.audio_path, banker_wav, banker_idx, rate)
+        _extract_channel(call.audio_path, customer_wav, customer_idx, rate)
+        vad_engine, banker_segments = run_vad(banker_wav, config)
+        _, customer_segments = run_vad(customer_wav, config)
+        artifact = AudioArtifact(
+            call_id=call.call_id,
+            is_stereo=True,
+            banker_wav=str(banker_wav),
+            customer_wav=str(customer_wav),
+            sample_rate=rate,
+            vad_engine=vad_engine,
+            banker_segments=banker_segments,
+            customer_segments=customer_segments,
+        )
+    else:
+        mono_wav = wav_dir / f"{call.call_id}.mono.wav"
+        _extract_channel(call.audio_path, mono_wav, None, rate)
+        vad_engine, mono_segments = run_vad(mono_wav, config)
+        artifact = AudioArtifact(
+            call_id=call.call_id,
+            is_stereo=False,
+            mono_wav=str(mono_wav),
+            sample_rate=rate,
+            vad_engine=vad_engine,
+            mono_segments=mono_segments,
+        )
+    logger.info(
+        "audio done: call_id=%s stereo=%s vad=%s segments=%d",
+        call.call_id,
+        artifact.is_stereo,
+        vad_engine,
+        len(artifact.banker_segments) + len(artifact.customer_segments) + len(artifact.mono_segments),
+    )
+    return artifact

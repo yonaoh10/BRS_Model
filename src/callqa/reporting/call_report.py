@@ -1,0 +1,49 @@
+"""Per-call RTL HTML report - part of the process_call output (stage 8)."""
+
+from __future__ import annotations
+
+from callqa.models import CallMeta, Features, RedactedTranscript, ScoreCard
+from callqa.reporting.common import (
+    jinja_env,
+    load_recommendations,
+    pick_recommendation,
+    score_color,
+)
+from callqa.rubric import Rubric
+
+
+def weakest_non_gate_dimension(rubric: Rubric, scorecard: ScoreCard) -> str | None:
+    """The weakest non-gate dimension (lowest score; rubric order breaks ties)."""
+    candidates = [d for d in rubric.dimensions if not d.gate and d.id in scorecard.scores]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda d: scorecard.scores[d.id].score).id
+
+
+def render_call_report(
+    rubric: Rubric,
+    meta: CallMeta,
+    scorecard: ScoreCard,
+    features: Features,
+    redacted: RedactedTranscript,
+    recommendations: dict[str, list[str]] | None = None,
+) -> str:
+    if recommendations is None:
+        recommendations = load_recommendations()
+    weakest = weakest_non_gate_dimension(rubric, scorecard)
+    recommendation = (
+        pick_recommendation(recommendations, weakest, scorecard.call_id) if weakest else None
+    )
+    by_id = rubric.by_id
+    template = jinja_env().get_template("call_report.html.j2")
+    return template.render(
+        meta=meta,
+        scorecard=scorecard,
+        features=features,
+        dimensions=rubric.dimensions,
+        dim_colors={d.id: score_color(scorecard.scores[d.id].score) for d in rubric.dimensions},
+        total_color=score_color(scorecard.weighted_total, maximum=100.0),
+        failed_gate_names=[by_id[g].name_he for g in scorecard.failed_gates if g in by_id],
+        weakest_dim_name=by_id[weakest].name_he if weakest else None,
+        recommendation=recommendation,
+    )

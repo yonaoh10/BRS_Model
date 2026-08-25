@@ -1,0 +1,83 @@
+{% extends "base.html.j2" %}
+{% block title %}דוח שיחה {{ meta.call_id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>דוח איכות שיחה</h1>
+  <div class="muted">
+    מזהה שיחה: {{ meta.call_id }} · מזהה בנקאי: {{ meta.banker_id }}
+    {% if meta.call_date %} · תאריך: {{ meta.call_date }}{% endif %}
+    · משך: {{ meta.duration_sec | mmss }} דקות
+    {% if meta.call_type %} · סוג שיחה: {{ meta.call_type }}{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>ציון כולל</h2>
+  <div style="display:flex; align-items:center; gap:24px;">
+    <div class="score-big" style="color: {{ total_color }};">{{ scorecard.weighted_total }}</div>
+    <div>
+      <div>מתוך 100 (ממוצע משוקלל של ממדי המחוון)</div>
+      {% if scorecard.gate_failed %}
+        <span class="badge badge-fail">חריגת שער: הציון הוגבל ל-59</span>
+        <div class="muted">ממדי שער שנכשלו: {{ failed_gate_names | join(", ") }}</div>
+      {% else %}
+        <span class="badge badge-ok">כל ממדי השער תקינים</span>
+      {% endif %}
+      {% if scorecard.truncated %}
+        <div class="muted">שיחה ארוכה: ההערכה בוצעה על תמליל מקוצר (ממדי השער הוערכו על תחילת השיחה).</div>
+      {% endif %}
+    </div>
+  </div>
+  {% if scorecard.summary_he %}<p>{{ scorecard.summary_he }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>ציונים לפי ממד</h2>
+  {% for dim in dimensions %}
+  {% set ds = scorecard.scores[dim.id] %}
+  <h3>
+    {{ dim.name_he }} —
+    <span style="color: {{ dim_colors[dim.id] }};">{{ ds.score }}/5</span>
+    <span class="muted">(משקל {{ (dim.weight * 100) | round | int }}%{% if dim.gate %}, ממד שער{% endif %})</span>
+  </h3>
+  <p>{{ ds.reasoning_he }}</p>
+  {% for ev in ds.evidence %}
+  <div class="quote">
+    <span class="ts">[{{ ev.timestamp }}] {{ speaker_he[ev.speaker] }}:</span>
+    "{{ ev.quote }}"
+  </div>
+  {% endfor %}
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>מדדים אובייקטיביים</h2>
+  <table>
+    <tr><th>מדד</th><th>ערך</th></tr>
+    <tr><td>יחס דיבור של הבנקאי</td><td>{{ "%.0f" | format(features.talk_ratio * 100) }}%</td></tr>
+    <tr><td>המונולוג הארוך ביותר של הבנקאי</td><td>{{ "%.1f" | format(features.longest_banker_monologue_sec) }} שניות</td></tr>
+    <tr><td>קטיעות של הבנקאי את הלקוח</td><td>{{ features.interruptions_by_banker }}</td></tr>
+    <tr><td>קטיעות של הלקוח את הבנקאי</td><td>{{ features.interruptions_by_customer }}</td></tr>
+    <tr><td>חציון זמן המתנה לפני מענה</td>
+        <td>{% if features.patience_median_sec is not none %}{{ "%.1f" | format(features.patience_median_sec) }} שניות{% else %}לא נמדד{% endif %}</td></tr>
+    <tr><td>שאלות של הבנקאי</td><td>{{ features.banker_question_count }} ({{ "%.2f" | format(features.banker_questions_per_minute) }} לדקה)</td></tr>
+    <tr><td>קצב דיבור — בנקאי</td><td>{{ "%.0f" | format(features.speech_rate_wpm.banker) }} מילים לדקה</td></tr>
+    <tr><td>קצב דיבור — לקוח</td><td>{{ "%.0f" | format(features.speech_rate_wpm.customer) }} מילים לדקה</td></tr>
+    <tr><td>זמן שקט כולל (מעל 3 שניות)</td><td>{{ "%.1f" | format(features.dead_air_total_sec) }} שניות</td></tr>
+  </table>
+</div>
+
+{% if recommendation %}
+<div class="card">
+  <h2>המלצת אימון</h2>
+  <div>הממד לחיזוק: <strong>{{ weakest_dim_name }}</strong></div>
+  <div class="rec">{{ recommendation }}</div>
+</div>
+{% endif %}
+{% endblock %}
+{% block footer %}
+מודל שיפוט: {{ scorecard.model }} · מנוע: {{ scorecard.judge_engine }} ·
+גרסת פרומפט: {{ scorecard.prompt_version }} ·
+חתימת פרומפט: <code>{{ scorecard.prompt_sha256[:16] }}</code> ·
+נוצר: {{ scorecard.timestamp }}
+{% endblock %}
