@@ -170,7 +170,7 @@ def watch_loop(
     failed_dir = config.paths.input_dir / "failed"
     calls_dir.mkdir(parents=True, exist_ok=True)
 
-    sizes: dict[Path, tuple[int, float]] = {}  # path -> (size, first_seen_at_this_size)
+    sizes: dict[Path, tuple[int, float]] = {}  # path -> (size, unchanged_since)
     results: list[CallResult] = []
     cycles = 0
     while (stop_event is None or not stop_event.is_set()) and (
@@ -182,11 +182,21 @@ def watch_loop(
             if path.suffix.lower() not in (".wav", ".mp3"):
                 continue
             try:
-                size = path.stat().st_size
+                stat = path.stat()
             except OSError:
                 continue
+            size = stat.st_size
             prev = sizes.get(path)
-            if prev is None or prev[0] != size:
+            if prev is None:
+                # First sighting: date it from the file's own mtime (mapped onto
+                # the monotonic clock) rather than now, so a recording that was
+                # already finished before this process started counts as stable
+                # immediately. Without this a single-cycle run (`watch --once`,
+                # e.g. from cron) could never process anything.
+                age = max(0.0, time.time() - stat.st_mtime)
+                sizes[path] = (size, now - age)
+                prev = sizes[path]
+            elif prev[0] != size:
                 sizes[path] = (size, now)
                 continue
             if now - prev[1] < config.watch.stable_seconds:
