@@ -4,6 +4,7 @@ resume behavior, and the no-PII-leak guarantee (per spec section 15)."""
 from __future__ import annotations
 
 import dataclasses
+import os
 import shutil
 import threading
 import time
@@ -131,6 +132,52 @@ def test_resume_reruns_only_missing_stage(workspace, engines) -> None:  # noqa: 
 
 
 # -- watch driver ------------------------------------------------------------
+
+def test_watch_single_cycle_processes_already_stable_file(
+    tmp_path: Path, workspace, engines  # noqa: ANN001
+) -> None:
+    """A single poll cycle (`watch --once`, e.g. from cron) must process a
+    recording that was already finished before the process started."""
+    input_dir = tmp_path / "once_input"
+    (input_dir / "calls").mkdir(parents=True)
+    shutil.copy(workspace.paths.input_dir / "metadata.csv", input_dir / "metadata.csv")
+    target = input_dir / "calls" / "CALL006.wav"
+    shutil.copy(workspace.paths.input_dir / "calls" / "CALL006.wav", target)
+    # The file is finished: backdate its mtime well past stable_seconds.
+    old = time.time() - 3600
+    os.utime(target, (old, old))
+
+    config = workspace.model_copy(deep=True)
+    config.paths.input_dir = input_dir
+    config.watch.stable_seconds = 10
+    engines = dataclasses.replace(engines, config=config)
+
+    results = watch_loop(config, engines, max_cycles=1)
+    assert len(results) == 1
+    assert results[0].call_id == "CALL006"
+    assert results[0].status == "success"
+    assert (input_dir / "processed" / "CALL006.wav").exists()
+
+
+def test_watch_single_cycle_skips_in_progress_file(
+    tmp_path: Path, workspace, engines  # noqa: ANN001
+) -> None:
+    """A recording still being written (fresh mtime) must NOT be processed."""
+    input_dir = tmp_path / "fresh_input"
+    (input_dir / "calls").mkdir(parents=True)
+    shutil.copy(workspace.paths.input_dir / "metadata.csv", input_dir / "metadata.csv")
+    shutil.copy(
+        workspace.paths.input_dir / "calls" / "CALL006.wav", input_dir / "calls" / "CALL006.wav"
+    )  # mtime = now
+
+    config = workspace.model_copy(deep=True)
+    config.paths.input_dir = input_dir
+    config.watch.stable_seconds = 30
+    engines = dataclasses.replace(engines, config=config)
+
+    assert watch_loop(config, engines, max_cycles=1) == []
+    assert (input_dir / "calls" / "CALL006.wav").exists()
+
 
 def test_watch_picks_up_stable_file(tmp_path: Path, workspace, engines) -> None:  # noqa: ANN001
     # Isolated input dir so moving files does not disturb the shared sample set.
