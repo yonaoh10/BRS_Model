@@ -1,5 +1,9 @@
 # Call-QA PoC — Hebrew Conversation Intelligence for Banker Calls
 
+**🌐 [English](#english) · [עברית](#hebrew)**
+
+<a id="english"></a>
+
 A production-grade, single-call pipeline that takes one banker↔customer
 recording (Hebrew) and produces the complete per-call output:
 
@@ -159,3 +163,171 @@ See `src/callqa/` — `pipeline.py` (`process_call()`, the production core),
 `judge/`), `aggregation.py`, `calibration.py`, `reporting/`, and `cli.py`.
 Config lives in `config/` (`config.yaml`, `rubric.yaml`,
 `recommendations_he.yaml`). Tests in `tests/` (`make test`).
+
+<a id="hebrew"></a>
+
+---
+---
+
+# עברית — מערכת בקרת איכות שיחות בנקאיות
+
+**🌐 [English](#english) · [עברית](#hebrew)**
+
+מערכת ברמת ייצור שמקבלת הקלטה **אחת** של שיחה בין בנקאי ללקוח (בעברית)
+ומפיקה את מלוא התוצר עבור אותה שיחה:
+
+1. **תמלול** — מודל ivrit.ai Whisper (faster-whisper CT2), עברית כפויה.
+2. **שיוך דוברים** — פיצול ערוצי סטריאו (המסלול העיקרי); pyannote כגיבוי
+   להקלטות מונו.
+3. **הסרת פרטים מזהים (PII)** — מותאם לעברית (תעודת זהות עם ספרת ביקורת,
+   טלפונים, כרטיסי אשראי, מספרי חשבון, שמות).
+4. **מדדים אובייקטיביים** — יחס דיבור, קטיעות, סבלנות, שאלות, אורך מונולוג,
+   זמן שקט, קצב דיבור.
+5. **שופט LLM** — מחוון משוקלל בן 8 ממדים, מדורג על ידי מודל המוגש מקומית
+   ב-vLLM, עם ציטוטי ראיה מילה במילה (מאומתים, לעולם לא מומצאים).
+6. **דוח HTML לכל שיחה** — בעברית, RTL, לחלוטין אופליין (CSS מוטמע).
+
+סביב הליבה יושבות שלוש שכבות דקות: מנועי הרצה
+(`process` / `watch` / `run`), אגרגציה ברמת הבנקאי (`report`), וכיול השופט
+מול הערכות אנושיות (`calibrate`, QWK).
+
+**הכול רץ מקצה לקצה במצב mock על מכונה ללא GPU וללא מודלים** — מנועים
+דמה דטרמיניסטיים מאחורי אותם ממשקים בדיוק, שמתחלפים למנועים אמיתיים
+באמצעות קונפיגורציה בלבד. זיהוי רגשות מוחרג במפורש מהמערכת.
+
+## התחלה מהירה (מכונת פיתוח, מצב mock)
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+
+python scripts/generate_sample_data.py          # 6 קבצי WAV סטריאו סינתטיים + CSV
+
+# יחידת העבודה האטומית - שיחה אחת (מבחן הקבלה העיקרי):
+python -m callqa process --mock --audio data/input/calls/CALL001.wav
+
+# אצוות ה-PoC + דוחות מסכמים + כיול:
+python -m callqa run --mock
+python -m callqa report --mock
+python -m callqa calibrate --mock
+# פתח את data/output/reports/index.html
+
+make test                                        # חבילת הבדיקות
+```
+
+קודי יציאה עבור `process`: `0` הצלחה · `1` נדרשת בדיקה אנושית ·
+`2` כישלון — ניתן לחבר ישירות כל מתזמן חיצוני או hook ממערכת ההקלטות.
+
+## פקודות CLI
+
+| פקודה | תפקיד |
+|---|---|
+| `callqa process --audio F [--call-id --banker-id --banker-channel]` | שיחה אחת, כל הצינור |
+| `callqa watch` | קליטה בייצור: סריקת תיקיית הקלט, עיבוד כל קובץ יציב פעם אחת, העברה ל-`processed/`/`failed/` |
+| `callqa run [--max-workers N]` | מנוע ההרצה של ה-PoC על `data/input/metadata.csv` |
+| `callqa report` | דוחות לכל בנקאי + `reports/index.html` |
+| `callqa calibrate` | QWK מול `human_ratings.csv` ← `reports/calibration.html` |
+| `callqa validate-inputs` | ולידציה קפדנית של המטא-דאטה והדירוגים |
+
+כל הפקודות מקבלות `--config`, `--mock`, `--force`. כל שדה בקונפיגורציה
+ניתן לדריסה דרך משתני סביבה: `CALLQA_SECTION__FIELD`
+(למשל `CALLQA_JUDGE__BASE_URL`).
+
+## חוזה הקלט
+
+- `data/input/calls/*.{wav,mp3}` — שם הקובץ (או המטא-דאטה) = `call_id`.
+- `data/input/metadata.csv` — חובה: `call_id, banker_id, file_name`;
+  רשות: `call_date, call_type, banker_channel (L/R), banker_name`.
+- `data/input/human_ratings.csv` — `call_id, rater_id,` ועמודה אחת לכל ממד
+  במחוון, ציונים 1–5 (1–2 מעריכים לכל שיחה).
+
+## הבטחות התכנון
+
+- **אידמפוטנטי וניתן להמשך**: מצב לכל שיחה×שלב ב-SQLite; הרצה חוזרת מדלגת
+  על שלבים שהושלמו; `--force` מריץ מחדש. כל תוצר נכתב אטומית.
+- **אטומיות ברמת השיחה**: נעילת SQLite לכל `call_id` מונעת עיבוד כפול;
+  כל שיחה מסתיימת במעטפת סטטוס מפורשת; שיחה בעייתית אחת לעולם לא עוצרת
+  את מנוע ההרצה.
+- **פרטיות**: רק טקסט מצונזר מגיע לשופט, לדוחות וללוגים. תמלילים גולמיים
+  שמורים רק תחת `data/output/transcripts/` (עם קובץ אזהרה). הלוגים מכילים
+  מזהי שיחה ושמות שלבים בלבד, לעולם לא תוכן תמליל.
+- **דטרמיניזם וניתן לביקורת**: טמפרטורת השופט 0.0; כל כרטיס ציונים שומר
+  מזהה מודל, SHA-256 של הפרומפט, גרסת פרומפט, מספר ניסיונות חוזרים, זמן
+  תגובה וחותמת זמן.
+- **אימות ראיות**: כל ציטוט של השופט חייב להופיע מילה במילה בתמליל המצונזר,
+  אחרת התשובה נדחית ומתבצע ניסיון חוזר; לאחר כישלון סופי השיחה מסומנת
+  `needs_human_review` — לעולם לא מומצא מידע.
+- **כלל שער**: ממד שער (זיהוי, ציות) שקיבל ציון 2 ומטה מגביל את הציון
+  הכולל ל-59 ומסמן את השיחה.
+
+---
+
+# מדריך התקנה בשרת הבנק
+
+מכונת הפיתוח לעולם אינה מורידה מודלים. כל קבצי המודלים נמשכים בשרת הבנק
+באמצעות `scripts/download_models.py`.
+
+1. **העברה** של המאגר יחד עם חבילת ה-wheels. יש לבנות את החבילה קודם על
+   מכונה עם אינטרנט: `./scripts/build_offline_bundle.sh` (יוצר `wheels/`).
+2. **התקנה אופליין** בשרת: `./scripts/install_offline.sh --server`
+   (מתקין `requirements.txt` + `requirements-server.txt` מתוך `wheels/`,
+   ולאחר מכן את חבילת `callqa` — ללא רשת).
+3. **התקנת ffmpeg**: `apt/yum install ffmpeg`, או הצבת בינארי סטטי של
+   `ffmpeg`/`ffprobe` בתוך `$PATH` בשרת מנותק לחלוטין.
+4. **הורדת מודלים** לפי נפח ה-VRAM הזמין (שלב זה דורש אינטרנט או קבצים
+   שהוכנו מראש):
+
+   | VRAM | ASR | מודל השופט (`--llm-model`) | דגלי vLLM |
+   |---|---|---|---|
+   | 24 GB | `--asr` (ivrit CT2, ~1.6GB) | `dicta-il/dictalm2.0-instruct` (7B fp16), או מודל 12–27B בכימות AWQ/GPTQ | `--quantization awq` עבור AWQ |
+   | ≥48 GB | `--asr` | `meta-llama/Llama-3.3-70B-Instruct` AWQ (מוגבל גישה) | `--quantization awq --tensor-parallel-size 2` |
+
+   ```bash
+   python scripts/download_models.py --asr
+   python scripts/download_models.py --llm --llm-model dicta-il/dictalm2.0-instruct
+   # רק אם מתברר שההקלטות במונו (מוגבל גישה; יש לאשר תנאים ולהגדיר HF_TOKEN):
+   python scripts/download_models.py --diarization
+   # רשות: הסרת שמות אנשים מבוססת NER:
+   python scripts/download_models.py --ner    # ואז יש להגדיר redaction.ner: true
+   ```
+   הסקריפט כותב `models/MODELS_MANIFEST.json` ומעדכן את `judge.model`
+   בקובץ `config/config.yaml` כך שיצביע על המודל שהורד.
+5. **מעבר למצב אופליין**: `export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`.
+6. **הפעלת השופט**: `./scripts/start_vllm.sh <model-id-or-path> 8000`
+   (דגלי הכימות מפורטים בכותרת הסקריפט). הצינור רק בודק קישוריות אל
+   `judge.base_url`; הוא לעולם אינו מפעיל את vLLM בעצמו.
+7. **הצבת הקלט**: הקלטות תחת `data/input/calls/`, יחד עם `metadata.csv`
+   ו-(לצורך כיול) `human_ratings.csv`.
+8. **ולידציה**: `python -m callqa validate-inputs` — נכשל עם טבלת בעיות
+   בכל תקלה במטא-דאטה.
+9. **עיבוד אצוות ה-PoC**: `python -m callqa run` (ניתן להוסיף
+   `--max-workers 2` אם יש עודף משאבים ב-GPU). בייצור שוטף יש להשתמש
+   ב-`python -m callqa watch` — הוא סורק את תיקיית הקלט ומעבד כל הקלטה
+   חדשה ברגע שגודל הקובץ שלה מתייצב.
+10. **כיול**: `python -m callqa calibrate` ←
+    `data/output/reports/calibration.html` (עובר כאשר QWK כולל ≥ 0.70;
+    ממדים עם QWK < 0.60 מסומנים "אין לפרוס ללא בקרה אנושית").
+11. **דוחות**: `python -m callqa report` ←
+    `data/output/reports/index.html` שמקשר לכל דוחות השיחות והבנקאים
+    (הכול HTML סטטי, ללא נכסים חיצוניים).
+
+## פתרון תקלות
+
+| תסמין | פתרון |
+|---|---|
+| CUDA OOM (תמלול) | הגדר `asr.compute_type: int8` בקונפיגורציה |
+| CUDA OOM (vLLM) | השתמש במודל AWQ/GPTQ, הקטן את `--max-model-len`, הוסף `--gpu-memory-utilization 0.9` |
+| "mono recording but no diarizer" / זוהו קבצי מונו | התקן את תלויות השרת, הרץ `download_models.py --diarization` עם `HF_TOKEN` (יש לאשר את תנאי pyannote ב-HF) |
+| נקודת הקצה של vLLM אינה זמינה | הפעל את `scripts/start_vllm.sh`; בדוק את הפורט ב-`judge.base_url`; `curl localhost:8000/v1/models` |
+| ביטחון תמלול נמוך (בלוק `quality` מסמן הרבה מקטעים) | בדוק את קצב הדגימה והרעש בהקלטה; ודא `asr.language: he`; שקול לשנות את מערך ההקלטה |
+| תיקיית מודל ה-ASR חסרה או ריקה | הרץ `download_models.py --asr` ובדוק את `paths.models_dir` |
+| שיחה תקועה במצב "already being processed" | תהליך קודם קרס באמצע: הנעילה נגנבת אוטומטית כאשר ה-pid מת; אחרת מחק את השורה מטבלת `locks` במסד המצב |
+
+## מבנה המאגר
+
+ראה `src/callqa/` — `pipeline.py` (`process_call()`, ליבת הייצור),
+`engines.py` (מכל הזרקת תלויות שנבנה פעם אחת לכל תהליך), מודולי השלבים
+(`ingestion`, `audio`, `asr/`, `speakers/`, `redaction`, `features`,
+`judge/`), `aggregation.py`, `calibration.py`, `reporting/`, ו-`cli.py`.
+הקונפיגורציה נמצאת ב-`config/` (`config.yaml`, `rubric.yaml`,
+`recommendations_he.yaml`). הבדיקות ב-`tests/` (`make test`).
