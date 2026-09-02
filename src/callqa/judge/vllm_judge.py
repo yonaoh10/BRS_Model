@@ -33,10 +33,17 @@ class VLLMJudge:
                 "config/config.yaml (see scripts/download_models.py --llm)."
             )
 
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        return headers
+
     def check_connectivity(self) -> None:
         url = f"{self.config.base_url.rstrip('/')}/models"
+        req = urllib.request.Request(url, headers=self._headers(), method="GET")
         try:
-            with urllib.request.urlopen(url, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status != 200:
                     raise VLLMJudgeError(f"vLLM /models returned HTTP {resp.status}")
         except (urllib.error.URLError, OSError) as exc:
@@ -61,7 +68,7 @@ class VLLMJudge:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=self._headers(),
             method="POST",
         )
         try:
