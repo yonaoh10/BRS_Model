@@ -81,6 +81,10 @@ class JudgeConfig(BaseModel):
     max_retries: int = Field(default=3, ge=0, le=10)
     # Transcript token budget (approx.) before the long-call chunking rule kicks in.
     max_transcript_chars: int = Field(default=24000, gt=0)
+    # Optional bearer token sent as `Authorization: Bearer ...` (vLLM --api-key,
+    # or any remote OpenAI-compatible endpoint). Prefer the env var
+    # CALLQA_JUDGE__API_KEY over writing secrets into config.yaml.
+    api_key: str | None = None
 
 
 class ReportingConfig(BaseModel):
