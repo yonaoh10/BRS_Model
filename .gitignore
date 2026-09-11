@@ -13,3 +13,4 @@ models/
 .venv/
 venv/
 MODELS_MANIFEST.json
+cloud/.runpod_state.json

@@ -91,6 +91,29 @@ env-overridable: `CALLQA_SECTION__FIELD` (e.g. `CALLQA_JUDGE__BASE_URL`).
 
 ---
 
+## Optional: cloud GPUs during development
+
+You can build and tune the whole system on a laptop with no GPU by renting one
+GPU machine by the hour and running only the two heavy stages on it
+(transcription and the LLM judge). Everything else stays local.
+
+```bash
+python cloud/runpod_cli.py up                              # start the GPU box
+python -m callqa run --config config/config.cloud.yaml     # laptop drives it
+python cloud/runpod_cli.py down                            # stop paying
+```
+
+Roughly a few dollars per month of development. The rented machine runs the
+same `download_models.py` and `vllm serve` as the bank runbook, so it is a
+rehearsal rather than a detour. **Development data only** — audio leaves your
+machine, so use synthetic or consented recordings.
+
+This is scaffolding: `python scripts/remove_cloud_option.py --apply` deletes it
+entirely and verifies the pipeline still passes. Full guide, costs and security
+rules: **[cloud/README.md](cloud/README.md)**.
+
+---
+
 # Bank-server deployment runbook
 
 The developer machine never downloads models. All model files are fetched on
@@ -259,6 +282,29 @@ make test                                        # חבילת הבדיקות
   `needs_human_review` — לעולם לא מומצא מידע.
 - **כלל שער**: ממד שער (זיהוי, ציות) שקיבל ציון 2 ומטה מגביל את הציון
   הכולל ל-59 ומסמן את השיחה.
+
+---
+
+## רשות: GPU בענן בזמן הפיתוח
+
+אפשר לבנות ולכוונן את המערכת כולה על מחשב נייד ללא GPU, על ידי שכירת מכונת
+GPU אחת לפי שעה והרצת שני השלבים הכבדים בלבד עליה (תמלול ושופט ה-LLM).
+כל השאר נשאר מקומי.
+
+```bash
+python cloud/runpod_cli.py up                              # הפעלת מכונת ה-GPU
+python -m callqa run --config config/config.cloud.yaml     # המחשב שלך מפעיל אותה
+python cloud/runpod_cli.py down                            # להפסיק לשלם
+```
+
+העלות היא כמה דולרים בודדים לחודש פיתוח. המכונה השכורה מריצה את אותו
+`download_models.py` ואותה פקודת `vllm serve` שבמדריך הבנק, ולכן זו חזרה
+גנרלית ולא עקיפה. **נתוני פיתוח בלבד** — האודיו יוצא מהמחשב שלך, ולכן יש
+להשתמש בהקלטות סינתטיות או בהסכמה.
+
+זהו פיגום זמני: הפקודה `python scripts/remove_cloud_option.py --apply` מוחקת
+אותו לחלוטין ומאמתת שהצינור עדיין עובר את כל הבדיקות. מדריך מלא, עלויות
+וכללי אבטחה: **[cloud/README.md](cloud/README.md)**.
 
 ---
 

@@ -44,13 +44,19 @@ class AudioConfig(BaseModel):
 
 
 class ASRConfig(BaseModel):
-    engine: Literal["faster_whisper", "mock"] = "faster_whisper"
+    # faster_whisper = in-process (bank server). remote = HTTP client to a
+    # cloud-hosted ASR server (DEV ONLY; see cloud/README.md). mock = fake.
+    engine: Literal["faster_whisper", "remote", "mock"] = "faster_whisper"
     model_dir: str = "{models_dir}/ivrit-whisper-large-v3-turbo-ct2"
     language: str = "he"
     compute_type: str = "float16"
     word_timestamps: bool = True
     vad_filter: bool = True
     low_confidence_logprob: float = -1.0
+    # --- remote engine only (dev phase); ignored by faster_whisper/mock ---
+    base_url: str = ""
+    api_key: str | None = None
+    timeout_sec: float = 900.0
 
     @field_validator("language")
     @classmethod
@@ -58,6 +64,12 @@ class ASRConfig(BaseModel):
         if not v or v == "auto":
             raise ValueError("asr.language must be an explicit language code (never autodetect)")
         return v
+
+    @model_validator(mode="after")
+    def _remote_needs_base_url(self) -> ASRConfig:
+        if self.engine == "remote" and not self.base_url:
+            raise ValueError("asr.engine='remote' requires asr.base_url (see cloud/README.md)")
+        return self
 
 
 class SpeakersConfig(BaseModel):
