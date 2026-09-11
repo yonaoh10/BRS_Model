@@ -46,6 +46,12 @@ def build_engines(config: Config, rubric_path: str = "config/rubric.yaml") -> En
         from callqa.asr.mock_engine import MockASREngine
 
         asr: ASREngine = MockASREngine()
+    elif config.asr.engine == "remote":
+        # DEV-ONLY cloud path - deleted when the project moves on-prem.
+        from callqa.asr.remote_engine import RemoteASREngine
+
+        asr = RemoteASREngine(config.asr)
+        asr.check_connectivity()
     else:
         from callqa.asr.faster_whisper_engine import FasterWhisperEngine
 
