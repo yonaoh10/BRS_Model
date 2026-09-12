@@ -8,13 +8,39 @@ left empty. Runs light+dark x desktop+phone.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+# playwright is a developer tool, not a runtime dependency: importing it here
+# would make this file unopenable - and `--help` unusable - on a machine that
+# only runs the pipeline.
 
-CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
+
+def _find_chrome() -> str | None:
+    """Locate a Chromium build, rather than hard-coding one machine's path.
+
+    Playwright normally resolves its own browser; an explicit path is only
+    needed where the installed playwright package and the bundled browser
+    build disagree, which is the case in some CI images.
+    """
+    import glob
+    import os
+    import shutil
+
+    override = os.environ.get("CALLQA_CHROME")
+    if override and Path(override).exists():
+        return override
+    for pattern in ("/opt/pw-browsers/chromium*/chrome-linux/chrome",
+                    str(Path.home() / ".cache/ms-playwright/chromium*/chrome-linux/chrome")):
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            return matches[-1]
+    return shutil.which("chromium") or shutil.which("google-chrome")
+
+
+CHROME = _find_chrome()
 PAGE = Path(__file__).parent / "prototype.html"
 OUT = Path(__file__).parent / "qa-output"
 OUT.mkdir(exist_ok=True)
@@ -174,9 +200,29 @@ MODES = [
 ]
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Render the dashboard in a headless browser and fail on any "
+                    "accessibility or layout defect.")
+    parser.add_argument("--page", type=Path, default=None,
+                        help="page to check (default: dashboard/prototype.html)")
+    parser.add_argument("--out-dir", type=Path, default=None,
+                        help="where screenshots and the JSON report are written")
+    parser.add_argument("--chrome", default=None,
+                        help="path to a Chromium binary (default: auto-detect)")
+    args = parser.parse_args()
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("playwright is not installed. This harness is a developer tool:\n"
+              "  pip install playwright", file=sys.stderr)
+        return 2
+    globals()["sync_playwright"] = sync_playwright
+    if args.chrome:
+        globals()["CHROME"] = args.chrome
     findings: dict[str, list] = {}
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROME)
+        browser = p.chromium.launch(**({"executable_path": CHROME} if CHROME else {}))
         for name, vp, theme in MODES:
             ctx = browser.new_context(viewport=vp, color_scheme=theme,
                                       device_scale_factor=2, locale="he-IL")

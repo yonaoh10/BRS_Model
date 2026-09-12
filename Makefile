@@ -4,7 +4,7 @@ test:
 	python -m pytest -q
 
 lint:
-	ruff check src tests scripts
+	ruff check src tests scripts dashboard cloud
 
 sample:
 	python scripts/generate_sample_data.py

@@ -24,6 +24,21 @@ sys.path.insert(0, str(REPO_ROOT / "dashboard"))
 
 from server import Handler, collect_state  # noqa: E402
 
+
+def _chrome() -> str | None:
+    """The same Chromium lookup the QA harness uses, without importing it
+    (that module pulls in playwright, which a bank machine will not have)."""
+    import glob
+    import shutil
+
+    for pattern in ("/opt/pw-browsers/chromium*/chrome-linux/chrome",
+                    str(Path.home() / ".cache/ms-playwright/chromium*/chrome-linux/chrome")):
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            return matches[-1]
+    return shutil.which("chromium") or shutil.which("google-chrome")
+
+
 RAW_ID = "123456782"          # seeded into the mock dialog fixture
 RAW_PHONE = "052-1234567"
 
@@ -182,8 +197,7 @@ def test_page_is_served_with_its_token(live_server: str) -> None:
 
 # ------------------------------------------------- live page, real browser
 
-@pytest.mark.skipif(not Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome").exists(),
-                    reason="bundled Chromium not present")
+@pytest.mark.skipif(_chrome() is None, reason="no Chromium available")
 def test_page_applies_live_data_without_js_errors(live_server: str) -> None:
     """The page must actually consume /api/state.
 
@@ -193,7 +207,7 @@ def test_page_applies_live_data_without_js_errors(live_server: str) -> None:
     its embedded sample figures. Only a browser check catches that.
     """
     playwright = pytest.importorskip("playwright.sync_api")
-    chrome = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
+    chrome = _chrome()
     with playwright.sync_playwright() as p:
         browser = p.chromium.launch(executable_path=chrome)
         page = browser.new_context(viewport={"width": 1280, "height": 900},

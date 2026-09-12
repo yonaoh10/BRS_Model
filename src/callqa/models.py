@@ -6,10 +6,11 @@ own; all artifacts are validated by the models below.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Speaker = Literal["banker", "customer"]
 CallStatus = Literal["success", "needs_human_review", "failed"]
@@ -26,10 +27,26 @@ STATUS_EXIT_CODES: dict[str, int] = {
 }
 
 
+# Mirrors ingestion.CALL_ID_RE; duplicated here so no CallInput can be built
+# with an id that would escape output_dir or land unescaped in a web page.
+_CALL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
 class CallInput(BaseModel):
     """The input to process_call: one recording plus its metadata."""
 
     call_id: str
+
+    @field_validator("call_id")
+    @classmethod
+    def _safe_call_id(cls, value: str) -> str:
+        if not _CALL_ID_RE.match(value):
+            raise ValueError(
+                f"call_id {value!r} is not a safe identifier: letters, digits, "
+                f"dot, underscore and hyphen only, 1-64 characters"
+            )
+        return value
+
     audio_path: Path
     banker_id: str = "unknown"
     call_date: str | None = None
@@ -146,6 +163,7 @@ class DiarizationQualityRecord(BaseModel):
     words_attributed: int = 0
     words_by_nearest: int = 0
     smoothed_islands: int = 0
+    words_dropped: int = 0
 
 
 class DialogTranscript(BaseModel):
@@ -157,6 +175,10 @@ class DialogTranscript(BaseModel):
     # inferred. On the mono path, 0.0 means the signals were split evenly.
     role_confidence: float = 1.0
     turns: list[DialogTurn]
+    # Which anonymous speaker index became the banker. Stored rather than
+    # re-derived downstream: re-deriving it from the vote tally disagreed with
+    # this decision on ties, and mislabelled the report's evidence table.
+    banker_index: int | None = None
     role_signals: list[RoleSignalRecord] = Field(default_factory=list)
     diarization: DiarizationQualityRecord | None = None
 
@@ -176,6 +198,10 @@ class RedactedTranscript(BaseModel):
     engine: str
     turns: list[RedactedTurn]
     redaction_counts: dict[str, int] = Field(default_factory=dict)
+    # False means the redaction stage was switched off and this text is RAW.
+    # Recorded in the artifact so a disabled run can never be mistaken for a
+    # clean one after the fact.
+    enabled: bool = True
 
 
 class SpeechRateWPM(BaseModel):
@@ -188,6 +214,10 @@ class Features(BaseModel):
 
     call_id: str
     talk_ratio: float
+    # False on a single-channel recording: the diarizer gives one speaker per
+    # moment, so interruptions cannot be measured and their counts are
+    # structural zeros rather than observations.
+    overlap_metrics_available: bool = True
     longest_banker_monologue_sec: float
     interruptions_by_banker: int
     interruptions_by_customer: int
@@ -211,6 +241,15 @@ class DimensionScore(BaseModel):
     score: int = Field(ge=1, le=5)
     reasoning_he: str
     evidence: list[Evidence] = Field(default_factory=list)
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def _not_a_boolean(cls, value: object) -> object:
+        # bool is a subclass of int, so `"score": true` was coerced to 1 - a
+        # judgement of "the worst possible" produced by a type error.
+        if isinstance(value, bool):
+            raise ValueError("score must be a number between 1 and 5, not a boolean")
+        return value
 
 
 class JudgeResponse(BaseModel):

@@ -13,12 +13,19 @@ running ruff and the test suite.
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Documentation sections wrapped in these markers are removed wholesale, so the
+# claim that removal leaves nothing behind stays true as the prose changes.
+MARKED_SECTION_RE = re.compile(
+    r"\n?<!-- cloud-option:start -->.*?<!-- cloud-option:end -->\n?", re.DOTALL
+)
 
 PATHS_TO_DELETE = [
     "cloud",
@@ -54,7 +61,43 @@ EDITS: list[tuple[str, str, str]] = [
     base_url: str = ""
     api_key: str | None = None
     timeout_sec: float = 900.0
+
+    @field_validator("base_url")
+    @classmethod
+    def _safe_base_url(cls, value: str) -> str:
+        return validate_endpoint(value, "asr.base_url")
 """,
+        "",
+    ),
+    (
+        "Makefile",
+        """
+# --- dev-phase cloud option (see cloud/README.md) -------------------------
+cloud-up:
+\tpython cloud/runpod_cli.py up
+
+cloud-status:
+\tpython cloud/runpod_cli.py status
+
+cloud-down:
+\tpython cloud/runpod_cli.py down
+
+# Removes the cloud option entirely (files + code references), then verifies.
+# Run this when moving to the bank servers. Dry-run first:
+#   python scripts/remove_cloud_option.py
+cloud-remove:
+\tpython scripts/remove_cloud_option.py --apply
+""",
+        "",
+    ),
+    (
+        "Makefile",
+        ".PHONY: test lint sample mock-e2e clean cloud-up cloud-status cloud-down cloud-remove",
+        ".PHONY: test lint sample mock-e2e clean",
+    ),
+    (
+        ".gitignore",
+        "cloud/.runpod_state.json\n",
         "",
     ),
     (
@@ -111,7 +154,17 @@ def check(apply: bool) -> int:
         path.write_text(path.read_text(encoding="utf-8").replace(old, new, 1), encoding="utf-8")
         print(f"unwired  {rel}")
 
-    # 2. delete cloud-only files (this script last, so failures leave it usable)
+    # 2. drop the documented sections, delimited by markers so this stays
+    #    reliable when the prose around them is rewritten
+    for rel in ("README.md",):
+        path = REPO_ROOT / rel
+        text = path.read_text(encoding="utf-8")
+        stripped = MARKED_SECTION_RE.sub("", text)
+        if stripped != text:
+            path.write_text(stripped, encoding="utf-8")
+            print(f"unwrote  {rel} (cloud-option sections)")
+
+    # 3. delete cloud-only files (this script last, so failures leave it usable)
     self_path = Path(__file__).resolve()
     for rel in PATHS_TO_DELETE:
         path = REPO_ROOT / rel
@@ -120,7 +173,7 @@ def check(apply: bool) -> int:
         shutil.rmtree(path) if path.is_dir() else path.unlink()
         print(f"deleted  {rel}")
 
-    # 3. prove the pipeline is intact
+    # 4. prove the pipeline is intact
     print("\nVerifying...")
     for cmd in (["ruff", "check", "src", "tests", "scripts"],
                 [sys.executable, "-m", "pytest", "-q"]):
@@ -134,9 +187,30 @@ def check(apply: bool) -> int:
             return 1
 
     print(f"\nDone. Finally remove this script: git rm {self_path.relative_to(REPO_ROOT)}")
-    print("Also drop the 'cloud option' section from README.md and the")
-    print("cloud-* targets from the Makefile, then commit.")
+    leftovers = _remaining_references()
+    if leftovers:
+        print("\nStill mentioning the cloud option (prose only, safe to leave, but")
+        print("they will read as broken links once cloud/ is gone):")
+        for path, line_no, text in leftovers:
+            print(f"  {path}:{line_no}: {text.strip()[:80]}")
     return 0
+
+
+def _remaining_references() -> list[tuple[str, int, str]]:
+    """Prose that still points at the removed option.
+
+    The code un-wiring is verified by the test suite; documentation is not, so
+    it is listed explicitly rather than claimed to be clean.
+    """
+    found: list[tuple[str, int, str]] = []
+    for rel in ("README.md", "Makefile", "docs/performance_he.md", "docs/diarization_he.md"):
+        path = REPO_ROOT / rel
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if "cloud/" in line or "runpod" in line.lower():
+                found.append((rel, i, line))
+    return found
 
 
 def main() -> int:

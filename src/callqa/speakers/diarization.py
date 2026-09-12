@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import bisect
 import logging
-from bisect import bisect_left
 from dataclasses import dataclass, field
 
 from callqa.models import TranscriptSegment, Word
@@ -67,6 +66,7 @@ class DiarizationQuality:
     words_attributed: int = 0
     words_by_nearest: int = 0      # attributed with no overlap at all
     smoothed_islands: int = 0
+    words_dropped: int = 0         # words whose timestamps were unusable
 
     @property
     def nearest_ratio(self) -> float:
@@ -79,6 +79,7 @@ class DiarizationQuality:
             "words_attributed": self.words_attributed,
             "words_by_nearest": self.words_by_nearest,
             "smoothed_islands": self.smoothed_islands,
+            "words_dropped": self.words_dropped,
         }
 
 
@@ -138,7 +139,24 @@ def reduce_to_two_speakers(
         "and folded %.1fs of the rest into them",
         call_id, len(totals), quality.reassigned_sec,
     )
-    return sorted(result, key=lambda s: (s.start, s.end)), quality
+    return _merge_adjacent(sorted(result, key=lambda s: (s.start, s.end))), quality
+
+
+def _merge_adjacent(segments: list[DiarizedSegment]) -> list[DiarizedSegment]:
+    """Fuse touching or overlapping regions that now carry the same label.
+
+    Folding a third speaker in can leave two same-label regions overlapping,
+    which double-counts that speaker's time in the overlap and lets it win
+    words that belong to the other party.
+    """
+    merged: list[DiarizedSegment] = []
+    for seg in segments:
+        if merged and merged[-1].label == seg.label and seg.start <= merged[-1].end:
+            last = merged[-1]
+            merged[-1] = DiarizedSegment(last.label, last.start, max(last.end, seg.end))
+        else:
+            merged.append(seg)
+    return merged
 
 
 def _gap(a: DiarizedSegment, b: DiarizedSegment) -> float:
@@ -191,17 +209,19 @@ class _SpeakerLookup:
         if overlaps:
             return max(overlaps.items(), key=lambda kv: kv[1])[0], False
 
+        # Nearest by distance. Scanning only the start-ordered neighbours picks
+        # a short segment that merely STARTS nearby over a long one the word
+        # actually sits beside.
         mid = (start + end) / 2
-        pos = bisect_left(self.starts, mid)
         best, best_dist = None, float("inf")
-        for i in (pos - 1, pos, pos + 1):
-            if 0 <= i < len(self.segments):
-                seg = self.segments[i]
-                dist = 0.0 if seg.start <= mid <= seg.end else min(
-                    abs(seg.start - mid), abs(seg.end - mid)
-                )
-                if dist < best_dist:
-                    best, best_dist = seg.label, dist
+        for seg in self.segments:
+            dist = 0.0 if seg.start <= mid <= seg.end else min(
+                abs(seg.start - mid), abs(seg.end - mid)
+            )
+            if dist < best_dist:
+                best, best_dist = seg.label, dist
+                if dist == 0.0:
+                    break
         return best, True
 
 
@@ -210,8 +230,12 @@ def _smooth_islands(
 ) -> list[str | None]:
     """Flip a single short word wedged between two runs of the other speaker."""
     out = list(labels)
-    for i in range(1, len(out) - 1):
-        before, here, after = out[i - 1], out[i], out[i + 1]
+    for i in range(1, len(labels) - 1):
+        # Read the ORIGINAL labels, write the copy. Reading back what this
+        # loop just wrote lets one flip create the next one's context, so a
+        # correctly alternating sequence of short words collapses into a
+        # single turn.
+        before, here, after = labels[i - 1], labels[i], labels[i + 1]
         if here is None or before is None or before != after or here == before:
             continue
         if (words[i].end - words[i].start) <= ISLAND_MAX_SEC:
@@ -220,14 +244,31 @@ def _smooth_islands(
     return out
 
 
+def join_words(words: list[Word]) -> str:
+    """Rebuild a turn's text from its words.
+
+    Whisper emits word tokens with a leading space; this project's engines
+    strip it. Joining on "" is right for the first convention and glues the
+    whole turn into one word for the second, which then silently breaks
+    redaction of names, every multi-word role marker and every word count.
+    So the separator is decided per word, from the token itself.
+    """
+    parts: list[str] = []
+    for word in words:
+        token = word.word
+        if parts and token[:1] not in (" ", "\t", "\u00a0"):
+            parts.append(" ")
+        parts.append(token)
+    return "".join(parts).strip()
+
+
 def _segment_from_words(
     template: TranscriptSegment, words: list[Word]
 ) -> TranscriptSegment:
-    text = "".join(w.word for w in words).strip()
     return TranscriptSegment(
-        start=words[0].start,
-        end=words[-1].end,
-        text=text,
+        start=min(w.start for w in words),
+        end=max(w.end for w in words),
+        text=join_words(words),
         words=words,
         avg_logprob=template.avg_logprob,
     )
@@ -251,7 +292,11 @@ def attribute_segments(
     for seg in segments:
         if not seg.text.strip():
             continue
-        usable = [w for w in seg.words if w.end > w.start]
+        usable = sorted((w for w in seg.words if w.end > w.start),
+                        key=lambda w: (w.start, w.end))
+        dropped = len(seg.words) - len(usable)
+        if dropped:
+            quality.words_dropped += dropped
         if not usable:
             label, nearest = lookup.label_for(seg.start, seg.end)
             quality.words_attributed += 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import statistics
 from dataclasses import dataclass, field
@@ -13,13 +14,51 @@ from callqa.rubric import Rubric
 logger = logging.getLogger(__name__)
 
 
-def load_scorecards(output_dir: Path) -> list[ScoreCard]:
+def load_scorecards(output_dir: Path, include_unpublished: bool = False) -> list[ScoreCard]:
+    """Scorecards for the calls whose processing actually succeeded.
+
+    A call held for human review still produces a scorecard - it has to, or
+    the reviewer would have nothing to look at - and a call that later failed
+    leaves its previous scorecard behind. Averaging either into a named
+    employee's report presents a number the pipeline itself does not stand
+    behind, so the status envelope in results/ decides what counts.
+    """
     scores_dir = output_dir / "scores"
-    cards = []
-    if scores_dir.exists():
-        for path in sorted(scores_dir.glob("*.json")):
-            cards.append(ScoreCard.model_validate_json(path.read_text(encoding="utf-8")))
+    if not scores_dir.exists():
+        return []
+    statuses = _call_statuses(output_dir)
+    cards: list[ScoreCard] = []
+    skipped: list[str] = []
+    for path in sorted(scores_dir.glob("*.json")):
+        try:
+            card = ScoreCard.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning("skipping unreadable scorecard %s: %s", path.name, type(exc).__name__)
+            continue
+        status = statuses.get(card.call_id, "success")
+        if status != "success" and not include_unpublished:
+            skipped.append(f"{card.call_id}({status})")
+            continue
+        cards.append(card)
+    if skipped:
+        logger.info("excluded %d call(s) from the aggregates: %s",
+                    len(skipped), ", ".join(sorted(skipped)))
     return cards
+
+
+def _call_statuses(output_dir: Path) -> dict[str, str]:
+    statuses: dict[str, str] = {}
+    results_dir = output_dir / "results"
+    if not results_dir.exists():
+        return statuses
+    for path in sorted(results_dir.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("call_id"):
+            statuses[data["call_id"]] = data.get("status", "success")
+    return statuses
 
 
 @dataclass

@@ -15,9 +15,26 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from callqa.config import Config, load_config
-from callqa.models import EXIT_FAILED, CallInput, CallResult
+from callqa.models import (
+    EXIT_FAILED,
+    EXIT_NEEDS_HUMAN_REVIEW,
+    EXIT_SUCCESS,
+    CallInput,
+    CallResult,
+)
+from callqa.resources import find_config
 
 logger = logging.getLogger("callqa")
+
+# Everything probe_audio can read. Watching only .wav/.mp3 left an .m4a sitting
+# in the drop directory forever: not processed, not quarantined, not logged.
+WATCHED_EXTENSIONS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".mp4", ".ogg",
+                                ".opus", ".flac", ".wma", ".amr"})
+
+# Everything probe_audio can read. Watching only .wav/.mp3 left an .m4a sitting
+# in the drop directory forever, unprocessed and unmentioned.
+WATCHED_EXTENSIONS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".mp4", ".ogg",
+                                ".opus", ".flac", ".wma", ".amr"})
 
 
 def _setup_logging(verbose: bool = False) -> None:
@@ -44,8 +61,14 @@ def _load_config(args: argparse.Namespace) -> Config:
     if getattr(args, "max_workers", None):
         overrides["run"]["max_workers"] = args.max_workers
     config_path = args.config
-    if config_path is None and Path("config/config.yaml").exists():
-        config_path = "config/config.yaml"
+    if config_path is None:
+        try:
+            config_path = str(find_config("config.yaml"))
+        except FileNotFoundError:
+            logger.warning(
+                "no config.yaml found; running on built-in defaults. Pass "
+                "--config, or run from the project directory."
+            )
     return load_config(config_path, overrides)
 
 
@@ -62,22 +85,45 @@ def _metadata_lookup(config: Config) -> dict[str, dict[str, str]]:
     if not metadata_csv.exists():
         return {}
     validation = load_metadata(metadata_csv)
+    if not validation.ok:
+        logger.error("metadata.csv has problems; rows are NOT being used:\n%s",
+                     validation.problem_table())
+        return {}
     return validation.rows
 
 
 def _call_input(
     audio_path: Path, config: Config, args: argparse.Namespace | None = None
 ) -> CallInput:
-    """Build a CallInput for one file: CLI args > metadata.csv > defaults."""
-    from callqa.ingestion import call_input_from_metadata
+    """Build a CallInput for one file: CLI args > metadata.csv > defaults.
 
-    call_id = getattr(args, "call_id", None) or audio_path.stem
+    The row is found by FILE NAME, then by call_id. Matching on the filename
+    stem alone meant that any recorder whose naming differs from the bank's
+    call ids silently lost every row: unknown banker, default channel (which
+    can invert the two speakers) and no banker name to redact - while
+    validate-inputs still reported the file as fine.
+    """
+    from callqa.ingestion import call_input_from_metadata, sanitize_call_id
+
     rows = _metadata_lookup(config)
-    row = rows.get(call_id)
+    explicit_id = getattr(args, "call_id", None)
+    row = None
+    if explicit_id:
+        row = rows.get(explicit_id)
+    if row is None:
+        row = next((r for r in rows.values() if r.get("file_name") == audio_path.name), None)
+    if row is None:
+        row = rows.get(audio_path.stem)
+    call_id = explicit_id or (row or {}).get("call_id") or sanitize_call_id(audio_path.stem)
     if row is not None:
         call = call_input_from_metadata(row, audio_path.parent)
-        call = call.model_copy(update={"audio_path": audio_path})
+        call = call.model_copy(update={"audio_path": audio_path, "call_id": call_id})
     else:
+        if rows:
+            logger.warning(
+                "%s has no row in metadata.csv; processing with defaults "
+                "(banker unknown, channel L, banker name not redacted)", audio_path.name,
+            )
         call = CallInput(call_id=call_id, audio_path=audio_path)
     if args is not None:
         updates = {}
@@ -172,6 +218,7 @@ def watch_loop(
 
     sizes: dict[Path, tuple[int, float]] = {}  # path -> (size, unchanged_since)
     results: list[CallResult] = []
+    skipped: set[Path] = set()
     cycles = 0
     while (stop_event is None or not stop_event.is_set()) and (
         max_cycles is None or cycles < max_cycles
@@ -179,7 +226,13 @@ def watch_loop(
         cycles += 1
         now = time.monotonic()
         for path in sorted(calls_dir.glob("*")):
-            if path.suffix.lower() not in (".wav", ".mp3"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in WATCHED_EXTENSIONS:
+                if path not in skipped:
+                    skipped.add(path)
+                    logger.warning("ignoring %s: %s is not an audio extension this "
+                                   "pipeline reads", path.name, path.suffix or "(none)")
                 continue
             try:
                 stat = path.stat()
@@ -206,6 +259,13 @@ def watch_loop(
             result = _process_one(call, engines)
             results.append(result)
             sizes.pop(path, None)
+            if result.error and result.error.startswith("locked:"):
+                # Another process is handling this recording. Leave it where it
+                # is; quarantining a healthy call into failed/ loses it, since
+                # nothing ever rescans that directory.
+                logger.info("%s is locked by another process; leaving it in place",
+                            path.name)
+                continue
             if config.watch.move_processed:
                 target_dir = processed_dir if result.status != "failed" else failed_dir
                 target_dir.mkdir(parents=True, exist_ok=True)
@@ -233,10 +293,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
         config.watch.stable_seconds,
     )
     try:
-        watch_loop(config, engines, max_cycles=1 if args.once else None)
+        results = watch_loop(config, engines, max_cycles=1 if args.once else None)
     except KeyboardInterrupt:
         logger.info("watch stopped")
-    return 0
+        return EXIT_SUCCESS
+    # A scheduler only sees the exit code, so a batch that contained a failure
+    # must not report success.
+    if any(r.status == "failed" for r in results):
+        return EXIT_FAILED
+    if any(r.status == "needs_human_review" for r in results):
+        return EXIT_NEEDS_HUMAN_REVIEW
+    return EXIT_SUCCESS
 
 
 def cmd_report(args: argparse.Namespace) -> int:

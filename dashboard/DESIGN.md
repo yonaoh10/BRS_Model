@@ -54,7 +54,7 @@ the GPU status, elapsed time and money spent, because the real risk is not the
 hourly rate but forgetting the machine is running. A regression test asserts
 the cost meter never leaves the viewport.
 
-Navigation is a right-hand rail with five destinations. Overview holds a single
+Navigation is a right-hand rail with six destinations. Overview holds a single
 alert, three tiles, one chart and a table — deliberately no second chart, no
 sparklines, no metric soup.
 
@@ -113,13 +113,14 @@ An independent adversarial review then found three more in shipped code:
 ## Running it
 
 ```bash
-python dashboard/server.py          # prints a URL with a one-time token
+python dashboard/server.py          # prints a URL with a session token
 python dashboard/qa_dashboard.py    # the visual QA harness
 ```
 
 It is read-only: it renders what the pipeline already wrote. Actions that
 spend money or mutate state are gated behind `--allow-actions` and are not
-implemented yet.
+implemented yet, so the Run and Cloud screens described above are design, not
+shipped behaviour.
 
 ## Removing it
 

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 
 from callqa.calibration import (
+    MIN_CALLS_FOR_PASS,
     CalibrationError,
     _mean_rounded,
     _safe_qwk,
@@ -40,8 +41,13 @@ def test_qwk_hand_computed_partial() -> None:
     assert value is not None and 0.9 < value < 1.0
 
 
-def test_qwk_degenerate_constant() -> None:
-    assert _safe_qwk([3, 3, 3], [3, 3, 3]) == 1.0
+def test_qwk_is_undefined_on_constant_ratings() -> None:
+    """Kappa measures agreement above chance. With no variance there is no
+    chance to beat, so "perfect agreement" is not an answer that can be
+    given - and reporting 1.0 let a rater who always says 3 certify the judge."""
+    assert _safe_qwk([3, 3, 3], [3, 3, 3]) is None
+    assert _safe_qwk([3, 3, 3], [4, 4, 4]) is None
+    assert _safe_qwk([1, 2, 3, 4], [1, 2, 3, 4]) == 1.0
 
 
 def test_mean_rounded() -> None:
@@ -81,13 +87,52 @@ def test_calibrate_end_to_end(rubric) -> None:
     result = calibrate(cards, ratings, rubric)
     assert result.n_calls == 3
     assert result.overall_qwk == 1.0
-    assert result.overall_pass
+    assert not result.overall_pass, "three calls is not a calibration"
     assert result.n_doubly_rated == 1
-    assert result.human_vs_human_qwk == 1.0
+    # Both raters gave the same constant score, so their agreement is not
+    # measurable either - reported as unknown rather than as perfect.
+    assert result.human_vs_human_qwk is None
     # Confusion matrices place everything on the diagonal.
     for d in result.dimensions:
         assert sum(d.confusion[i][i] for i in range(5)) == d.n
         assert d.mae == 0.0
+
+
+def test_a_calibration_needs_enough_calls_to_mean_anything(rubric) -> None:
+    """Perfect agreement over a handful of calls is not evidence. The PASS
+    verdict is what tells a bank the judge may be trusted, so it needs a
+    sample, agreement on the whole set AND on every dimension."""
+    dim_ids = [d.id for d in rubric.dimensions]
+    scores = [1, 2, 3, 4, 5] * 5
+    cards = [make_card(rubric, f"C{i}", dict.fromkeys(dim_ids, s))
+             for i, s in enumerate(scores)]
+    ratings = {f"C{i}": [dict.fromkeys(dim_ids, s)] for i, s in enumerate(scores)}
+
+    result = calibrate(cards, ratings, rubric)
+
+    assert result.n_calls == len(scores) >= MIN_CALLS_FOR_PASS
+    assert result.overall_qwk == 1.0
+    assert result.mean_dimension_qwk == 1.0
+    assert result.overall_pass
+
+
+def test_one_broken_dimension_fails_the_whole_calibration(rubric) -> None:
+    """Pooling across dimensions hides the one that disagrees: eight kappas
+    below 0.25 still pooled to 0.90 because the overall LEVEL was right."""
+    dim_ids = [d.id for d in rubric.dimensions]
+    broken = dim_ids[0]
+    scores = [1, 2, 3, 4, 5] * 5
+    cards = [make_card(rubric, f"C{i}", dict.fromkeys(dim_ids, s))
+             for i, s in enumerate(scores)]
+    ratings = {
+        f"C{i}": [{d: (6 - s if d == broken else s) for d in dim_ids}]
+        for i, s in enumerate(scores)
+    }
+
+    result = calibrate(cards, ratings, rubric)
+
+    assert broken in result.flagged_dimensions
+    assert not result.overall_pass
 
 
 def test_calibrate_no_overlap_raises(rubric) -> None:

@@ -26,7 +26,7 @@ echo "=== 2/5 python dependencies ==="
 cd "$WORKDIR"
 pip install -q -r requirements.txt
 pip install -q -r requirements-server.txt
-pip install -q vllm
+pip install -q "vllm==${VLLM_VERSION:-0.11.2}"
 pip install -q -e .
 
 echo "=== 3/5 models (same script the bank server runs) ==="

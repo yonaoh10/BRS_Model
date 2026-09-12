@@ -74,6 +74,15 @@ def _resample_linear(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.nd
     return np.interp(dst_t, src_t, samples).astype(np.float32)
 
 
+def _restrict(path: Path) -> None:
+    """Customer voice at rest. Every other artifact is written 0600; these
+    were left at the process umask, i.e. world-readable."""
+    try:
+        path.chmod(0o600)
+    except OSError:  # pragma: no cover - unusual filesystems
+        logger.debug("could not restrict permissions on %s", path)
+
+
 def _extract_channel(
     src: Path, dst: Path, channel: int | None, target_rate: int
 ) -> None:
@@ -84,6 +93,7 @@ def _extract_channel(
         else:
             pan = f"pan=mono|c0=c{channel}"
             _run_ffmpeg(["-i", str(src), "-af", pan, "-ar", str(target_rate), str(dst)])
+        _restrict(dst)
         return
     # Pure-Python fallback (WAV inputs only).
     if src.suffix.lower() != ".wav":
@@ -91,6 +101,7 @@ def _extract_channel(
     data, rate = _read_wav(src)
     mono = data.mean(axis=1) if channel is None else data[:, min(channel, data.shape[1] - 1)]
     _write_wav(dst, _resample_linear(mono, rate, target_rate), target_rate)
+    _restrict(dst)
 
 
 # -- channel probing ---------------------------------------------------------
@@ -100,17 +111,25 @@ def _extract_channel(
 # BOTH speakers on both sides (talk_ratio pinned near 0.5, phantom
 # interruptions everywhere), and a dead channel leaves one party with no
 # speech at all. Neither is visible in the metadata, only in the samples.
-DUPLICATE_CHANNEL_RATIO = 0.02   # residual RMS below 2% of signal RMS
+# A single recording saved as stereo is not bit-identical on both channels:
+# lossy encoding, a gain trim, a one-sample delay or a DC offset all leave a
+# residual, and a phase-inverted copy leaves a very large one. Correlation
+# survives all of those, so it decides, and the residual test is kept only as
+# a fast path for the exactly-identical case.
+DUPLICATE_CORRELATION = 0.98     # |r| this high means one recording, not two
 SILENT_CHANNEL_RATIO = 0.01      # channel RMS below 1% of the louder one
-PROBE_SECONDS = 120
+PROBE_SECONDS = 240              # total sampled, spread across the whole file
+PROBE_WINDOWS = 6                # ... in this many windows
 
 
-def _decode_stereo(src: Path, seconds: int = PROBE_SECONDS, rate: int = 8000) -> np.ndarray | None:
-    """Decode the head of a file to (n, 2) float32. None if it is not stereo."""
+def _decode_stereo_window(
+    src: Path, start: float, seconds: float, rate: int = 8000
+) -> np.ndarray | None:
+    """Decode one window of a file to (n, 2) float32. None if not stereo."""
     if _have_ffmpeg():
         proc = subprocess.run(
-            ["ffmpeg", "-v", "error", "-t", str(seconds), "-i", str(src),
-             "-ac", "2", "-ar", str(rate), "-f", "s16le", "-"],
+            ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
+             "-i", str(src), "-ac", "2", "-ar", str(rate), "-f", "s16le", "-"],
             capture_output=True,
         )
         if proc.returncode != 0 or not proc.stdout:
@@ -124,32 +143,76 @@ def _decode_stereo(src: Path, seconds: int = PROBE_SECONDS, rate: int = 8000) ->
     data, src_rate = _read_wav(src)
     if data.shape[1] < 2:
         return None
-    return data[: src_rate * seconds, :2]
+    lo = int(start * src_rate)
+    return data[lo:lo + int(seconds * src_rate), :2]
 
 
-def probe_channels(src: Path) -> str:
+def _decode_stereo(src: Path, duration: float = 0.0) -> np.ndarray | None:
+    """Sample the file in windows spread across its whole length.
+
+    Looking only at the opening misreads a call that is dual-mono while the
+    agent is alone on the line and genuinely two-channel once the customer
+    joins, and the mirror case hands one party several minutes of silence.
+    """
+    if duration <= PROBE_SECONDS:
+        return _decode_stereo_window(src, 0.0, max(duration, PROBE_SECONDS))
+    window = PROBE_SECONDS / PROBE_WINDOWS
+    step = (duration - window) / max(1, PROBE_WINDOWS - 1)
+    chunks = [
+        chunk for i in range(PROBE_WINDOWS)
+        if (chunk := _decode_stereo_window(src, i * step, window)) is not None
+        and len(chunk)
+    ]
+    if not chunks:
+        return None
+    return np.concatenate(chunks, axis=0)
+
+
+def probe_channels(src: Path, duration: float = 0.0) -> str:
     """Classify what a two-channel file actually contains.
 
     Returns "stereo" (two genuinely different recordings), "dual_mono" (the
-    same recording on both channels) or "single_channel" (one side silent).
+    same recording on both channels, however it was re-encoded or trimmed) or
+    "single_channel" (one side effectively silent).
+
+    A file that cannot be decoded is reported as dual_mono, not stereo: taking
+    the channel split on a file nothing could read would attribute the call by
+    guesswork, while the diarization path infers the speakers and says that it
+    did.
     """
-    samples = _decode_stereo(src)
+    samples = _decode_stereo(src, duration)
     if samples is None or len(samples) == 0:
-        return "stereo"
+        logger.warning("could not sample the channels of %s; treating it as one "
+                       "recording", src.name)
+        return "dual_mono"
     left, right = samples[:, 0], samples[:, 1]
+    left = left - left.mean()                  # a DC offset is not a speaker
+    right = right - right.mean()
     rms_l, rms_r = float(np.sqrt((left ** 2).mean())), float(np.sqrt((right ** 2).mean()))
     loud = max(rms_l, rms_r)
     if loud < 1e-6:
-        return "stereo"          # silence throughout; nothing to infer
+        return "dual_mono"       # silence throughout; nothing to split
     if min(rms_l, rms_r) < SILENT_CHANNEL_RATIO * loud:
         return "single_channel"
-    residual = float(np.sqrt(((left - right) ** 2).mean()))
-    if residual < DUPLICATE_CHANNEL_RATIO * loud:
+    correlation = float(np.dot(left, right) / (len(left) * rms_l * rms_r))
+    if abs(correlation) >= DUPLICATE_CORRELATION:
+        # abs(): a phase-inverted copy is still one recording, and it is the
+        # case a plain difference test is worst at.
         return "dual_mono"
     return "stereo"
 
 
 # -- VAD ---------------------------------------------------------------------
+
+# About -46 dBFS: below this, a 16-bit phone recording is room tone.
+ABSOLUTE_SPEECH_RMS = 0.005
+# Speech alternates between sound and silence, so its quietest frames are far
+# below its loudest. A signal whose floor is close to its peak is a tone, hold
+# music or a clipped line - loud throughout, and not a conversation. The
+# threshold is deliberately high: someone who never pauses still falls well
+# under it.
+FLAT_LEVEL_RATIO = 0.8
+
 
 def energy_vad(
     wav_path: Path,
@@ -168,7 +231,16 @@ def energy_vad(
     rms = np.sqrt((frames ** 2).mean(axis=1))
     floor = float(np.percentile(rms, 10))
     peak = float(np.percentile(rms, 95))
-    threshold = max(1e-4, floor + 0.15 * (peak - floor))
+    # A purely relative threshold has no idea what silence is: a recording of
+    # nothing but room tone gets one scaled to room tone and reports the whole
+    # file as speech. An absolute floor and a required dynamic range give it
+    # the missing reference.
+    threshold = max(ABSOLUTE_SPEECH_RMS, floor + 0.15 * (peak - floor))
+    if peak < ABSOLUTE_SPEECH_RMS or floor > FLAT_LEVEL_RATIO * peak:
+        # Either nothing here is loud enough to be speech, or the level never
+        # changes (hold music, a tone, clipping) - both mean "no speech found"
+        # rather than "speech throughout".
+        return []
     speech = rms > threshold
 
     segments: list[VADSegment] = []
@@ -260,8 +332,18 @@ def prepare_audio(
     """Convert / split audio to 16 kHz mono WAV(s) and run VAD per channel."""
     rate = config.audio.target_sample_rate
     wav_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        wav_dir.chmod(0o700)
+    except OSError:  # pragma: no cover
+        pass
 
-    layout = probe_channels(call.audio_path) if meta.channels >= 2 else "mono"
+    if meta.channels > 2:
+        # Classified from a downmix but extracted with a two-channel pan, so
+        # the extra channels would vanish without a word.
+        logger.warning("call_id=%s: file has %d channels; only the first two are "
+                       "used", call.call_id, meta.channels)
+    layout = (probe_channels(call.audio_path, meta.duration_sec)
+              if meta.channels >= 2 else "mono")
     if layout != "stereo":
         # Two declared channels that carry one recording: the split would
         # produce two copies of the same conversation, so downmix and let the

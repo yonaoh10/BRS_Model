@@ -19,6 +19,7 @@ from callqa.judge.prompts import (
 )
 from callqa.judge.validation import JudgeValidationError, validate_judge_output
 from callqa.models import Features, JudgeResponse, RedactedTranscript, ScoreCard
+from callqa.redaction import redact_text, sanitize_error
 from callqa.rubric import Rubric, RubricDimension, weighted_total
 
 logger = logging.getLogger(__name__)
@@ -69,19 +70,50 @@ def _judge_once_with_retries(
             features=features,
             attempt=attempt,
         )
-        raw = judge.complete(request)
         try:
+            raw = judge.complete(request)
             response = validate_judge_output(raw, expected, redacted)
-            return response, first_prompt, attempt
+            return _scrub(response), first_prompt, attempt
         except JudgeValidationError as exc:
             last_error = exc
-            validation_error = str(exc)[:2000]
-            logger.info(
-                "judge validation failed: call_id=%s attempt=%d", call_id, attempt
-            )
+            # Fed back to the model on the next attempt, so it must not carry
+            # transcript text that the redactor has not seen.
+            validation_error = sanitize_error(exc, limit=2000)
+            logger.info("judge validation failed: call_id=%s attempt=%d", call_id, attempt)
+        except Exception as exc:  # noqa: BLE001
+            # A refused connection, a 500, a truncated body: transport failures
+            # used to escape the retry loop entirely and fail the call outright,
+            # when the right outcome is the same held-for-review status as a
+            # model that cannot produce valid output.
+            last_error = exc
+            validation_error = None
+            logger.warning("judge call failed: call_id=%s attempt=%d: %s",
+                           call_id, attempt, sanitize_error(exc, limit=300))
     raise NeedsHumanReviewError(
-        f"judge output failed validation after {config.max_retries + 1} attempts: {last_error}"
+        f"judge output failed after {config.max_retries + 1} attempts: "
+        f"{sanitize_error(last_error, limit=500)}"
     )
+
+
+def _scrub(response: JudgeResponse) -> JudgeResponse:
+    """Re-redact everything the model wrote in free text.
+
+    Evidence quotes are verified against the redacted transcript, but the
+    model's own prose is not: a judge that repeats an identifier it inferred,
+    or that is steered into doing so, would otherwise put it straight into the
+    report and the dashboard.
+    """
+    def clean(text: str) -> str:
+        return redact_text(text or "")[0]
+
+    for dim in response.scores.values():
+        dim.reasoning_he = clean(dim.reasoning_he)
+        for ev in dim.evidence:
+            ev.quote = clean(ev.quote)
+    response.strengths_he = [clean(s) for s in response.strengths_he]
+    response.development_area_he = clean(response.development_area_he)
+    response.summary_he = clean(response.summary_he)
+    return response
 
 
 def _merge_samples(samples: list[JudgeResponse]) -> JudgeResponse:
@@ -92,9 +124,20 @@ def _merge_samples(samples: list[JudgeResponse]) -> JudgeResponse:
     merged_scores = {}
     for dim_id in samples[0].scores:
         values = [s.scores[dim_id].score for s in samples]
-        median = int(round(statistics.median(values)))
+        # median_low, not round(median): on an even number of samples a tie
+        # otherwise rounds in whichever direction the pair happens to sit,
+        # so [2,3] capped the call at 59 while [3,4] rounded up to 4. The low
+        # value is both deterministic and the safer reading of a disagreement.
+        median = int(statistics.median_low(values))
         closest = min(samples, key=lambda s: abs(s.scores[dim_id].score - median))
         chosen = closest.scores[dim_id].model_copy(deep=True)
+        if chosen.score != median:
+            # Never show a reasoning that argues for a different number than
+            # the one printed beside it.
+            chosen.reasoning_he = (
+                f"{chosen.reasoning_he} [הציון הסופי {median} הוא החציון של "
+                f"{len(values)} הערכות: {sorted(values)}]"
+            )
         chosen.score = median
         merged_scores[dim_id] = chosen
     base = samples[0]

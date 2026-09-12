@@ -41,8 +41,46 @@ def format_transcript(redacted: RedactedTranscript, max_chars: int | None = None
         lines.append(f"[{mmss(turn.start)}] {SPEAKER_HE[turn.speaker]}: {turn.text}")
     text = "\n".join(lines)
     if max_chars is not None and len(text) > max_chars:
-        text = text[:max_chars].rsplit("\n", 1)[0]
+        text = _elide_middle(lines, max_chars)
     return text
+
+
+ELISION_MARKER = "[... אמצע השיחה הושמט בשל אורך ...]"
+
+
+def _elide_middle(lines: list[str], max_chars: int) -> str:
+    """Keep the opening AND the closing of a long call.
+
+    Cutting at the character budget kept only the beginning, so on a two-hour
+    call the dimensions that are about how the call ENDS - resolution, closure,
+    the next step - were scored on a transcript that stopped an hour earlier.
+    The opening carries identification and disclosure, the ending carries the
+    summary and the commitment, so both survive and the middle is marked as
+    removed.
+    """
+    budget = max(0, max_chars - len(ELISION_MARKER) - 2)
+    head_budget = budget * 2 // 3          # the opening carries the gate dimensions
+    tail_budget = budget - head_budget
+
+    head: list[str] = []
+    used = 0
+    for line in lines:
+        if used + len(line) + 1 > head_budget:
+            break
+        head.append(line)
+        used += len(line) + 1
+
+    tail: list[str] = []
+    used = 0
+    for line in reversed(lines[len(head):]):
+        if used + len(line) + 1 > tail_budget:
+            break
+        tail.insert(0, line)
+        used += len(line) + 1
+
+    if not tail:
+        return "\n".join(head)
+    return "\n".join([*head, ELISION_MARKER, *tail])
 
 
 def format_rubric(dimensions: list[RubricDimension]) -> str:

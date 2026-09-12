@@ -8,6 +8,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 
 from callqa.models import DimensionScore
+from callqa.resources import find_config
 
 GATE_CAP = 59.0
 
@@ -52,9 +53,23 @@ class Rubric(BaseModel):
         return [d.id for d in self.dimensions if d.gate]
 
 
-def load_rubric(path: str | Path = "config/rubric.yaml") -> Rubric:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    return Rubric.model_validate(data)
+def load_rubric(path: str | Path | None = None) -> Rubric:
+    resolved = find_config("rubric.yaml", path)
+    data = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+    rubric = Rubric.model_validate(data)
+    ids = [d.id for d in rubric.dimensions]
+    duplicates = sorted({i for i in ids if ids.count(i) > 1})
+    if duplicates:
+        # by_id silently kept the last one, so a duplicated id doubled one
+        # weight and deleted the other dimension - including, in one case, a
+        # gate - while the weights-sum check still passed.
+        raise ValueError(f"rubric has duplicate dimension ids: {duplicates}")
+    if not any(d.gate for d in rubric.dimensions):
+        raise ValueError(
+            "rubric defines no gate dimension, so the gate cap can never apply. "
+            "Mark at least one dimension with gate: true."
+        )
+    return rubric
 
 
 def weighted_total(rubric: Rubric, scores: dict[str, DimensionScore]) -> tuple[float, bool, list[str]]:

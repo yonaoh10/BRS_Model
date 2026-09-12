@@ -11,7 +11,7 @@ recording (Hebrew) and produces the complete per-call output:
 2. **Speaker attribution** — stereo channel split (primary); pyannote
    diarization fallback for mono recordings.
 3. **PII redaction** — Hebrew-aware (Israeli ID with checksum, phones,
-   payment cards, aggressive account-like numbers, names).
+   payment cards, aggressive account-like numbers (any run of 6+ digits), names).
 4. **Objective features** — talk ratio, interruptions, patience, questions,
    monologue length, dead air, speech rate.
 5. **LLM judge** — a weighted 8-dimension rubric scored by a locally served
@@ -91,6 +91,7 @@ env-overridable: `CALLQA_SECTION__FIELD` (e.g. `CALLQA_JUDGE__BASE_URL`).
 
 ---
 
+<!-- cloud-option:start -->
 ## Optional: cloud GPUs during development
 
 You can build and tune the whole system on a laptop with no GPU by renting one
@@ -111,6 +112,7 @@ machine, so use synthetic or consented recordings.
 This is scaffolding: `python scripts/remove_cloud_option.py --apply` deletes it
 entirely and verifies the pipeline still passes. Full guide, costs and security
 rules: **[cloud/README.md](cloud/README.md)**.
+<!-- cloud-option:end -->
 
 ---
 
@@ -203,7 +205,7 @@ Config lives in `config/` (`config.yaml`, `rubric.yaml`,
 2. **שיוך דוברים** — פיצול ערוצי סטריאו (המסלול העיקרי); pyannote כגיבוי
    להקלטות מונו.
 3. **הסרת פרטים מזהים (PII)** — מותאם לעברית (תעודת זהות עם ספרת ביקורת,
-   טלפונים, כרטיסי אשראי, מספרי חשבון, שמות).
+   טלפונים, כרטיסי אשראי, מספרי חשבון (כל רצף של 6 ספרות ומעלה), שמות).
 4. **מדדים אובייקטיביים** — יחס דיבור, קטיעות, סבלנות, שאלות, אורך מונולוג,
    זמן שקט, קצב דיבור.
 5. **שופט LLM** — מחוון משוקלל בן 8 ממדים, מדורג על ידי מודל המוגש מקומית
@@ -285,6 +287,7 @@ make test                                        # חבילת הבדיקות
 
 ---
 
+<!-- cloud-option:start -->
 ## רשות: GPU בענן בזמן הפיתוח
 
 אפשר לבנות ולכוונן את המערכת כולה על מחשב נייד ללא GPU, על ידי שכירת מכונת
@@ -305,6 +308,7 @@ python cloud/runpod_cli.py down                            # להפסיק לשל
 זהו פיגום זמני: הפקודה `python scripts/remove_cloud_option.py --apply` מוחקת
 אותו לחלוטין ומאמתת שהצינור עדיין עובר את כל הבדיקות. מדריך מלא, עלויות
 וכללי אבטחה: **[cloud/README.md](cloud/README.md)**.
+<!-- cloud-option:end -->
 
 ---
 

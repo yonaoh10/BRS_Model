@@ -13,6 +13,17 @@ if [[ ! -d wheels ]]; then
     exit 1
 fi
 
+# An empty wheels/ passed the directory check and then printed "Done" having
+# installed nothing, which only surfaced when the first call failed.
+shopt -s nullglob
+wheel_files=(wheels/*.whl wheels/*.tar.gz)
+if (( ${#wheel_files[@]} == 0 )); then
+    echo "ERROR: wheels/ is empty. Run scripts/build_offline_bundle.sh on a machine" >&2
+    echo "       with network access and copy the whole directory across." >&2
+    exit 1
+fi
+echo "Found ${#wheel_files[@]} packages in wheels/"
+
 echo "Installing core dependencies from wheels/ ..."
 pip install --no-index --find-links wheels/ -r requirements.txt
 
@@ -22,6 +33,15 @@ if [[ "${1:-}" == "--server" ]]; then
 fi
 
 echo "Installing callqa package ..."
-pip install --no-index --no-build-isolation -e .
+# --no-build-isolation builds with the interpreter's own setuptools, which a
+# 3.12+ venv does not ship. Install it from the bundle first if it is missing.
+if ! python -c "import setuptools" >/dev/null 2>&1; then
+    echo "  setuptools is missing; installing it from wheels/ ..."
+    pip install --no-index --find-links wheels/ setuptools wheel
+fi
+pip install --no-index --find-links wheels/ --no-build-isolation -e .
 
-echo "Done. Verify with: python -m callqa --help"
+echo "Verifying the installation ..."
+python -m callqa --help >/dev/null
+python -c "from callqa.reporting.common import jinja_env; jinja_env().get_template('call_report.html.j2')"
+echo "Done. Next: python -m callqa validate-inputs"

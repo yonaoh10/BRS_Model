@@ -29,13 +29,10 @@ SIGNAL_NAMES_HE = {
 
 
 def _banker_index(dialog: DialogTranscript | None) -> int:
-    """Which speaker index ended up as the banker, read back off the votes."""
-    if not dialog or not dialog.role_signals:
+    """Which speaker index the pipeline decided was the banker."""
+    if dialog is None or dialog.banker_index is None:
         return 0
-    tally: dict[int, float] = {}
-    for signal in dialog.role_signals:
-        tally[signal.votes_for] = tally.get(signal.votes_for, 0.0) + signal.weight
-    return max(tally, key=lambda k: tally[k]) if tally else 0
+    return dialog.banker_index
 
 
 def weakest_non_gate_dimension(rubric: Rubric, scorecard: ScoreCard) -> str | None:

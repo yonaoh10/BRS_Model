@@ -34,6 +34,7 @@ import argparse
 import hmac
 import json
 import logging
+import re
 import secrets
 import statistics
 import sys
@@ -42,7 +43,7 @@ import webbrowser
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -79,7 +80,10 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
         dims_meta = [{"id": d.id, "he": d.name_he, "gate": d.gate, "weight": d.weight}
                      for d in rubric.dimensions]
 
-    cards = [c for c in (_load_json(p) for p in sorted((output_dir / "scores").glob("*.json"))) if c]
+    # Tolerant by design: one unreadable scorecard must not take the whole
+    # console down, it must simply be absent from it.
+    cards = [c for c in (_load_json(p) for p in sorted((output_dir / "scores").glob("*.json")))
+             if isinstance(c, dict) and c.get("call_id")]
     results = [r for r in (_load_json(p) for p in sorted((output_dir / "results").glob("*.json"))) if r]
     result_by_id = {r["call_id"]: r for r in results}
 
@@ -214,12 +218,24 @@ class Handler(BaseHTTPRequestHandler):
         # This console never belongs in a frame on another page.
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        # The page is self-contained; nothing here should ever reach the network.
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "connect-src 'self'; form-action 'none'; frame-ancestors 'none'; "
+            "base-uri 'none'",
+        )
         self.end_headers()
         self.wfile.write(body)
 
     def log_message(self, fmt: str, *a) -> None:
-        # Call ids only; never transcript content (project-wide rule).
-        logger.info("%s", fmt % a)
+        # The session token rides in the query string, so the raw request line
+        # must never be logged: it would leave a working credential for this
+        # console in the terminal scrollback and in any captured log.
+        message = fmt % a
+        logger.info("%s", re.sub(r"\?t=[^\s\"]+", "?t=<redacted>", message))
 
     def do_GET(self) -> None:  # noqa: N802
         route = urlparse(self.path).path
@@ -241,16 +257,23 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/state":
             try:
                 data = collect_state(type(self).output_dir)
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
+                # Deliberately not echoed: the exception text can carry file
+                # paths and artifact content, and this body is rendered in a
+                # browser.
                 logger.exception("failed to collect state")
-                self._send(500, json.dumps({"error": str(exc)}).encode(), "application/json")
+                self._send(500, b'{"error":"could not read the pipeline output"}',
+                           "application/json")
                 return
             self._send(200, json.dumps(data, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
         if route.startswith("/reports/"):
             # Serve the generated per-call and per-banker reports.
-            rel = route[len("/reports/"):]
+            # Percent-decoded, so a report whose id contains a space or a
+            # non-ASCII character is reachable; the containment check below is
+            # what keeps that safe.
+            rel = unquote(route[len("/reports/"):])
             target = (type(self).output_dir / "reports" / rel).resolve()
             root = (type(self).output_dir / "reports").resolve()
             # is_relative_to, not startswith: a string prefix also accepts a

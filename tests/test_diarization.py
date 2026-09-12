@@ -44,8 +44,24 @@ def test_a_third_speaker_is_folded_into_the_nearest_one() -> None:
     assert quality.speakers_found == 3
     assert quality.reassigned_sec == 2.0
     assert {s.label for s in reduced} == {"A", "B"}
-    # 38-40 sits next to B's turn, so it joins B rather than a random role.
-    assert [s.label for s in reduced if s.start == 38][0] == "B"
+    # 38-40 sits next to B's turn, so it joins B rather than a random role,
+    # and the two touching B regions are fused into one.
+    assert [(s.label, s.start, s.end) for s in reduced] == [
+        ("A", 0, 20), ("B", 20, 40), ("A", 40, 50),
+    ]
+
+
+def test_folding_never_leaves_two_overlapping_regions_of_one_speaker() -> None:
+    """Overlapping same-label regions double-count that speaker's time and let
+    it win words that belong to the other party."""
+    segs = [
+        DiarizedSegment("A", 0, 30),
+        DiarizedSegment("B", 30, 60),
+        DiarizedSegment("C", 10, 25),          # folds into A, inside A
+    ]
+    reduced, _ = reduce_to_two_speakers(segs)
+    for first, second in zip(reduced, reduced[1:], strict=False):
+        assert not (first.label == second.label and second.start < first.end)
 
 
 def test_labels_are_indexed_in_order_of_appearance() -> None:

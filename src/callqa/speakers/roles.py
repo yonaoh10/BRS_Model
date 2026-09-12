@@ -24,6 +24,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from callqa.features import count_questions
 from callqa.models import TranscriptSegment
 
 logger = logging.getLogger(__name__)
@@ -31,18 +32,29 @@ logger = logging.getLogger(__name__)
 OPENING_WINDOW_SEC = 45.0
 CLOSING_WINDOW_SEC = 45.0
 
-# An agent answers the phone for the bank, not for themselves.
+# An agent answers the phone FOR THE BANK. Markers that only say "somebody is
+# introducing themselves" are excluded on purpose: a customer opening with
+# "שמי דנה" used to hand the banker role straight to them, at a confidence
+# above the review threshold.
 AGENT_OPENING = (
-    "הגעת ל", "הגעתם ל", "מדבר ", "מדברת ", "מוקד", "שירות לקוחות", "נציג",
+    "הגעת ל", "הגעתם ל", "מוקד", "שירות לקוחות", "נציג", "מהבנק", "מהסניף",
     "במה אפשר לעזור", "איך אפשר לעזור", "במה אוכל לעזור", "איך אוכל לעזור",
-    "השיחה מוקלטת", "השיחה הזאת מוקלטת", "לצורכי בקרת איכות", "שמי ",
+    "השיחה מוקלטת", "השיחה הזאת מוקלטת", "לצורכי בקרת איכות",
 )
-# Only the bank asks for these.
-IDENTITY_REQUEST = (
+# The names of identifying fields. BOTH parties say these words - the bank
+# asking and the customer answering - so a bare mention is not evidence. A hit
+# counts only in a turn that is actually ASKING (see _asks_for_identity).
+IDENTITY_FIELDS = (
     "תעודת זהות", "תעודת הזהות", "מספר זהות", "ת.ז", 'ת"ז', "מספר חשבון",
-    "לאימות", "לזהות אותך", "אזהה אותך", "נזהה אותך", "הזיהוי",
-    "ארבע הספרות האחרונות", "שם האם", "תאריך לידה", "מה מספר",
+    "ארבע הספרות האחרונות", "שם האם", "תאריך לידה",
 )
+# Phrases only the side performing the identification uses.
+IDENTITY_ACTIONS = (
+    "לאימות", "לזהות אותך", "אזהה אותך", "נזהה אותך", "הזיהוי הושלם",
+    "אני צריך לזהות", "צריכה לזהות",
+)
+REQUEST_CUES = ("?", "מה ", "מהו", "אפשר", "תן לי", "תגיד", "תמסור", "אני צריך",
+                "אני צריכה", "בבקשה", "אשמח לקבל")
 # Service register: the side that is helping.
 SERVICE_LANGUAGE = (
     "בשמחה", "אשמח", "אבדוק", "אני בודק", "אני בודקת", "אעביר אותך",
@@ -53,9 +65,6 @@ AGENT_CLOSING = (
     "תודה שפנית", "תודה שפניתם", "יום נעים", "יום טוב", "נשמח לעמוד לשירותך",
     "ערב טוב ותודה", "נשמח לעזור",
 )
-# Same list the feature stage counts questions with, so the two agree.
-HEBREW_INTERROGATIVES = ("האם", "מה", "מתי", "איך", "כמה", "למה", "איפה", "מי")
-
 DIGIT_RUN = re.compile(r"(?<!\d)\d{5,}(?!\d)")
 
 # Weights are ordered by how much each signal is worth on its own. The opening
@@ -104,13 +113,40 @@ def _count_markers(text: str, markers: tuple[str, ...]) -> int:
     return sum(text.count(marker) for marker in markers)
 
 
-def _question_count(text: str) -> int:
-    count = text.count("?")
-    for sentence in re.split(r"[.!?\n]", text):
-        stripped = sentence.strip()
-        if stripped.startswith(HEBREW_INTERROGATIVES):
+def _asks_for_identity(turns: list[str]) -> int:
+    """Turns that ASK for an identifying field, rather than mention one."""
+    count = 0
+    for text in turns:
+        if any(action in text for action in IDENTITY_ACTIONS):
+            count += 1
+            continue
+        if any(field in text for field in IDENTITY_FIELDS) and any(
+            cue in text for cue in REQUEST_CUES
+        ):
             count += 1
     return count
+
+
+def _first_utterances_of_each_number(
+    labeled: list[tuple[int, TranscriptSegment]]
+) -> dict[int, int]:
+    """Who said each distinct long number FIRST.
+
+    A banker reading an ID back to confirm it says the same digits as the
+    customer who supplied it. Counting every utterance let the read-back
+    outvote the original and inverted the roles.
+    """
+    seen: set[str] = set()
+    counts = {0: 0, 1: 0}
+    for idx, seg in labeled:
+        if idx not in counts:
+            continue
+        for number in DIGIT_RUN.findall(seg.text):
+            if number in seen:
+                continue
+            seen.add(number)
+            counts[idx] += 1
+    return counts
 
 
 def _vote(signals: list[RoleSignal], name: str, per_speaker: dict[int, float],
@@ -152,9 +188,11 @@ def infer_roles(
     opening: dict[int, str] = {0: "", 1: ""}
     closing: dict[int, str] = {0: "", 1: ""}
     words: dict[int, int] = {0: 0, 1: 0}
+    turn_texts: dict[int, list[str]] = {0: [], 1: []}
     for idx, seg in labeled:
         if idx not in text:
             continue
+        turn_texts[idx].append(seg.text)
         text[idx] += " " + seg.text
         words[idx] += len(seg.text.split())
         if seg.start <= OPENING_WINDOW_SEC:
@@ -166,13 +204,12 @@ def infer_roles(
     _vote(signals, "opening",
           {i: _count_markers(opening[i], AGENT_OPENING) for i in (0, 1)})
     _vote(signals, "identity_request",
-          {i: _count_markers(text[i], IDENTITY_REQUEST) for i in (0, 1)})
-    # The party who reads out a long run of digits is supplying identification,
+          {i: _asks_for_identity(turn_texts[i]) for i in (0, 1)})
+    # The party who FIRST reads out a long number is supplying identification,
     # which makes them the customer - so this signal votes the other way.
-    _vote(signals, "identity_supply",
-          {i: len(DIGIT_RUN.findall(text[i])) for i in (0, 1)}, invert=True)
+    _vote(signals, "identity_supply", _first_utterances_of_each_number(labeled), invert=True)
     _vote(signals, "question_rate",
-          {i: round(_question_count(text[i]) / max(words[i], 1) * 100, 2) for i in (0, 1)})
+          {i: round(count_questions(text[i]) / max(words[i], 1) * 100, 2) for i in (0, 1)})
     _vote(signals, "service_language",
           {i: _count_markers(text[i], SERVICE_LANGUAGE) for i in (0, 1)})
     _vote(signals, "closing",

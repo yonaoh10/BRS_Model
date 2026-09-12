@@ -11,6 +11,7 @@ from callqa.reporting.common import (
     jinja_env,
     load_recommendations,
     pick_recommendation,
+    safe_filename,
     score_color,
 )
 from callqa.rubric import Rubric
@@ -59,7 +60,7 @@ def generate_banker_reports(
     output_dir: Path,
     rubric: Rubric,
     group_comparison: str = "median",
-    recommendations_path: str = "config/recommendations_he.yaml",
+    recommendations_path: str | None = None,
 ) -> list[Path]:
     """Render all banker reports + index.html. Returns the written paths."""
     cards = load_scorecards(output_dir)
@@ -77,7 +78,9 @@ def generate_banker_reports(
         html = render_banker_report(
             agg, rubric, group_dim, group_total, group_comparison, recommendations, footer
         )
-        path = bankers_dir / f"{agg.banker_id}.html"
+        # A banker_id comes from a CSV the bank edits; without this it chose
+        # the output path, and "../../x" wrote outside output_dir entirely.
+        path = bankers_dir / f"{safe_filename(agg.banker_id)}.html"
         atomic_write_text(path, html)
         written.append(path)
 

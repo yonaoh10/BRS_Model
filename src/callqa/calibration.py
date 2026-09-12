@@ -20,6 +20,9 @@ from callqa.rubric import Rubric
 logger = logging.getLogger(__name__)
 
 QWK_PASS_THRESHOLD = 0.70
+# A kappa over a handful of calls is noise. Two rated calls used to be enough
+# to declare the judge calibrated against a human.
+MIN_CALLS_FOR_PASS = 20
 QWK_DIMENSION_FLAG_THRESHOLD = 0.60
 LABELS = [1, 2, 3, 4, 5]
 
@@ -48,13 +51,18 @@ class CalibrationResult:
     human_vs_human_kappa: float | None
     n_doubly_rated: int
     flagged_dimensions: list[str] = field(default_factory=list)
+    # Mean of the per-dimension kappas. Reported beside the pooled value
+    # because the two disagree exactly when one dimension is broken.
+    mean_dimension_qwk: float | None = None
 
     def to_dict(self) -> dict:
         return {
             "n_calls": self.n_calls,
             "overall_qwk": self.overall_qwk,
+            "mean_dimension_qwk": self.mean_dimension_qwk,
             "overall_pass": self.overall_pass,
             "qwk_pass_threshold": QWK_PASS_THRESHOLD,
+            "min_calls_for_pass": MIN_CALLS_FOR_PASS,
             "dimension_flag_threshold": QWK_DIMENSION_FLAG_THRESHOLD,
             "human_vs_human": {
                 "qwk": self.human_vs_human_qwk,
@@ -110,10 +118,17 @@ def load_human_ratings(
 
 
 def _safe_qwk(a: list[int], b: list[int], weights: str | None = "quadratic") -> float | None:
-    if len(a) < 2 or len(set(a)) == 1 and set(a) == set(b):
-        # kappa is undefined (or trivially degenerate) on constant data
-        if a == b:
-            return 1.0
+    """Quadratic-weighted kappa, or None where it is not defined.
+
+    Kappa measures agreement ABOVE chance. When every rating is the same value
+    there is no variance to work with and chance agreement is total, so kappa
+    is undefined. Returning 1.0 there reported a rater who has only ever said
+    "3" as being in perfect agreement with the model, and one agreeing call
+    was enough to pass the whole calibration.
+    """
+    if len(a) < 2:
+        return None
+    if len(set(a)) == 1 or len(set(b)) == 1:
         return None
     try:
         value = cohen_kappa_score(a, b, labels=LABELS, weights=weights)
@@ -174,6 +189,14 @@ def calibrate(
         pooled_system.extend(system)
 
     overall_qwk = _safe_qwk(pooled_human, pooled_system)
+    # Pooling across dimensions hides a dimension that disagrees: a set whose
+    # eight per-dimension kappas were all below 0.25 still pooled to 0.90,
+    # because pooling rewards getting the overall LEVEL right. So passing also
+    # requires enough rated calls and no flagged dimension.
+    dimension_qwks = [d.qwk for d in dims if d.qwk is not None]
+    mean_dimension_qwk = (
+        round(sum(dimension_qwks) / len(dimension_qwks), 4) if dimension_qwks else None
+    )
 
     # Human-vs-human agreement on doubly-rated calls (first two raters).
     hh_a: list[int] = []
@@ -193,7 +216,15 @@ def calibrate(
     result = CalibrationResult(
         n_calls=len(common_calls),
         overall_qwk=overall_qwk,
-        overall_pass=overall_qwk is not None and overall_qwk >= QWK_PASS_THRESHOLD,
+        overall_pass=(
+            overall_qwk is not None
+            and overall_qwk >= QWK_PASS_THRESHOLD
+            and mean_dimension_qwk is not None
+            and mean_dimension_qwk >= QWK_PASS_THRESHOLD
+            and len(common_calls) >= MIN_CALLS_FOR_PASS
+            and not any(d.flagged for d in dims)
+        ),
+        mean_dimension_qwk=mean_dimension_qwk,
         dimensions=dims,
         human_vs_human_qwk=hh_qwk,
         human_vs_human_kappa=hh_kappa,

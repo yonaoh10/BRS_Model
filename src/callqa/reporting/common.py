@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from callqa.judge.prompts import mmss
+from callqa.resources import find_config
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -26,9 +28,12 @@ def jinja_env() -> Environment:
     return env
 
 
-def load_recommendations(path: str | Path = "config/recommendations_he.yaml") -> dict[str, list[str]]:
-    p = Path(path)
-    if not p.exists():
+def load_recommendations(path: str | Path | None = None) -> dict[str, list[str]]:
+    """Coaching lines per dimension. Missing is survivable; the report simply
+    carries no recommendation."""
+    try:
+        p = find_config("recommendations_he.yaml", path)
+    except FileNotFoundError:
         return {}
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     return {k: list(v) for k, v in data.items() if isinstance(v, list)}
@@ -52,3 +57,16 @@ def score_color(score: float, maximum: float = 5.0) -> str:
     if ratio >= 0.6:
         return "#9a6700"
     return "#c0392b"
+
+
+_UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_filename(value: str, fallback: str = "unknown") -> str:
+    """A filename component built from data, never a path.
+
+    Report filenames are built from identifiers that arrive in a CSV the bank
+    maintains, so they have to be treated as untrusted text.
+    """
+    cleaned = _UNSAFE_FILENAME.sub("_", (value or "").strip()).strip("._-")
+    return cleaned[:64] or fallback
