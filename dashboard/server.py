@@ -4,8 +4,11 @@
 Runs on the operator's own machine and reads the artifacts the pipeline has
 already written. Start it with:
 
-    python -m callqa dashboard        (once wired into the CLI)
-    python dashboard/server.py        (directly)
+    python dashboard/server.py
+
+Deliberately NOT wired into `python -m callqa`: keeping it out of the core CLI
+is what lets `rm -rf dashboard/` remove this feature without touching the
+package the bank receives.
 
 DESIGN NOTES
 - stdlib only. The project has no JavaScript toolchain and a hard offline

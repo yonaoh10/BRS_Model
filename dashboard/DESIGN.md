@@ -1,7 +1,8 @@
 # Operator dashboard — design decisions
 
-**Status: prototype under review.** `prototype.html` is a clickable mock with
-real figures from a pipeline run. The live server is not built yet.
+**Status: working, under review.** `server.py` serves `prototype.html` with
+live data read from `data/output/`. Opened as a plain file the same page falls
+back to embedded sample figures, so it doubles as a standalone prototype.
 
 > **Scope note.** The original build spec puts a web application out of scope
 > ("static HTML reports only", §3). This dashboard is built anyway because the
@@ -85,13 +86,36 @@ light/dark × desktop/phone plus the detail drawer, and fails on:
 - focus states with no visible ring
 - the cost meter scrolling out of view
 
-It has already caught four real defects: the muted-ink contrast failure, a
+It has already caught six real defects: the muted-ink contrast failure, a
 551px-wide overflow at 390px (grid items default to `min-width:auto`), the
-cost meter scrolling away, and unisolated Latin inside a Hebrew label.
+cost meter scrolling away, unisolated Latin inside a Hebrew label, and two
+scoping bugs where helpers were swallowed into `renderAll()` so the page threw
+a silent ReferenceError and quietly kept showing its sample data.
+
+That last pair is the instructive one: the page *looked* correct, because the
+fallback made it look correct. The harness only found it once it failed on any
+page error and asserted that the detail drawer actually opens.
+
+## Running it
+
+```bash
+python dashboard/server.py          # prints a URL with a one-time token
+python dashboard/qa_dashboard.py    # the visual QA harness
+```
+
+It is read-only: it renders what the pipeline already wrote. Actions that
+spend money or mutate state are gated behind `--allow-actions` and are not
+implemented yet.
+
+## Removing it
+
+`rm -rf dashboard/ tests/test_dashboard_server.py` and nothing else changes.
+The server is intentionally not registered as a `callqa` subcommand, so the
+package the bank receives has no reference to it.
 
 ## Still to build
 
-- Live progress streamed from the real pipeline rather than stubbed rows
-- The empty state for day one, before any call exists
-- The server: reads `data/output/` artifacts and drives the existing CLI
-  entrypoints in-process
+- Progress that streams while a batch runs, rather than a snapshot per load
+- The screen for starting and stopping the cloud machine from here, which is
+  why `--allow-actions` exists but does nothing yet
+- A designed empty state for day one, before any call exists
