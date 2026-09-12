@@ -41,7 +41,9 @@
   --r-sm:6px; --r:10px; --r-lg:14px;
   --shadow:0 1px 3px rgb(28 25 23/.07), 0 1px 2px rgb(28 25 23/.04);
   --shadow-lg:0 8px 28px rgb(28 25 23/.12);
-  --ring:0 0 0 3px rgb(234 88 12/.35);
+  /* Opaque. The old translucent ring composited to 1.55:1 on the card
+     and 1.60:1 on the dark card - both fail WCAG 1.4.11 (needs 3:1). */
+  --ring-color:#c2410c;   /* 5.18:1 on the card */
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
@@ -54,6 +56,7 @@
     --warn:#fbbf24; --warn-ink:#1c1917; --warn-tint:#2e2206;
     --bad:#f87171; --bad-ink:#1c1917; --bad-tint:#2e1212;
     --info:#60a5fa; --info-tint:#10213d;
+    --ring-color:#fb923c;  /* 6.70:1 on the dark card */
     --shadow:0 1px 3px rgb(0 0 0/.4);
     --shadow-lg:0 8px 28px rgb(0 0 0/.55);
   }
@@ -68,6 +71,7 @@
   --warn:#fbbf24; --warn-ink:#1c1917; --warn-tint:#2e2206;
   --bad:#f87171; --bad-ink:#1c1917; --bad-tint:#2e1212;
   --info:#60a5fa; --info-tint:#10213d;
+  --ring-color:#fb923c;  /* 6.70:1 on the dark card */
   --shadow:0 1px 3px rgb(0 0 0/.4);
   --shadow-lg:0 8px 28px rgb(0 0 0/.55);
 }
@@ -83,7 +87,8 @@ body{
 .ltr{direction:ltr; unicode-bidi:isolate; font-variant-numeric:tabular-nums}
 .mono{font-family:var(--mono); direction:ltr; unicode-bidi:isolate; font-size:.86em}
 .num{font-variant-numeric:tabular-nums}
-:focus-visible{outline:none; box-shadow:var(--ring); border-radius:var(--r-sm)}
+:focus-visible{outline:2px solid var(--ring-color); outline-offset:2px;
+               border-radius:var(--r-sm)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
 
 /* ---------- app frame ---------- */
@@ -252,7 +257,10 @@ tbody td{padding:var(--s3) var(--s5); border-block-end:1px solid var(--border)}
 tbody tr:last-child td{border-block-end:none}
 tbody tr{cursor:pointer}
 tbody tr:hover{background:var(--brand-tint)}
-tbody tr:focus-visible{background:var(--brand-tint); outline:none; box-shadow:inset var(--ring)}
+tbody tr:focus-visible{background:var(--brand-tint);
+  /* outline-offset would be clipped by the row, so the ring is drawn
+     inside the row instead - opaque, so it clears 1.4.11 */
+  outline:2px solid var(--ring-color); outline-offset:-2px}
 .score{font-weight:700; font-variant-numeric:tabular-nums}
 
 /* ---------- detail drawer ---------- */
@@ -709,17 +717,23 @@ async function loadLive(){
 }
 let LIVE = null;
 
+/* Everything below interpolates pipeline data into HTML. That data derives
+   from ASR output, file names and config values, so it is escaped: this page
+   holds a session token and can start billable machines. */
+const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 /* Shared helpers: declared at top level because openCall() and the boot
    block call them from outside renderAll(). */
 function gateBadge(g){ return g ? '<span class="badge warn">⚠ חריגה</span>' : '<span class="badge quiet">✓ תקין</span>'; }
 function rowHTML(c, withStatus){
   return `<tr tabindex="0" data-call="${c.id}">
-    <td><span class="mono">${c.id}</span></td>
-    <td><span class="ltr">${c.banker}</span></td>
+    <td><span class="mono">${esc(c.id)}</span></td>
+    <td><span class="ltr">${esc(c.banker)}</span></td>
     <td class="score num">${c.total.toFixed(1)}</td>
     <td>${gateBadge(c.gate)}</td>
     ${withStatus?`<td>${c.status==='דורש בדיקה'?'<span class="badge warn">⚠ דורש בדיקה</span>':'<span class="badge quiet">הושלם</span>'}</td>`:''}
-    <td><span class="ltr">${c.date}</span></td>
+    <td><span class="ltr">${esc(c.date)}</span></td>
   </tr>`;
 }
 const DEMO_RUN = [
@@ -740,11 +754,11 @@ function renderRun(){
     return;
   }
   panel.innerHTML = rows.map(r=>`<div class="runrow">
-  <div><span class="mono">${r.id}</span></div>
+  <div><span class="mono">${esc(r.id)}</span></div>
   <div class="stages">${STAGES.map((s,i)=>{
      const cls = i<r.done ? 'done' : (i===r.done && r.done>0 && r.done<STAGES.length ? 'active' : '');
-     return `<div class="stage ${cls}" title="${s}"></div>`;}).join('')}</div>
-  <div class="st">${r.stage}</div>
+     return `<div class="stage ${cls}" title="${esc(s)}"></div>`;}).join('')}</div>
+  <div class="st">${esc(r.stage)}</div>
 </div>`).join('');
 }
 
@@ -754,7 +768,7 @@ document.getElementById('dimChart').innerHTML = DIMS.map(d=>{
   const pct = ((d.avg-1)/4*100).toFixed(1); // matches the scoring formula
   const low = d.avg < 3.2;
   return `<div class="dimrow">
-    <div class="name">${d.he}${d.gate?'<span class="gatemark" title="ממד שער">⚑ שער</span>':''}</div>
+    <div class="name">${esc(d.he)}${d.gate?'<span class="gatemark" title="ממד שער">⚑ שער</span>':''}</div>
     <div class="track"><div class="fill${low?' low':''}" style="width:${pct}%"></div></div>
     <div class="v num">${d.avg.toFixed(2)}</div>
   </div>`;
@@ -764,7 +778,7 @@ document.getElementById('dimChart').innerHTML = DIMS.map(d=>{
 document.getElementById('bankerChart').innerHTML = BANKERS.map(b=>{
   const pct=(b.mean/100*100).toFixed(1), med=(GROUP_MEDIAN).toFixed(1);
   return `<div class="dimrow">
-    <div class="name"><span class="ltr">${b.id}</span> · <span class="num">${b.n}</span> שיחות</div>
+    <div class="name"><span class="ltr">${esc(b.id)}</span> · <span class="num">${b.n}</span> שיחות</div>
     <div class="track"><div class="fill" style="width:${pct}%"></div>
       <div class="median" style="inset-inline-start:${med}%" title="חציון קבוצתי"></div></div>
     <div class="v num">${b.mean.toFixed(1)}</div>
@@ -804,28 +818,28 @@ function openCall(id){
        rec: DETAIL.CALL003.rec}
     : null;
   const d = live || DETAIL[id] || DETAIL.CALL003;
-  document.getElementById('drawerTitle').innerHTML = `שיחה <span class="mono">${c.id}</span>`;
+  document.getElementById('drawerTitle').innerHTML = `שיחה <span class="mono">${esc(c.id)}</span>`;
   document.getElementById('drawerBody').innerHTML = `
     <dl class="kv">
-      <dt>בנקאי</dt><dd><span class="ltr">${c.banker}</span></dd>
-      <dt>תאריך</dt><dd><span class="ltr">${c.date}</span></dd>
+      <dt>בנקאי</dt><dd><span class="ltr">${esc(c.banker)}</span></dd>
+      <dt>תאריך</dt><dd><span class="ltr">${esc(c.date)}</span></dd>
       <dt>ציון כולל</dt><dd><span class="num">${c.total.toFixed(1)}</span> / 100</dd>
       <dt>שער</dt><dd>${gateBadge(c.gate)}</dd>
     </dl>
     ${c.gate?`<div class="quote" style="border-inline-start-color:var(--warn); background:var(--warn-tint)">
       <div class="meta">מדוע הציון הוגבל</div>
       ממד השער "זיהוי ואימות לקוח" קיבל ציון 2, ולכן הציון הכולל הוגבל ל-59.</div>`:''}
-    ${c.summary?`<p style="font-size:13.5px; color:var(--ink-2); margin:0 0 var(--s4)">${c.summary}</p>`:''}
+    ${c.summary?`<p style="font-size:13.5px; color:var(--ink-2); margin:0 0 var(--s4)">${esc(c.summary)}</p>`:''}
     <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">ציונים לפי ממד</h4>
     ${Object.entries(d.scores).map(([k,v])=>`<div class="dimline">
-      <span class="n">${byId[k]}</span>
+      <span class="n">${esc(byId[k])}</span>
       <span class="s" style="color:${v<=2?'var(--bad)':v>=4?'var(--ok)':'var(--ink)'}">${v}/5</span>
     </div>`).join('')}
     <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">ציטוטי ראיה</h4>
     ${d.evidence.map(e=>`<div class="quote">
-      <div class="meta"><span class="ltr">[${e.t}]</span> ${e.sp}</div>${e.q}</div>`).join('')}
+      <div class="meta"><span class="ltr">[${esc(e.t)}]</span> ${esc(e.sp)}</div>${esc(e.q)}</div>`).join('')}
     <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">המלצת אימון</h4>
-    <div class="quote" style="border-inline-start-color:var(--ok); background:var(--ok-tint)">${d.rec}</div>
+    <div class="quote" style="border-inline-start-color:var(--ok); background:var(--ok-tint)">${esc(d.rec)}</div>
   `;
   const link = document.getElementById('openReport');
   if (link) {

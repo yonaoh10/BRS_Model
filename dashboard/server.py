@@ -253,7 +253,10 @@ class Handler(BaseHTTPRequestHandler):
             rel = route[len("/reports/"):]
             target = (type(self).output_dir / "reports" / rel).resolve()
             root = (type(self).output_dir / "reports").resolve()
-            if not str(target).startswith(str(root)) or not target.is_file():
+            # is_relative_to, not startswith: a string prefix also accepts a
+            # SIBLING directory whose name merely starts with "reports"
+            # (reports_backup, reports-old), which would serve files outside it.
+            if not target.is_relative_to(root) or not target.is_file():
                 self._send(404, b'{"error":"not found"}', "application/json")
                 return
             self._send(200, target.read_bytes(), "text/html; charset=utf-8")

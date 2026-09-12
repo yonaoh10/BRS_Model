@@ -137,8 +137,18 @@ FOCUS_JS = r"""
     const cs = getComputedStyle(e);
     const hasRing = (cs.boxShadow && cs.boxShadow !== 'none') ||
                     (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0);
-    if (!hasRing) bad.push({sel: e.tagName.toLowerCase()+'.'+(e.className||'').toString().split(' ')[0],
-                            text:(e.textContent||'').trim().slice(0,20)});
+    const label = {sel: e.tagName.toLowerCase()+'.'+(e.className||'').toString().split(' ')[0],
+                   text:(e.textContent||'').trim().slice(0,20)};
+    if (!hasRing) { bad.push({...label, why:'no visible ring'}); return; }
+    // WCAG 1.4.11 wants 3:1 for the focus indicator. A TRANSLUCENT ring
+    // composites toward the background and can sit near 1.5:1 while still
+    // "existing" - which is exactly how this escaped the first audit.
+    const ring = cs.outlineColor || '';
+    const m = ring.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
+    if (m) {
+      const alpha = m[4] === undefined ? 1 : +m[4];
+      if (alpha < 0.95) bad.push({...label, why:'translucent ring, alpha '+alpha});
+    }
   });
   document.activeElement && document.activeElement.blur();
   return bad;
