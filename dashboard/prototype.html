@@ -645,6 +645,7 @@ tbody tr:focus-visible{background:var(--brand-tint); outline:none; box-shadow:in
   <header>
     <h3 id="drawerTitle">שיחה</h3>
     <div style="margin-inline-start:auto; display:flex; gap:var(--s2)">
+      <a class="btn btn-ghost btn-sm" id="openReport" href="#" target="_blank" rel="noopener" hidden>הדוח המלא</a>
       <button class="btn btn-ghost btn-sm" id="closeDrawer">סגירה</button>
     </div>
   </header>
@@ -708,6 +709,45 @@ async function loadLive(){
 }
 let LIVE = null;
 
+/* Shared helpers: declared at top level because openCall() and the boot
+   block call them from outside renderAll(). */
+function gateBadge(g){ return g ? '<span class="badge warn">⚠ חריגה</span>' : '<span class="badge quiet">✓ תקין</span>'; }
+function rowHTML(c, withStatus){
+  return `<tr tabindex="0" data-call="${c.id}">
+    <td><span class="mono">${c.id}</span></td>
+    <td><span class="ltr">${c.banker}</span></td>
+    <td class="score num">${c.total.toFixed(1)}</td>
+    <td>${gateBadge(c.gate)}</td>
+    ${withStatus?`<td>${c.status==='דורש בדיקה'?'<span class="badge warn">⚠ דורש בדיקה</span>':'<span class="badge quiet">הושלם</span>'}</td>`:''}
+    <td><span class="ltr">${c.date}</span></td>
+  </tr>`;
+}
+const DEMO_RUN = [
+  {id:'CALL007', done:8, stage:'הושלם'},
+  {id:'CALL008', done:6, stage:'שיפוט'},
+  {id:'CALL009', done:0, stage:'ממתין'},
+];
+function renderRun(){
+  const rows = (LIVE && LIVE.running && LIVE.running.length) ? LIVE.running : DEMO_RUN;
+  const panel = document.getElementById('runList');
+  if(!panel) return;
+  const head = panel.closest('.panel').querySelector('header');
+  if (LIVE && !(LIVE.running||[]).length) {
+    panel.innerHTML = '<div class="empty"><div class="big" aria-hidden="true">✓</div>'
+      + 'אין עיבוד פעיל. כל השיחות שנוספו הושלמו.</div>';
+    if(head){ head.querySelector('.sub').textContent='';
+              head.querySelector('.right').innerHTML='<span class="badge quiet">לא פעיל</span>'; }
+    return;
+  }
+  panel.innerHTML = rows.map(r=>`<div class="runrow">
+  <div><span class="mono">${r.id}</span></div>
+  <div class="stages">${STAGES.map((s,i)=>{
+     const cls = i<r.done ? 'done' : (i===r.done && r.done>0 && r.done<STAGES.length ? 'active' : '');
+     return `<div class="stage ${cls}" title="${s}"></div>`;}).join('')}</div>
+  <div class="st">${r.stage}</div>
+</div>`).join('');
+}
+
 function renderAll(){
 /* ---------- render: dimension bars ---------- */
 document.getElementById('dimChart').innerHTML = DIMS.map(d=>{
@@ -732,33 +772,12 @@ document.getElementById('bankerChart').innerHTML = BANKERS.map(b=>{
 }).join('');
 
 /* ---------- render: tables ---------- */
-function gateBadge(g){ return g ? '<span class="badge warn">⚠ חריגה</span>' : '<span class="badge quiet">✓ תקין</span>'; }
-function rowHTML(c, withStatus){
-  return `<tr tabindex="0" data-call="${c.id}">
-    <td><span class="mono">${c.id}</span></td>
-    <td><span class="ltr">${c.banker}</span></td>
-    <td class="score num">${c.total.toFixed(1)}</td>
-    <td>${gateBadge(c.gate)}</td>
-    ${withStatus?`<td>${c.status==='דורש בדיקה'?'<span class="badge warn">⚠ דורש בדיקה</span>':'<span class="badge quiet">הושלם</span>'}</td>`:''}
-    <td><span class="ltr">${c.date}</span></td>
-  </tr>`;
-}
 document.querySelector('#recentTable tbody').innerHTML = CALLS.slice(0,4).map(c=>rowHTML(c,false)).join('');
 document.querySelector('#allTable tbody').innerHTML  = CALLS.map(c=>rowHTML(c,true)).join('');
 
 /* ---------- render: live run ---------- */
-document.getElementById('runList').innerHTML = [
-  {id:'CALL007', done:8, state:'הושלם'},
-  {id:'CALL008', done:6, state:'שיפוט'},
-  {id:'CALL009', done:0, state:'ממתין'},
-].map(r=>`<div class="runrow">
-  <div><span class="mono">${r.id}</span></div>
-  <div class="stages">${STAGES.map((s,i)=>{
-     const cls = i<r.done ? 'done' : (i===r.done && r.done>0 && r.done<8 ? 'active' : '');
-     return `<div class="stage ${cls}" title="${s}"></div>`;}).join('')}</div>
-  <div class="st">${r.state}</div>
-</div>`).join('');
 
+  renderRun();
 }
 renderAll();
 
@@ -779,7 +798,12 @@ document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',(
 const drawer=document.getElementById('drawer'), scrim=document.getElementById('scrim');
 function openCall(id){
   const c = CALLS.find(x=>x.id===id); if(!c) return;
-  const d = DETAIL[id] || DETAIL.CALL003;
+  const live = (c.scores && Object.keys(c.scores).length)
+    ? {scores:c.scores,
+       evidence:(c.evidence||[]).map(e=>({t:e.t,sp:e.sp==='banker'?'בנקאי':'לקוח',q:e.q})),
+       rec: DETAIL.CALL003.rec}
+    : null;
+  const d = live || DETAIL[id] || DETAIL.CALL003;
   document.getElementById('drawerTitle').innerHTML = `שיחה <span class="mono">${c.id}</span>`;
   document.getElementById('drawerBody').innerHTML = `
     <dl class="kv">
@@ -791,6 +815,7 @@ function openCall(id){
     ${c.gate?`<div class="quote" style="border-inline-start-color:var(--warn); background:var(--warn-tint)">
       <div class="meta">מדוע הציון הוגבל</div>
       ממד השער "זיהוי ואימות לקוח" קיבל ציון 2, ולכן הציון הכולל הוגבל ל-59.</div>`:''}
+    ${c.summary?`<p style="font-size:13.5px; color:var(--ink-2); margin:0 0 var(--s4)">${c.summary}</p>`:''}
     <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">ציונים לפי ממד</h4>
     ${Object.entries(d.scores).map(([k,v])=>`<div class="dimline">
       <span class="n">${byId[k]}</span>
@@ -802,6 +827,14 @@ function openCall(id){
     <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">המלצת אימון</h4>
     <div class="quote" style="border-inline-start-color:var(--ok); background:var(--ok-tint)">${d.rec}</div>
   `;
+  const link = document.getElementById('openReport');
+  if (link) {
+    // Only offer the report when a server is actually there to serve it.
+    if (window.__CALLQA_TOKEN__ && c.report) {
+      link.href = '/' + c.report + '?t=' + encodeURIComponent(window.__CALLQA_TOKEN__);
+      link.hidden = false;
+    } else { link.hidden = true; }
+  }
   drawer.hidden=false; scrim.hidden=false;
   document.getElementById('closeDrawer').focus();
 }
@@ -850,7 +883,7 @@ if (dz) {
 loadLive().then(ok => {
   if(!ok) return;
   if(LIVE && LIVE.groupMedian) GROUP_MEDIAN = LIVE.groupMedian;
-  renderAll();
+  renderAll();   // this also re-renders the run panel
   const s = LIVE.summary || {};
   const head = document.querySelector('#view-overview .viewhead p');
   if(head && s.nCalls) head.textContent =
