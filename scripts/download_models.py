@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -116,18 +117,33 @@ def _record(models_dir: Path, role: str, model_id: str, local_path: Path) -> Non
 
 
 def _write_llm_into_config(model_id: str) -> None:
-    """Point judge.model in config/config.yaml at the downloaded LLM."""
+    """Point judge.model in config/config.yaml at the downloaded LLM.
+
+    Edits the one line rather than reserialising the file. Round-tripping it
+    through yaml.safe_dump deleted every comment in it, and those comments are
+    how the bank's operators know what the settings mean.
+    """
     config_path = Path("config/config.yaml")
     if not config_path.exists():
         print("   note: config/config.yaml not found; set judge.model manually")
         return
-    import yaml
-
-    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    data.setdefault("judge", {})["model"] = model_id
-    config_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
-                           encoding="utf-8")
-    print(f"   config/config.yaml updated: judge.model = {model_id}")
+    lines = config_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    in_judge = False
+    for i, line in enumerate(lines):
+        if re.match(r"^judge:\s*$", line):
+            in_judge = True
+            continue
+        if in_judge and re.match(r"^\S", line):
+            break                                    # left the judge block
+        if in_judge and re.match(r"^\s+model:\s", line):
+            indent = line[: len(line) - len(line.lstrip())]
+            comment = line.split("#", 1)
+            trailing = f"  #{comment[1].rstrip()}" if len(comment) > 1 else ""
+            lines[i] = f'{indent}model: "{model_id}"{trailing}\n'
+            config_path.write_text("".join(lines), encoding="utf-8")
+            print(f"   config/config.yaml updated: judge.model = {model_id}")
+            return
+    print("   note: judge.model not found in config/config.yaml; set it manually")
 
 
 def main() -> int:
@@ -161,6 +177,10 @@ def main() -> int:
 
         if args.all or args.diarization:
             if not token:
+                if args.all:
+                    print("\nNOTE: --diarization needs HF_TOKEN. The ASR model above")
+                    print("      downloaded fine; re-run with --diarization once the")
+                    print("      token is set.")
                 print("ERROR: --diarization requires the HF_TOKEN environment variable.")
                 print("Accept the model conditions once on huggingface.co:")
                 print(f"  {DIARIZATION_MODEL_ID}")
@@ -188,7 +208,11 @@ def main() -> int:
                 args.llm_model, models_dir / args.llm_model.replace("/", "--"), token
             )
             _record(models_dir, "llm", model_id, path)
-            _write_llm_into_config(args.llm_model)
+            # The LOCAL PATH, not the repo id: snapshot_download(local_dir=...)
+            # deliberately bypasses the Hugging Face cache, so an offline
+            # machine asked to serve the repo id has nowhere to resolve it
+            # from and vLLM fails at startup.
+            _write_llm_into_config(str(path))
 
         if args.ner:
             model_id, path = _snapshot(NER_MODEL_ID, models_dir / "dictabert-ner", token)

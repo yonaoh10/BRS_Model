@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -17,33 +18,72 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 ENV_PREFIX = "CALLQA_"
 ENV_NESTED_DELIMITER = "__"
 
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"}
 
-class PathsConfig(BaseModel):
+
+def validate_endpoint(url: str, field_name: str) -> str:
+    """Reject an endpoint that would send call data somewhere unintended.
+
+    This pipeline handles recordings of bank customers. An endpoint is a
+    complete egress path for a transcript or for the audio itself, and a
+    mistyped or injected value is indistinguishable from a deliberate one, so
+    the shape is checked rather than trusted: a real scheme, and plaintext
+    only when it stays on this machine.
+    """
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"{field_name} must be an http:// or https:// URL, got {url!r}"
+        )
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError(f"{field_name} has no host: {url!r}")
+    if parsed.scheme == "http" and host not in LOOPBACK_HOSTS:
+        raise ValueError(
+            f"{field_name} sends data in clear text to {host}. Use https, or "
+            f"a loopback address for a server on this machine."
+        )
+    return url
+
+
+class StrictModel(BaseModel):
+    """Config sections reject unknown keys.
+
+    A typo in config.yaml was silently ignored, so a setting the operator
+    believed they had changed simply never applied.
+    """
+
+    model_config = {"extra": "forbid"}
+
+
+class PathsConfig(StrictModel):
     input_dir: Path = Path("data/input")
     output_dir: Path = Path("data/output")
     models_dir: Path = Path("models")
     state_db: Path = Path("data/callqa_state.db")
 
 
-class RunConfig(BaseModel):
+class RunConfig(StrictModel):
     mock: bool = False
     force: bool = False
     max_workers: int = Field(default=1, ge=1, le=32)
 
 
-class WatchConfig(BaseModel):
+class WatchConfig(StrictModel):
     poll_seconds: float = Field(default=30, gt=0)
     stable_seconds: float = Field(default=10, ge=0)
     move_processed: bool = True
 
 
-class AudioConfig(BaseModel):
+class AudioConfig(StrictModel):
     target_sample_rate: int = Field(default=16000, gt=0)
     vad: Literal["silero", "energy"] = "silero"
     min_speech_ms: int = Field(default=250, ge=0)
 
 
-class ASRConfig(BaseModel):
+class ASRConfig(StrictModel):
     # faster_whisper = in-process (bank server). remote = HTTP client to a
     # cloud-hosted ASR server (DEV ONLY; see cloud/README.md). mock = fake.
     engine: Literal["faster_whisper", "remote", "mock"] = "faster_whisper"
@@ -57,6 +97,11 @@ class ASRConfig(BaseModel):
     base_url: str = ""
     api_key: str | None = None
     timeout_sec: float = 900.0
+
+    @field_validator("base_url")
+    @classmethod
+    def _safe_base_url(cls, value: str) -> str:
+        return validate_endpoint(value, "asr.base_url")
 
     @field_validator("language")
     @classmethod
@@ -72,7 +117,7 @@ class ASRConfig(BaseModel):
         return self
 
 
-class SpeakersConfig(BaseModel):
+class SpeakersConfig(StrictModel):
     mode: Literal["auto", "stereo", "mono"] = "auto"
     banker_channel: Literal["L", "R", "from_metadata"] = "from_metadata"
     # community-1 is the current pyannote open pipeline and roughly halves the
@@ -87,12 +132,12 @@ class SpeakersConfig(BaseModel):
     min_role_confidence: float = 0.34
 
 
-class RedactionConfig(BaseModel):
+class RedactionConfig(StrictModel):
     enabled: bool = True
     ner: bool = False
 
 
-class JudgeConfig(BaseModel):
+class JudgeConfig(StrictModel):
     engine: Literal["vllm", "mock"] = "vllm"
     base_url: str = "http://localhost:8000/v1"
     model: str = "<LLM_MODEL_ID_PLACEHOLDER>"
@@ -107,8 +152,13 @@ class JudgeConfig(BaseModel):
     # CALLQA_JUDGE__API_KEY over writing secrets into config.yaml.
     api_key: str | None = None
 
+    @field_validator("base_url")
+    @classmethod
+    def _safe_base_url(cls, value: str) -> str:
+        return validate_endpoint(value, "judge.base_url")
 
-class ReportingConfig(BaseModel):
+
+class ReportingConfig(StrictModel):
     group_comparison: Literal["median", "mean"] = "median"
     language: str = "he"
 

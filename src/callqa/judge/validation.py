@@ -1,8 +1,14 @@
-"""Judge output validation: strict JSON schema + evidence-quote verification.
+"""Judge output validation: strict JSON schema + evidence verification.
 
 Anti-hallucination rule: every evidence quote must exist verbatim in the
-redacted transcript (substring match after whitespace/punctuation
-normalization). A response with any unverifiable quote is rejected.
+redacted transcript, in a turn spoken by the speaker the judge attributes it
+to. Both halves matter. A quote that exists somewhere in the call but not in
+that speaker's mouth is how a customer's complaint gets published as the
+banker's words, which is a worse error than an invented quote because it reads
+as evidence.
+
+A response with any unverifiable quote is rejected and the model is asked
+again with the reason.
 """
 
 from __future__ import annotations
@@ -14,7 +20,12 @@ from pydantic import ValidationError
 
 from callqa.models import JudgeResponse, RedactedTranscript
 
-_NORMALIZE_RE = re.compile(r"[\s\.,;:!\?\-–—'\"״׳\(\)\[\]<>]+")
+_NORMALIZE_RE = re.compile(r"[\s\.,;:!\?\-–—\'\"״׳\(\)\[\]<>]+")
+# Niqqud and the bidi marks Hebrew text carries: present in one copy of a
+# string and absent from the other, they make an identical quote look invented.
+_INVISIBLE_RE = re.compile(r"[\u0591-\u05C7\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+_TIMESTAMP_RE = re.compile(r"^\d{1,3}:[0-5]\d$")
+MIN_QUOTE_CHARS = 8
 
 
 class JudgeValidationError(ValueError):
@@ -22,12 +33,12 @@ class JudgeValidationError(ValueError):
 
 
 def normalize_for_match(text: str) -> str:
-    return _NORMALIZE_RE.sub("", text)
+    return _NORMALIZE_RE.sub("", _INVISIBLE_RE.sub("", text))
 
 
 def extract_json(raw: str) -> str:
     """Tolerate markdown fences / stray text around the JSON object."""
-    raw = raw.strip()
+    raw = (raw or "").strip()
     fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw, re.DOTALL)
     if fence:
         return fence.group(1)
@@ -39,10 +50,14 @@ def extract_json(raw: str) -> str:
 
 
 def parse_judge_response(raw: str) -> JudgeResponse:
+    if not isinstance(raw, str) or not raw.strip():
+        raise JudgeValidationError("judge returned an empty response")
     try:
         data = json.loads(extract_json(raw))
     except json.JSONDecodeError as exc:
         raise JudgeValidationError(f"output is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise JudgeValidationError("output is not a JSON object")
     try:
         return JudgeResponse.model_validate(data)
     except ValidationError as exc:
@@ -51,19 +66,49 @@ def parse_judge_response(raw: str) -> JudgeResponse:
 
 def verify_evidence(response: JudgeResponse, redacted: RedactedTranscript) -> list[str]:
     """Return a list of human-readable problems (empty = all quotes verified)."""
-    haystack = normalize_for_match("".join(turn.text for turn in redacted.turns))
+    # Per turn, never joined: a quote spliced across a turn boundary is not
+    # something anybody said.
+    turns = [(t.speaker, normalize_for_match(t.text)) for t in redacted.turns]
+    call_end = max((t.end for t in redacted.turns), default=0.0)
     problems: list[str] = []
     for dim_id, dim_score in response.scores.items():
+        if not dim_score.evidence:
+            problems.append(f"dimension '{dim_id}': no evidence quote provided")
+            continue
         for ev in dim_score.evidence:
             needle = normalize_for_match(ev.quote)
-            if not needle:
-                problems.append(f"dimension '{dim_id}': empty evidence quote")
-            elif needle not in haystack:
+            if len(needle) < MIN_QUOTE_CHARS:
+                problems.append(
+                    f"dimension '{dim_id}': evidence quote is too short to verify: "
+                    f"'{ev.quote[:40]}'"
+                )
+                continue
+            holders = [speaker for speaker, text in turns if needle in text]
+            if not holders:
                 problems.append(
                     f"dimension '{dim_id}': quote not found verbatim in transcript: "
                     f"'{ev.quote[:80]}'"
                 )
+            elif ev.speaker not in holders:
+                problems.append(
+                    f"dimension '{dim_id}': quote is attributed to {ev.speaker} but was "
+                    f"said by {holders[0]}: '{ev.quote[:80]}'"
+                )
+            if not _TIMESTAMP_RE.match(ev.timestamp or ""):
+                problems.append(
+                    f"dimension '{dim_id}': timestamp '{ev.timestamp}' is not mm:ss"
+                )
+            elif _timestamp_seconds(ev.timestamp) > call_end + 60:
+                problems.append(
+                    f"dimension '{dim_id}': timestamp '{ev.timestamp}' is after the end "
+                    f"of the call"
+                )
     return problems
+
+
+def _timestamp_seconds(value: str) -> float:
+    minutes, seconds = value.split(":")
+    return int(minutes) * 60 + int(seconds)
 
 
 def validate_judge_output(

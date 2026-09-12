@@ -38,7 +38,10 @@ DEAD_AIR_MIN_GAP_SEC = 3.0
 
 
 def _total(segments: list[VADSegment]) -> float:
-    return sum(s.end - s.start for s in segments)
+    """Total speech seconds. Segments with end < start contribute nothing:
+    a negative duration once produced a negative talk_ratio, which is not a
+    value any reader of the report could interpret."""
+    return sum(max(0.0, s.end - s.start) for s in segments)
 
 
 def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
@@ -115,19 +118,26 @@ def patience_median(
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.?!])\s+")
 
 
-def count_banker_questions(dialog: DialogTranscript) -> int:
+def count_questions(text: str) -> int:
+    """Questions in one piece of text.
+
+    Shared with the role classifier so the two cannot drift apart. The first
+    word is compared WHOLE: `startswith` treats "מהבנק" and "מיוחד" as
+    questions, which invents them by the dozen in ordinary Hebrew.
+    """
     count = 0
-    for turn in dialog.turns:
-        if turn.speaker != "banker":
+    for sentence in _SENTENCE_SPLIT_RE.split(text):
+        sentence = sentence.strip()
+        if not sentence:
             continue
-        for sentence in _SENTENCE_SPLIT_RE.split(turn.text):
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            first_word = re.sub(r"^[^\w֐-׿]+", "", sentence).split(" ")[0]
-            if sentence.endswith("?") or first_word in HEBREW_INTERROGATIVES:
-                count += 1
+        first_word = re.sub(r"^[^\w֐-׿]+", "", sentence).split(" ")[0]
+        if sentence.endswith("?") or first_word in HEBREW_INTERROGATIVES:
+            count += 1
     return count
+
+
+def count_banker_questions(dialog: DialogTranscript) -> int:
+    return sum(count_questions(t.text) for t in dialog.turns if t.speaker == "banker")
 
 
 def dead_air_total(
@@ -164,7 +174,16 @@ def compute_features(
     customer_segments: list[VADSegment],
     dialog: DialogTranscript,
     call_duration_sec: float,
+    overlap_metrics_available: bool = True,
 ) -> Features:
+    """Compute the conversational features.
+
+    `overlap_metrics_available` is False on a single-channel recording. There
+    the two speakers' regions come from a diarizer that assigns one speaker per
+    moment, so they cannot overlap by construction and the interruption counts
+    would always be zero. Reporting a structural zero as a measurement is worse
+    than reporting nothing, so the flag travels with the numbers.
+    """
     banker_speech = _total(banker_segments)
     customer_speech = _total(customer_segments)
     denom = banker_speech + customer_speech
@@ -185,6 +204,7 @@ def compute_features(
     return Features(
         call_id=call_id,
         talk_ratio=talk_ratio,
+        overlap_metrics_available=overlap_metrics_available,
         longest_banker_monologue_sec=longest_monologue(banker_segments, customer_segments),
         interruptions_by_banker=count_interruptions(banker_segments, customer_segments),
         interruptions_by_customer=count_interruptions(customer_segments, banker_segments),

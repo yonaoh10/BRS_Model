@@ -61,6 +61,15 @@ def load_engine(config: ASRConfig):  # noqa: ANN201
 
 
 
+# A four-minute 16 kHz mono WAV is about 8 MB; this leaves room for a long
+# call and a generous encoding without letting one request exhaust the pod.
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+
+
+class IncompleteUpload(ValueError):
+    """The body ended before its closing boundary."""
+
+
 def parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, str], dict[str, bytes]]:
     """Minimal multipart/form-data parser.
 
@@ -73,6 +82,14 @@ def parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, str], dic
         raise ValueError("Content-Type is missing the multipart boundary")
     boundary = content_type.split(marker, 1)[1].split(";")[0].strip().strip('"')
     delimiter = b"--" + boundary.encode()
+
+    # A body that never reaches its closing boundary is a truncated upload,
+    # not a short call. Accepting one had a banker scored on 40% of a
+    # conversation, with nothing anywhere saying so.
+    if not body.rstrip().endswith(delimiter + b"--"):
+        raise IncompleteUpload(
+            "upload ended before its closing boundary; the transfer was cut short"
+        )
 
     fields: dict[str, str] = {}
     files: dict[str, bytes] = {}
@@ -153,11 +170,28 @@ class Handler(BaseHTTPRequestHandler):
         type(self).last_request_ts = time.monotonic()
 
         try:
-            length = int(self.headers.get("Content-Length", 0))
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+            except ValueError:
+                self._json(400, {"error": "bad Content-Length"})
+                return
+            if length <= 0:
+                self._json(411, {"error": "Content-Length is required"})
+                return
+            if length > MAX_UPLOAD_BYTES:
+                # Unbounded, a single request read the whole body into memory
+                # and then copied it twice while parsing: 200 MB in cost a
+                # measured 1 GB of RSS.
+                self._json(413, {"error": f"body exceeds {MAX_UPLOAD_BYTES} bytes"})
+                return
             if length <= 0:
                 raise ValueError("empty body")
+            body = self.rfile.read(length)
+            if len(body) < length:
+                self._json(400, {"error": "request body shorter than Content-Length"})
+                return
             fields, files = parse_multipart(
-                self.rfile.read(length), self.headers.get("Content-Type", "")
+                body, self.headers.get("Content-Type", "")
             )
             call_id = fields.get("call_id") or "unknown"
             role = (fields.get("role") or "").strip() or None

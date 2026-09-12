@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from callqa.config import Config
+from callqa.resources import find_config
 from callqa.rubric import Rubric, load_rubric
 
 if TYPE_CHECKING:
@@ -37,10 +38,10 @@ class Engines:
     mock: bool
 
 
-def build_engines(config: Config, rubric_path: str = "config/rubric.yaml") -> Engines:
+def build_engines(config: Config, rubric_path: str | None = None) -> Engines:
     """Build all engines once, honoring mock mode and lazy imports."""
     mock = config.run.mock
-    rubric = load_rubric(rubric_path)
+    rubric = load_rubric(find_config("rubric.yaml", rubric_path))
 
     if mock or config.asr.engine == "mock":
         from callqa.asr.mock_engine import MockASREngine

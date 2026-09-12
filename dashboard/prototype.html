@@ -727,7 +727,7 @@ const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
    block call them from outside renderAll(). */
 function gateBadge(g){ return g ? '<span class="badge warn">⚠ חריגה</span>' : '<span class="badge quiet">✓ תקין</span>'; }
 function rowHTML(c, withStatus){
-  return `<tr tabindex="0" data-call="${c.id}">
+  return `<tr tabindex="0" data-call="${esc(c.id)}">
     <td><span class="mono">${esc(c.id)}</span></td>
     <td><span class="ltr">${esc(c.banker)}</span></td>
     <td class="score num">${c.total.toFixed(1)}</td>

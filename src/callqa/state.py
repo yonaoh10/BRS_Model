@@ -7,6 +7,7 @@ Re-running the pipeline skips stages recorded as done (unless --force).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import tempfile
@@ -14,6 +15,13 @@ import time
 from pathlib import Path
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+# A lock older than this is assumed abandoned. Processing one call takes
+# minutes; a lock held for hours means the process that took it is gone, and on
+# another host its liveness cannot be checked at all.
+LOCK_TTL_SECONDS = 6 * 3600
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS stages (
@@ -138,6 +146,13 @@ class StateDB:
 
     # -- per-call locks -------------------------------------------------
 
+    def _lock_age(self, call_id: str) -> float:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT acquired_at FROM locks WHERE call_id=?", (call_id,)
+            ).fetchone()
+        return time.time() - row[0] if row else 0.0
+
     def acquire_lock(self, call_id: str) -> None:
         """Acquire the processing lock for call_id or raise CallLockedError.
 
@@ -158,14 +173,30 @@ class StateDB:
                 ).fetchone()
         if row is not None:
             pid, lock_host = row
-            if lock_host == hostname and pid != os.getpid() and not _pid_alive(pid):
-                # Stale lock from a dead process: steal it.
+            stale_by_death = (
+                lock_host == hostname and pid != os.getpid() and not _pid_alive(pid)
+            )
+            # A lock left behind by a container that no longer exists can never
+            # be shown dead from here, because the pid belongs to another host.
+            # Without an age limit that call is unprocessable forever.
+            stale_by_age = self._lock_age(call_id) > LOCK_TTL_SECONDS
+            if stale_by_death or stale_by_age:
+                # One conditional UPDATE, not read-then-write: every racing
+                # process otherwise saw the same dead pid and every one of them
+                # took the lock, which is exactly the case this guards.
                 with self._connect() as conn:
-                    conn.execute(
-                        "UPDATE locks SET pid=?, hostname=?, acquired_at=? WHERE call_id=?",
-                        (os.getpid(), hostname, time.time(), call_id),
-                    )
-                return
+                    changed = conn.execute(
+                        "UPDATE locks SET pid=?, hostname=?, acquired_at=? "
+                        "WHERE call_id=? AND pid=? AND hostname=?",
+                        (os.getpid(), hostname, time.time(), call_id, pid, lock_host),
+                    ).rowcount
+                if changed:
+                    if stale_by_age and not stale_by_death:
+                        logger.warning(
+                            "call_id=%s: stole a lock older than %ds held by pid %s on %s",
+                            call_id, LOCK_TTL_SECONDS, pid, lock_host,
+                        )
+                    return
         raise CallLockedError(
             f"call_id={call_id} is already being processed (locked by pid {row[0] if row else '?'})"
         )

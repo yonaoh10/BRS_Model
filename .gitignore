@@ -15,3 +15,16 @@ venv/
 MODELS_MANIFEST.json
 cloud/.runpod_state.json
 dashboard/qa-output/
+
+# Recordings and anything derived from them never belong in version control.
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+refs/
+logs/
+.env
+wheels/

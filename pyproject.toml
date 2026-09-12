@@ -6,21 +6,34 @@ build-backend = "setuptools.build_meta"
 name = "callqa"
 version = "0.1.0"
 description = "Hebrew Call-QA PoC - conversation intelligence pipeline for banker calls"
+readme = "README.md"
+license = { text = "Proprietary" }
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.13",
-    "pydantic-settings>=2.15",
     "jinja2>=3.1",
     "PyYAML>=6.0",
     "numpy>=1.26",
     "scikit-learn>=1.4",
 ]
 
+[project.optional-dependencies]
+# Only scripts/download_models.py needs this, and only on a machine with
+# network access. The runtime pipeline never downloads anything.
+download = ["huggingface_hub>=0.25"]
+
 [project.scripts]
 callqa = "callqa.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The report templates are code, not documentation: without them an installed
+# (non-editable) wheel fails every call with TemplateNotFound, which only ever
+# showed up on the target machine because a `pip install -e .` finds them on
+# disk regardless.
+[tool.setuptools.package-data]
+callqa = ["reporting/templates/*.j2", "reporting/*.yaml"]
 
 [tool.ruff]
 line-length = 100

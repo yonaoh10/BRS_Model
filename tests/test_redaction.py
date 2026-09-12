@@ -65,8 +65,14 @@ def test_account_like_aggressive() -> None:
     redacted, counts = redact_text("חשבון מספר 765432 בסניף")
     assert counts == {"ACCOUNT_LIKE": 1}
     assert "<חשבון:████>" in redacted
-    # 5 digits: not matched.
-    _, counts = redact_text("סניף 54321")
+
+
+def test_a_short_number_is_masked_only_where_it_identifies_something() -> None:
+    """Four and five digit runs are ambiguous. Next to an account word they
+    are an identifier and must go; on their own they are a quantity."""
+    _, counts = redact_text("מספר החשבון הוא 54321")
+    assert counts == {"ACCOUNT_LIKE": 1}
+    _, counts = redact_text("היו שם 54321 אנשים")
     assert counts == {}
 
 

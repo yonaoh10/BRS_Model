@@ -78,8 +78,13 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    STATE_FILE.chmod(0o600)  # contains the shared secrets
+    # Opened 0600 rather than written and then chmod'ed: between those two
+    # calls the file holding the pod's shared secrets existed at the process
+    # umask, which on a default machine is world-readable.
+    fd = os.open(STATE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(state, indent=2))
+    STATE_FILE.chmod(0o600)
 
 
 def proxy_url(pod_id: str, port: int) -> str:

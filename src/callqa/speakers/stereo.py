@@ -83,6 +83,7 @@ def assign_mono_roles(
         attribution_mode="mono_diarized",
         role_confidence=decision.confidence,
         turns=turns,
+        banker_index=decision.banker_index,
         role_signals=[RoleSignalRecord(**signal.as_dict()) for signal in decision.signals],
         diarization=DiarizationQualityRecord(**attribution.quality.as_dict()),
     )

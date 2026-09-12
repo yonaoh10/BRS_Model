@@ -1,0 +1,19 @@
+Copyright (c) 2026. All rights reserved.
+
+This software was produced as a proof of concept for a single client and is
+not released under an open-source licence. It may not be copied, distributed,
+modified or used except by the client it was delivered to, or with the
+copyright holder's written permission.
+
+Third-party components retain their own licences. The models this pipeline is
+designed to run are licensed separately by their publishers, and the licence
+terms of each must be reviewed before deployment:
+
+  ivrit-ai/whisper-large-v3-turbo-ct2          Apache-2.0
+  pyannote/speaker-diarization-community-1     CC-BY-4.0 (weights),
+                                               MIT (pyannote.audio code)
+  the judge LLM                                varies by the model chosen
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import logging
+import re
 import shutil
 import subprocess
 import wave
@@ -22,6 +24,36 @@ OPTIONAL_COLUMNS = ["call_date", "call_type", "banker_channel", "banker_name"]
 # when ffmpeg is present, since the dependency-free fallback reads WAV only.
 AUDIO_EXTENSIONS = {".wav", ".mp3"}
 FFMPEG_AUDIO_EXTENSIONS = {".m4a", ".aac", ".mp4", ".ogg", ".opus", ".flac", ".wma", ".amr"}
+
+
+# A call_id becomes a filename, a URL path segment, an HTML attribute and a
+# log line. Anything outside this set has been a path-traversal or an
+# injection vector rather than an identifier.
+CALL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_UNSAFE_CALL_ID_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+# A recording named after the customer is common and puts an identifier in
+# every artifact path, log line and report title.
+_LONG_DIGIT_RUN = re.compile(r"\d{7,}")
+
+
+def sanitize_call_id(raw: str, *, warn: bool = True) -> str:
+    """Turn an arbitrary filename stem into a safe call_id."""
+    cleaned = _UNSAFE_CALL_ID_CHARS.sub("_", (raw or "").strip()).strip("._-")
+    if not cleaned:
+        cleaned = "call"
+    if not cleaned[0].isalnum():
+        cleaned = "c" + cleaned
+    cleaned = cleaned[:64]
+    if warn:
+        if cleaned != (raw or "").strip():
+            logger.warning("call_id %r is not filename-safe; using %r", raw, cleaned)
+        if _LONG_DIGIT_RUN.search(cleaned):
+            logger.warning(
+                "call_id %r contains a long digit run. If recordings are named "
+                "after the customer, that identifier ends up in every artifact "
+                "path, log line and report title.", cleaned,
+            )
+    return cleaned
 
 
 class IngestionError(ValueError):
@@ -51,6 +83,26 @@ class MetadataValidation:
         return "\n".join(lines)
 
 
+def _read_text_any_encoding(path: Path) -> str:
+    """Read a CSV the bank exported from whatever tool it uses.
+
+    Excel on a Hebrew Windows machine writes cp1255 or UTF-16, and the loader
+    died on both with a UnicodeDecodeError before it could report anything.
+    """
+    raw = path.read_bytes()
+    # UTF-16 is tried only on its byte-order mark: without one it decodes
+    # almost any even-length byte string into plausible-looking nonsense, and
+    # a cp1255 file would come back as unreadable CJK rather than Hebrew.
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16")
+    for encoding in ("utf-8-sig", "utf-8", "cp1255", "iso-8859-8"):
+        try:
+            return raw.decode(encoding)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> MetadataValidation:
     """Load and strictly validate metadata.csv.
 
@@ -63,7 +115,13 @@ def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> Metadata
         result.problems.append(MetadataProblem(0, "-", f"metadata file not found: {metadata_csv}"))
         return result
 
-    with metadata_csv.open(newline="", encoding="utf-8-sig") as fh:
+    try:
+        text = _read_text_any_encoding(metadata_csv)
+    except (OSError, UnicodeDecodeError) as exc:
+        result.problems.append(MetadataProblem(
+            0, "-", f"could not read {metadata_csv.name}: {exc}"))
+        return result
+    with io.StringIO(text, newline="") as fh:
         reader = csv.DictReader(fh)
         fieldnames = [c.strip() for c in (reader.fieldnames or [])]
         missing = [c for c in REQUIRED_COLUMNS if c not in fieldnames]
@@ -73,7 +131,16 @@ def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> Metadata
             )
             return result
         for i, raw_row in enumerate(reader, start=1):
-            row = {(k or "").strip(): (v or "").strip() for k, v in raw_row.items()}
+            extra = raw_row.pop(None, None)
+            if extra:
+                # csv.DictReader puts surplus fields under the None key, and
+                # the value is a LIST - stripping it raised AttributeError and
+                # killed the whole validation run.
+                result.problems.append(MetadataProblem(
+                    i, "-", f"row has {len(extra)} more fields than the header"))
+                continue
+            row = {(k or "").strip(): (v or "").strip() if isinstance(v, str) else ""
+                   for k, v in raw_row.items()}
             for col in REQUIRED_COLUMNS:
                 if not row.get(col):
                     result.problems.append(MetadataProblem(i, col, "empty value"))
@@ -81,15 +148,31 @@ def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> Metadata
             if call_id in result.rows:
                 result.problems.append(MetadataProblem(i, "call_id", f"duplicate call_id '{call_id}'"))
                 continue
+            if call_id and not CALL_ID_RE.match(call_id):
+                result.problems.append(MetadataProblem(
+                    i, "call_id",
+                    f"'{call_id}' is not a safe identifier: use letters, digits, "
+                    f". _ - only (max 64 characters)",
+                ))
+                continue
             channel = row.get("banker_channel", "")
             if channel and channel not in ("L", "R"):
                 result.problems.append(
                     MetadataProblem(i, "banker_channel", f"must be L or R, got '{channel}'")
                 )
-            if calls_dir is not None and row.get("file_name"):
-                if not (calls_dir / row["file_name"]).exists():
+            file_name = row.get("file_name", "")
+            if file_name and (Path(file_name).is_absolute() or Path(file_name).name != file_name):
+                # An absolute path or one containing a separator reads a file
+                # outside the recordings directory - and the pipeline then
+                # writes its RAW transcript into the output tree.
+                result.problems.append(MetadataProblem(
+                    i, "file_name",
+                    f"must be a file name inside calls/, not a path: {file_name!r}"))
+                continue
+            if calls_dir is not None and file_name:
+                if not (calls_dir / file_name).exists():
                     result.problems.append(
-                        MetadataProblem(i, "file_name", f"audio file not found: {row['file_name']}")
+                        MetadataProblem(i, "file_name", f"audio file not found: {file_name}")
                     )
             if call_id:
                 result.rows[call_id] = row
@@ -149,6 +232,14 @@ def _probe_with_wave(audio_path: Path) -> dict | None:
         return None
 
 
+def _as_float(value: object) -> float:
+    """ffprobe reports an unknown duration as the string 'N/A'."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def probe_audio(call: CallInput) -> CallMeta:
     """Probe the audio file (ffprobe, wave-module fallback) -> CallMeta."""
     if not call.audio_path.exists():
@@ -167,7 +258,9 @@ def probe_audio(call: CallInput) -> CallMeta:
     if info is None or not info.get("streams"):
         raise IngestionError(f"could not probe audio file: {call.audio_path.name}")
     stream = info["streams"][0]
-    duration = float(stream.get("duration") or info.get("format", {}).get("duration") or 0.0)
+    duration = _as_float(stream.get("duration")) or _as_float(
+        info.get("format", {}).get("duration")
+    )
     if duration <= 0:
         raise IngestionError(f"audio has zero duration: {call.audio_path.name}")
     meta = CallMeta(

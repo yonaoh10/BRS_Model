@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TypeVar
+
+from pydantic import BaseModel
 
 from callqa.audio import prepare_audio
 from callqa.engines import Engines
@@ -34,6 +37,7 @@ from callqa.models import (
     ScoreCard,
     TranscriptBundle,
 )
+from callqa.redaction import sanitize_error
 from callqa.reporting.call_report import render_call_report
 from callqa.speakers.stereo import (
     assign_mono_roles,
@@ -43,6 +47,10 @@ from callqa.speakers.stereo import (
 from callqa.state import CallLockedError, StateDB, atomic_write_model, atomic_write_text
 
 logger = logging.getLogger(__name__)
+
+# Below these a "call" is a misfire, a voicemail beep or a dropped connection.
+MIN_CALL_SECONDS = 20.0
+MIN_SPEECH_SECONDS = 10.0
 
 STAGES = [
     "ingestion",
@@ -60,6 +68,9 @@ RAW_TRANSCRIPTS_README = (
     "including customer PII. Access must be restricted. Only the redacted\n"
     "transcripts (../redacted/) may be used for judging, reports, or logs.\n"
 )
+
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 class _ArtifactStore:
@@ -80,6 +91,39 @@ class _ArtifactStore:
     def mark_done(self, stage: str, artifact_path: Path) -> None:
         self.state.mark_stage_done(self.call_id, stage, artifact_path)
 
+    def load(self, stage: str, path: Path, model: type[_T]) -> _T | None:
+        """Read a completed stage's artifact, or None to recompute it.
+
+        A stage marked done whose artifact is missing, truncated, unparseable
+        or belongs to a DIFFERENT call is not a resumable state. Treating it as
+        one made a corrupt file a permanent failure that only --force could
+        clear, and let an artifact copied under the wrong name publish another
+        call's score under this call's id.
+        """
+        if not self.is_done(stage):
+            return None
+        try:
+            artifact = model.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning("call_id=%s stage=%s: artifact unusable (%s); recomputing",
+                           self.call_id, stage, type(exc).__name__)
+            return None
+        if getattr(artifact, "call_id", self.call_id) != self.call_id:
+            logger.error(
+                "call_id=%s stage=%s: artifact belongs to call %r; recomputing",
+                self.call_id, stage, getattr(artifact, "call_id", None),
+            )
+            return None
+        return artifact
+
+
+def _report_is_intact(path: Path) -> bool:
+    """A report that was truncated mid-write is not a finished report."""
+    try:
+        return path.is_file() and path.read_text(encoding="utf-8").rstrip().endswith("</html>")
+    except (OSError, UnicodeDecodeError):
+        return False
+
 
 def process_call(call: CallInput, engines: Engines, state: StateDB | None = None) -> CallResult:
     """The canonical single-call entrypoint. Never raises; returns a status envelope."""
@@ -89,7 +133,9 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
     try:
         state.acquire_lock(call_id)
     except CallLockedError as exc:
-        return CallResult(call_id=call_id, status="failed", error=str(exc))
+        # Prefixed so a driver can tell "somebody else has this call" apart
+        # from "this call is broken" and not quarantine a healthy recording.
+        return CallResult(call_id=call_id, status="failed", error=f"locked: {exc}")
 
     stages_completed: list[str] = []
     review_reasons: list[str] = []
@@ -100,9 +146,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
         # -- stage 1: ingestion ------------------------------------------
         meta_path = store.path("ingestion")
-        if store.is_done("ingestion"):
-            meta = CallMeta.model_validate_json(meta_path.read_text(encoding="utf-8"))
-        else:
+        meta = store.load("ingestion", meta_path, CallMeta)
+        if meta is None:
             meta = probe_audio(call)
             atomic_write_model(meta_path, meta)
             store.mark_done("ingestion", meta_path)
@@ -110,12 +155,27 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
         # -- stage 2: audio ----------------------------------------------
         audio_path = store.path("audio")
-        if store.is_done("audio"):
-            audio_art = AudioArtifact.model_validate_json(audio_path.read_text(encoding="utf-8"))
-        else:
+        audio_art = store.load("audio", audio_path, AudioArtifact)
+        if audio_art is None:
             audio_art = prepare_audio(call, meta, config, config.paths.output_dir / "audio" / "wav")
             atomic_write_model(audio_path, audio_art)
             store.mark_done("audio", audio_path)
+        speech_sec = sum(
+            seg.end - seg.start
+            for seg in (audio_art.banker_segments + audio_art.customer_segments
+                        + audio_art.mono_segments)
+        )
+        if meta.duration_sec < MIN_CALL_SECONDS:
+            review_reasons.append(
+                f"recording is only {meta.duration_sec:.1f}s long"
+            )
+        if speech_sec < MIN_SPEECH_SECONDS:
+            # Silence scores as well as anything else - the judge will happily
+            # fill in eight dimensions from an empty transcript - so a call
+            # with nothing in it must not arrive as a finished score.
+            review_reasons.append(
+                f"only {speech_sec:.1f}s of speech was detected in this recording"
+            )
         stages_completed.append("audio")
 
         # -- stage 3: asr (RAW transcripts) ------------------------------
@@ -124,9 +184,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
         if not readme.exists():
             atomic_write_text(readme, RAW_TRANSCRIPTS_README)
         bundle_path = store.path("transcripts")
-        if store.is_done("asr"):
-            bundle = TranscriptBundle.model_validate_json(bundle_path.read_text(encoding="utf-8"))
-        else:
+        bundle = store.load("asr", bundle_path, TranscriptBundle)
+        if bundle is None:
             if audio_art.is_stereo:
                 banker_t = engines.asr.transcribe(
                     Path(audio_art.banker_wav or ""), call_id=call_id, role="banker",
@@ -149,9 +208,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
         # -- stage 4: speakers (RAW dialog, stored under transcripts/) ---
         dialog_path = store.path("transcripts", suffix=".dialog.json")
-        if store.is_done("speakers"):
-            dialog = DialogTranscript.model_validate_json(dialog_path.read_text(encoding="utf-8"))
-        else:
+        dialog = store.load("speakers", dialog_path, DialogTranscript)
+        if dialog is None:
             if audio_art.is_stereo:
                 assert bundle.banker is not None and bundle.customer is not None
                 dialog = merge_stereo(call_id, bundle.banker, bundle.customer)
@@ -177,29 +235,31 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
         # -- stage 5: redaction ------------------------------------------
         redacted_path = store.path("redacted")
-        if store.is_done("redaction"):
-            redacted = RedactedTranscript.model_validate_json(
-                redacted_path.read_text(encoding="utf-8")
-            )
-        else:
+        redacted = store.load("redaction", redacted_path, RedactedTranscript)
+        if redacted is None:
             extra_names = [call.banker_name] if call.banker_name else []
             redacted = engines.redactor.redact_dialog(dialog, extra_names)
             atomic_write_model(redacted_path, redacted)
             store.mark_done("redaction", redacted_path)
+        if not redacted.enabled:
+            review_reasons.append(
+                "redaction was DISABLED for this call; the transcript, the judge "
+                "prompt and this report contain raw customer identifiers"
+            )
         stages_completed.append("redaction")
 
         # -- stage 6: features -------------------------------------------
         features_path = store.path("features")
-        if store.is_done("features"):
-            features = Features.model_validate_json(features_path.read_text(encoding="utf-8"))
-        else:
+        features = store.load("features", features_path, Features)
+        if features is None:
             if audio_art.is_stereo:
                 banker_segments = audio_art.banker_segments
                 customer_segments = audio_art.customer_segments
             else:
                 banker_segments, customer_segments = speaker_segments_from_dialog(dialog)
             features = compute_features(
-                call_id, banker_segments, customer_segments, dialog, meta.duration_sec
+                call_id, banker_segments, customer_segments, dialog, meta.duration_sec,
+                overlap_metrics_available=audio_art.is_stereo,
             )
             atomic_write_model(features_path, features)
             store.mark_done("features", features_path)
@@ -207,9 +267,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
         # -- stage 7: judge ----------------------------------------------
         score_path = store.path("scores")
-        if store.is_done("judge"):
-            scorecard = ScoreCard.model_validate_json(score_path.read_text(encoding="utf-8"))
-        else:
+        scorecard = store.load("judge", score_path, ScoreCard)
+        if scorecard is None:
             try:
                 scorecard = run_judge(
                     engines.judge, config.judge, engines.rubric,
@@ -220,7 +279,7 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                 result = CallResult(
                     call_id=call_id,
                     status="needs_human_review",
-                    error=str(exc),
+                    error=sanitize_error(exc),
                     stages_completed=stages_completed,
                 )
                 _write_result(config.paths.output_dir, result)
@@ -231,7 +290,7 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
         # -- stage 8: per-call report ------------------------------------
         report_path = config.paths.output_dir / "reports" / "calls" / f"{call_id}.html"
-        if not store.is_done("report") or not report_path.exists():
+        if not store.is_done("report") or not _report_is_intact(report_path):
             html = render_call_report(engines.rubric, meta, scorecard, features, redacted,
                                       dialog=dialog)
             atomic_write_text(report_path, html)
@@ -250,12 +309,16 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
         logger.info("call done: call_id=%s status=%s", call_id, result.status)
         return result
     except Exception as exc:  # noqa: BLE001 - one bad call never stops a driver
-        logger.exception("call failed: call_id=%s stage=%s", call_id,
-                         STAGES[len(stages_completed)] if len(stages_completed) < len(STAGES) else "?")
+        stage = STAGES[len(stages_completed)] if len(stages_completed) < len(STAGES) else "?"
+        # Not logger.exception: a traceback raised before redaction carries the
+        # transcript text that put it there, and the log is not a place raw
+        # customer data may reach.
+        logger.error("call failed: call_id=%s stage=%s error=%s",
+                     call_id, stage, sanitize_error(exc))
         result = CallResult(
             call_id=call_id,
             status="failed",
-            error=f"{type(exc).__name__}: {exc}",
+            error=f"{type(exc).__name__}: {sanitize_error(exc)}",
             stages_completed=stages_completed,
         )
         try:
