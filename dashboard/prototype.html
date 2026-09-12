@@ -416,17 +416,17 @@ tbody tr:focus-visible{background:var(--brand-tint); outline:none; box-shadow:in
       <div class="tiles">
         <div class="tile">
           <div class="lab">שיחות שנותחו</div>
-          <div class="fig num">6</div>
+          <div class="fig num" id="tileCalls">6</div>
           <div class="foot">הושלמו ללא שגיאה</div>
         </div>
         <div class="tile">
           <div class="lab">ציון ממוצע</div>
-          <div class="fig num">58.3<small> / 100</small></div>
-          <div class="foot"><span class="pip off" aria-hidden="true"></span>חציון קבוצתי <span class="num">58.1</span></div>
+          <div class="fig num"><span id="tileMean">58.3</span><small> / 100</small></div>
+          <div class="foot"><span class="pip off" aria-hidden="true"></span>חציון קבוצתי <span class="num" id="tileMedian">58.1</span></div>
         </div>
         <div class="tile">
           <div class="lab">דורשות בדיקה</div>
-          <div class="fig num">2</div>
+          <div class="fig num" id="tileReview">2</div>
           <div class="foot"><span class="badge warn">⚠ חריגת שער</span></div>
         </div>
       </div>
@@ -583,23 +583,23 @@ tbody tr:focus-visible{background:var(--brand-tint); outline:none; box-shadow:in
       <div class="tiles">
         <div class="tile">
           <div class="lab">‏QWK כולל</div>
-          <div class="fig num">0.83</div>
+          <div class="fig num" id="calQwk">0.83</div>
           <div class="foot"><span class="badge ok">✓ עובר</span> הסף הוא <span class="num">0.70</span></div>
         </div>
         <div class="tile">
           <div class="lab">שיחות בכיול</div>
-          <div class="fig num">6</div>
-          <div class="foot">מתוכן <span class="num">3</span> עם שני מעריכים</div>
+          <div class="fig num" id="calN">6</div>
+          <div class="foot">מתוכן <span class="num" id="calDouble">3</span> עם שני מעריכים</div>
         </div>
         <div class="tile">
           <div class="lab">ממדים מסומנים</div>
-          <div class="fig num">0</div>
+          <div class="fig num" id="calFlagged">0</div>
           <div class="foot">אף ממד לא ירד מתחת ל-<span class="num">0.60</span></div>
         </div>
       </div>
       <div class="panel">
         <header><h3>מסקנה</h3></header>
-        <div class="body" style="color:var(--ink-2); font-size:14px">
+        <div class="body" style="color:var(--ink-2); font-size:14px" id="calVerdict">
           השופט האוטומטי תואם להערכה האנושית ברמה שמאפשרת שימוש. כל ממד נבדק בנפרד,
           ואף אחד מהם לא סומן כדורש בקרה אנושית.
         </div>
@@ -672,7 +672,7 @@ const CALLS = [
   {id:'CALL005', banker:'B003', total:45.0, gate:true,  date:'2026-08-10', status:'דורש בדיקה'},
 ];
 const BANKERS = [{id:'B001',mean:58.8,n:2},{id:'B002',mean:57.5,n:2},{id:'B003',mean:58.8,n:2}];
-const GROUP_MEDIAN = 58.1;
+let GROUP_MEDIAN = 58.1;
 const STAGES = ['קליטה','אודיו','תמלול','דוברים','הסרת מזהים','מדדים','שיפוט','דוח'];
 
 const DETAIL = {
@@ -684,8 +684,31 @@ const DETAIL = {
     rec:'פתח כל שיחה בבקשת שני פרטים מזהים לפחות, ואמור במפורש "הזיהוי הושלם" לפני מסירת מידע על החשבון.'
   }
 };
-const byId = Object.fromEntries(DIMS.map(d=>[d.id,d.he]));
+let byId = Object.fromEntries(DIMS.map(d=>[d.id,d.he]));
 
+/* When served by dashboard/server.py the page swaps the demo figures above for
+   the pipeline's real artifacts. Opened as a plain file it keeps them, so this
+   one file is both the live UI and a standalone prototype. */
+async function loadLive(){
+  const token = window.__CALLQA_TOKEN__;
+  if(!token) return false;                       // opened as a static file
+  try{
+    const r = await fetch('/api/state?t='+encodeURIComponent(token));
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(!d.calls || !d.calls.length) return false;
+    CALLS.length = 0; CALLS.push(...d.calls);
+    DIMS.length  = 0; DIMS.push(...d.dims);
+    BANKERS.length = 0; BANKERS.push(...d.bankers);
+    byId = Object.fromEntries(DIMS.map(x=>[x.id,x.he]));
+    if(d.stages && d.stages.length){ STAGES.length = 0; STAGES.push(...d.stages); }
+    LIVE = d;
+    return true;
+  }catch(e){ return false; }
+}
+let LIVE = null;
+
+function renderAll(){
 /* ---------- render: dimension bars ---------- */
 document.getElementById('dimChart').innerHTML = DIMS.map(d=>{
   const pct = ((d.avg-1)/4*100).toFixed(1); // matches the scoring formula
@@ -735,6 +758,9 @@ document.getElementById('runList').innerHTML = [
      return `<div class="stage ${cls}" title="${s}"></div>`;}).join('')}</div>
   <div class="st">${r.state}</div>
 </div>`).join('');
+
+}
+renderAll();
 
 /* ---------- navigation ---------- */
 const views = document.querySelectorAll('.view');
@@ -819,6 +845,42 @@ if (dz) {
     dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('hot'); }));
   document.getElementById('pickFiles').addEventListener('click', () => dz.classList.add('hot'));
 }
+
+/* ---------- boot: prefer live pipeline data ---------- */
+loadLive().then(ok => {
+  if(!ok) return;
+  if(LIVE && LIVE.groupMedian) GROUP_MEDIAN = LIVE.groupMedian;
+  renderAll();
+  const s = LIVE.summary || {};
+  const head = document.querySelector('#view-overview .viewhead p');
+  if(head && s.nCalls) head.textContent =
+    `מצב העיבוד והממצאים המרכזיים מ-${s.nCalls} השיחות שנותחו.`;
+  document.querySelectorAll('.navlink[data-view="calls"] .count')
+    .forEach(e => e.textContent = String((LIVE.calls||[]).length));
+  document.querySelectorAll('.navlink[data-view="bankers"] .count')
+    .forEach(e => e.textContent = String((LIVE.bankers||[]).length));
+
+  const set = (id, v) => { const e=document.getElementById(id); if(e && v!=null) e.textContent=v; };
+  set('tileCalls', s.nCalls); set('tileMean', s.meanTotal);
+  set('tileMedian', LIVE.groupMedian); set('tileReview', s.needsReview);
+
+  const cal = LIVE.calibration || {};
+  set('calQwk', cal.qwk != null ? Number(cal.qwk).toFixed(2) : '—');
+  set('calN', cal.nCalls); set('calDouble', cal.nDouble);
+  set('calFlagged', (cal.flagged || []).length);
+  const verdict = document.getElementById('calVerdict');
+  if (verdict) {
+    const flagged = (cal.flagged || []).map(id => byId[id] || id);
+    verdict.textContent = cal.pass
+      ? (flagged.length
+          ? `ההתאמה הכוללת עוברת את הסף, אך ${flagged.length===1?'ממד אחד ירד':'מספר ממדים ירדו'} מתחת ל-0.60: ${flagged.join(', ')}. אין לפרוס ${flagged.length===1?'אותו':'אותם'} ללא בקרה אנושית.`
+          : 'השופט האוטומטי תואם להערכה האנושית ברמה שמאפשרת שימוש, ואף ממד לא סומן כדורש בקרה אנושית.')
+      : 'ההתאמה הכוללת אינה עוברת את הסף. נדרשת בדיקה של המחוון או של ההערכות האנושיות לפני פריסה.';
+  }
+  // the review tile must reflect gate failures AND calibration flags honestly
+  const reviewFoot = document.querySelector('#tileReview')?.parentElement?.querySelector('.foot');
+  if (reviewFoot && s.needsReview === 0) reviewFoot.innerHTML = '<span class="badge quiet">אין ממצאים</span>';
+});
 
 /* ---------- theme toggle ---------- */
 document.getElementById('themeBtn').addEventListener('click',()=>{
