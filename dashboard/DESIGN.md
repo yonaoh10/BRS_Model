@@ -127,9 +127,48 @@ implemented yet.
 The server is intentionally not registered as a `callqa` subcommand, so the
 package the bank receives has no reference to it.
 
+## Independent review
+
+A parallel research pass (five research lenses, three independent design
+proposals, three judges, a synthesis and an adversarial critic) was run against
+this work rather than before it. It converged on the same six destinations and
+the same stdlib decision, explicitly rejecting FastAPI + uvicorn + sse-starlette
+(ten wheels replacing a server that already works), htmx (65KB, and adopting it
+means rewriting the working render path), Alpine (needs `unsafe-eval`) and
+Chart.js (208KB, canvas-only, invisible to CSS and screen readers, manual RTL
+axis work). Its verdict was BUILD_WITH_FIXES, and its three verified defects are
+fixed above.
+
+Useful things it established that are worth keeping in view:
+
+- A dashboard is a **single-screen** medium (Few): Overview must answer "is the
+  machine burning money, is anything running, did anything fail" with no
+  scrolling at 1366×768. Everything else is a drill-down.
+- **One filled orange button per screen.** Read-only screens (Calls, Bankers)
+  should have none at all — that absence is what makes the orange button on
+  Run, Cloud and Calibration mean something.
+- Carbon's productive type set is **14px base with fixed, non-fluid headings**
+  for operational UI; Hebrew takes the looser line-height of each pair.
+
 ## Still to build
 
-- Progress that streams while a batch runs, rather than a snapshot per load
-- The screen for starting and stopping the cloud machine from here, which is
-  why `--allow-actions` exists but does nothing yet
-- A designed empty state for day one, before any call exists
+Ordered by what actually blocks an operator, per the critique:
+
+1. **The cloud round trip is incomplete.** Starting a pod generates per-pod
+   secrets and prints shell exports the operator is expected to run by hand.
+   `RUNPOD_API_KEY` also has no path into a double-clicked launcher. Until this
+   is wired, the cloud buttons would fail with a raw English exception.
+2. **No safe first run.** `--mock` is exactly what a non-expert needs on day
+   one, and there is no way to enter it from the UI. The empty state should
+   offer a demo run.
+3. **Validation messages are English.** The intake screen promises plain
+   Hebrew ("row 7, banker_channel, must be L or R"); `ingestion.py` emits
+   English strings. Translating in the dashboard needs structured problem
+   codes rather than free text, so this is a small core change.
+4. **No re-run after a rubric or prompt change.** Scorecards carry
+   `prompt_sha256` precisely so stale calls can be found; nothing surfaces
+   "N calls were scored with an older prompt".
+5. **`watch` has no surface.** If an operator starts it from a terminal, the
+   dashboard cannot see it and the two will contend for the same locks.
+6. Progress that streams during a batch, rather than a snapshot per page load.
+7. A designed empty state for day one.
