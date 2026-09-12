@@ -113,7 +113,7 @@
   --shadow:    0 1px 3px rgb(28 25 23 / 0.08), 0 1px 2px rgb(28 25 23 / 0.04);
   --shadow-lg: 0 4px 16px rgb(28 25 23 / 0.10);
 
-  --focus-ring: 0 0 0 3px rgb(234 88 12 / 0.35);
+  --ring-color: #c2410c;  /* opaque: translucent measured 1.55:1 */
 }
 
 /* --- dark mode: re-stepped for the dark surface, not an automatic flip.
@@ -168,6 +168,7 @@
   --warning: #fbbf24; --warning-ink: #1c1917; --warning-tint: #2e2206;
   --danger:  #f87171; --danger-ink:  #1c1917; --danger-tint:  #2e1212;
   --info:    #60a5fa; --info-ink:    #1c1917; --info-tint:    #10213d;
+  --ring-color: #fb923c;
 }
 
 /* ==========================================================================

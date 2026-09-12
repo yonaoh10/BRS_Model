@@ -96,6 +96,20 @@ That last pair is the instructive one: the page *looked* correct, because the
 fallback made it look correct. The harness only found it once it failed on any
 page error and asserted that the detail drawer actually opens.
 
+An independent adversarial review then found three more in shipped code:
+
+- **Path traversal.** The `/reports/` guard was `str(target).startswith(str(root))`.
+  A string prefix also accepts a *sibling* directory — `reports_backup`,
+  `reports-old` — so files outside the reports tree were reachable. Now
+  `Path.is_relative_to`, with a test that creates such a sibling.
+- **Focus ring failed WCAG 1.4.11.** `rgb(234 88 12 / 0.35)` composites to
+  1.55:1 on the card and 1.60:1 on the dark card; 3:1 is required. The first
+  audit only asserted a ring *existed*. It now rejects translucent rings, and
+  the ring is opaque (`#c2410c` light, `#fb923c` dark).
+- **Unescaped interpolation.** The page built HTML from ASR-derived text with
+  `innerHTML` in 13 places, in a document that holds the session token and can
+  start GPUs. All data is escaped now.
+
 ## Running it
 
 ```bash

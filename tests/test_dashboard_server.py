@@ -159,6 +159,16 @@ def test_report_path_traversal_is_refused(live_server: str) -> None:
     assert _status(f"{live_server}/reports/../../../etc/passwd?t=test-token-value") == 404
 
 
+def test_sibling_directory_is_not_served(live_server: str, pipeline_output: Path) -> None:
+    """A string-prefix guard also accepts a SIBLING directory whose name merely
+    starts with the allowed one. reports_backup/ must not be reachable."""
+    sibling = pipeline_output / "reports_backup"
+    sibling.mkdir(exist_ok=True)
+    (sibling / "secret.html").write_text("<p>not for the browser</p>", encoding="utf-8")
+    assert _status(f"{live_server}/reports/../reports_backup/secret.html"
+                   f"?t=test-token-value") == 404
+
+
 def test_serves_generated_reports(live_server: str) -> None:
     assert _status(f"{live_server}/reports/index.html?t=test-token-value") == 200
 
