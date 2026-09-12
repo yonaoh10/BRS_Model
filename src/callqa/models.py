@@ -129,13 +129,36 @@ class DialogTurn(BaseModel):
     words: list[Word] = Field(default_factory=list)
 
 
+class RoleSignalRecord(BaseModel):
+    """One piece of evidence behind the banker/customer decision."""
+
+    name: str
+    weight: float
+    votes_for: int
+    detail: str
+
+
+class DiarizationQualityRecord(BaseModel):
+    """What the diarizer produced and what had to be cleaned up."""
+
+    speakers_found: int = 2
+    reassigned_sec: float = 0.0
+    words_attributed: int = 0
+    words_by_nearest: int = 0
+    smoothed_islands: int = 0
+
+
 class DialogTranscript(BaseModel):
     """Stage 4 (speakers) output: merged, time-ordered dialog. RAW text."""
 
     call_id: str
     attribution_mode: Literal["stereo", "mono_diarized", "mock"]
+    # 1.0 on a stereo recording, where the roles are known rather than
+    # inferred. On the mono path, 0.0 means the signals were split evenly.
     role_confidence: float = 1.0
     turns: list[DialogTurn]
+    role_signals: list[RoleSignalRecord] = Field(default_factory=list)
+    diarization: DiarizationQualityRecord | None = None
 
 
 class RedactedTurn(BaseModel):

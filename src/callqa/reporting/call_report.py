@@ -17,6 +17,26 @@ from callqa.reporting.common import (
 )
 from callqa.rubric import Rubric
 
+SIGNAL_NAMES_HE = {
+    "opening": "פתיחת השיחה",
+    "identity_request": "בקשת פרטי זיהוי",
+    "identity_supply": "מסירת פרטי זיהוי",
+    "question_rate": "שיעור השאלות",
+    "service_language": "שפת שירות",
+    "closing": "סגירת השיחה",
+    "first_speaker": "מי פתח את השיחה",
+}
+
+
+def _banker_index(dialog: DialogTranscript | None) -> int:
+    """Which speaker index ended up as the banker, read back off the votes."""
+    if not dialog or not dialog.role_signals:
+        return 0
+    tally: dict[int, float] = {}
+    for signal in dialog.role_signals:
+        tally[signal.votes_for] = tally.get(signal.votes_for, 0.0) + signal.weight
+    return max(tally, key=lambda k: tally[k]) if tally else 0
+
 
 def weakest_non_gate_dimension(rubric: Rubric, scorecard: ScoreCard) -> str | None:
     """The weakest non-gate dimension (lowest score; rubric order breaks ties)."""
@@ -42,6 +62,9 @@ def render_call_report(
         pick_recommendation(recommendations, weakest, scorecard.call_id) if weakest else None
     )
     by_id = rubric.by_id
+    # Signals are recorded as votes for a speaker index; the report needs them
+    # as votes for a role, so they can be read without the index.
+    banker_index = _banker_index(dialog)
     template = jinja_env().get_template("call_report.html.j2")
     return template.render(
         meta=meta,
@@ -57,4 +80,14 @@ def render_call_report(
         # one. A score built on an inferred split must say so on its face.
         attribution_mode=dialog.attribution_mode if dialog else None,
         role_confidence=dialog.role_confidence if dialog else None,
+        role_signals=[
+            {
+                "he": SIGNAL_NAMES_HE.get(s.name, s.name),
+                "weight": s.weight,
+                "role": "בנקאי" if s.votes_for == banker_index else "לקוח",
+                "agrees": s.votes_for == banker_index,
+            }
+            for s in (dialog.role_signals if dialog else [])
+        ],
+        diarization=dialog.diarization if dialog else None,
     )

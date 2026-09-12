@@ -35,8 +35,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ASR_MODEL_ID = "ivrit-ai/whisper-large-v3-turbo-ct2"  # Apache-2.0
-DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-3.1"  # GATED - accept terms on HF
-DIARIZATION_DEP_ID = "pyannote/segmentation-3.0"  # GATED - dependency of the above
+DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"  # CC-BY-4.0; accept terms on HF
 NER_MODEL_ID = "dicta-il/dictabert-ner"  # optional
 
 
@@ -54,6 +53,39 @@ def _snapshot(model_id: str, target: Path, token: str | None = None) -> tuple[st
     print(f"-> downloading {model_id} into {target} ...")
     path = snapshot_download(model_id, local_dir=target, token=token)
     return model_id, Path(path)
+
+
+def _warm_diarization_cache(model_id: str, token: str | None) -> Path | None:
+    """Instantiate the pipeline once so the whole dependency tree is cached.
+
+    A diarization pipeline is not one file: its config names a segmentation
+    model and an embedding model that are fetched separately. Downloading only
+    the pipeline repo leaves those missing, and the failure surfaces later on
+    the offline machine, which is the worst possible moment. Building the
+    pipeline here pulls everything into the Hugging Face cache, and that cache
+    directory is what gets copied to the air-gapped server.
+    """
+    try:
+        from pyannote.audio import Pipeline
+    except ImportError:
+        print("   note: pyannote.audio is not installed here, so only the pipeline")
+        print("         repo is fetched. Its segmentation and embedding models will")
+        print("         be downloaded on first use, which an offline machine cannot do.")
+        return None
+
+    print(f"-> building {model_id} once to cache its dependencies ...")
+    try:
+        Pipeline.from_pretrained(model_id, token=token)
+    except TypeError:
+        Pipeline.from_pretrained(model_id, use_auth_token=token)
+
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    cache = Path(HF_HUB_CACHE)
+    print(f"   cached under {cache}")
+    print("   copy that directory to the offline machine, point HF_HOME at it,")
+    print("   and set HF_HUB_OFFLINE=1")
+    return cache
 
 
 def _dir_size(path: Path) -> int:
@@ -130,14 +162,22 @@ def main() -> int:
         if args.all or args.diarization:
             if not token:
                 print("ERROR: --diarization requires the HF_TOKEN environment variable.")
-                print("The pyannote models are gated: accept their terms on huggingface.co")
+                print("Accept the model conditions once on huggingface.co:")
                 print(f"  {DIARIZATION_MODEL_ID}")
-                print(f"  {DIARIZATION_DEP_ID}")
                 return 1
-            for role, mid in (("diarization", DIARIZATION_MODEL_ID),
-                              ("diarization_dep", DIARIZATION_DEP_ID)):
-                model_id, path = _snapshot(mid, models_dir / mid.replace("/", "--"), token)
-                _record(models_dir, role, model_id, path)
+            model_id, path = _snapshot(
+                DIARIZATION_MODEL_ID, models_dir / DIARIZATION_MODEL_ID.replace("/", "--"), token
+            )
+            _record(models_dir, "diarization", model_id, path)
+            cache = _warm_diarization_cache(DIARIZATION_MODEL_ID, token)
+            if cache:
+                _update_manifest(models_dir, {
+                    "role": "diarization_cache",
+                    "model_id": DIARIZATION_MODEL_ID,
+                    "local_path": str(cache),
+                    "size_bytes": _dir_size(cache),
+                    "downloaded_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                })
 
         if args.all or args.llm:
             if not args.llm_model:

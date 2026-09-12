@@ -75,7 +75,16 @@ class ASRConfig(BaseModel):
 class SpeakersConfig(BaseModel):
     mode: Literal["auto", "stereo", "mono"] = "auto"
     banker_channel: Literal["L", "R", "from_metadata"] = "from_metadata"
-    pyannote_model: str = "pyannote/speaker-diarization-3.1"
+    # community-1 is the current pyannote open pipeline and roughly halves the
+    # two-speaker error rate of 3.1; a filesystem path loads a local pipeline
+    # config instead, for an air-gapped machine.
+    diarization_model: str = "pyannote/speaker-diarization-community-1"
+    num_speakers: int = 2          # 0 lets the model estimate the count
+    device: Literal["auto", "cpu", "cuda"] = "auto"
+    exclusive: bool = True         # one speaker per moment, for word alignment
+    # Below this, who-is-who was a near coin flip and the call is held for a
+    # human rather than reported as fact.
+    min_role_confidence: float = 0.34
 
 
 class RedactionConfig(BaseModel):
