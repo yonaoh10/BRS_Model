@@ -1,0 +1,829 @@
+<title>מרכז בקרת איכות שיחות</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ============================================================
+   Design tokens. Every contrast ratio below was computed, not
+   eyeballed. Orange is BRAND CHROME ONLY - never a status colour:
+   brand #ea580c vs warning #ca8a04 is ΔE 2.9 under deuteranopia.
+   Every status therefore carries an icon + label.
+   ============================================================ */
+:root{
+  color-scheme: light;
+  --brand-700:#c2410c;  /* fill w/ white text 5.18:1 */
+  --brand-800:#9a3412;  /* ink on white 7.31:1 */
+  --brand-600:#ea580c;  /* accent/borders 3.56:1 */
+  --brand-300:#fdba74;
+  --brand-50:#fff7ed;
+
+  --brand-ink:var(--brand-800);
+  --brand-primary:var(--brand-700);
+  --brand-accent:var(--brand-600);
+  --brand-tint:var(--brand-50);
+  --brand-edge:var(--brand-300);
+
+  /* warm stone neutrals, biased toward the accent - chosen, not default grey */
+  --page:#faf9f7; --card:#ffffff; --sunken:#f5f4f1;
+  --border:#e7e5e4; --border-strong:#d6d3d1;
+  --ink:#1c1917;      /* 17.5:1 */
+  --ink-2:#57534e;    /*  7.6:1 */
+  --ink-3:#6f6862;    /* 4.98:1 on the SUNKEN fill - the tightest surface,
+                         not just 5.48:1 on the card. Checked against all three. */
+
+  --ok:#047857;   --ok-ink:#ffffff;   --ok-tint:#ecfdf5;
+  --warn:#ca8a04; --warn-ink:#451a03; --warn-tint:#fefce8;  /* dark ink: white fails 2.94:1 */
+  --bad:#dc2626;  --bad-ink:#ffffff;  --bad-tint:#fef2f2;
+  --info:#1d4ed8; --info-tint:#eff6ff;
+
+  --font:"Heebo","Segoe UI","Arial Hebrew",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
+  --r-sm:6px; --r:10px; --r-lg:14px;
+  --shadow:0 1px 3px rgb(28 25 23/.07), 0 1px 2px rgb(28 25 23/.04);
+  --shadow-lg:0 8px 28px rgb(28 25 23/.12);
+  --ring:0 0 0 3px rgb(234 88 12/.35);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --page:#1c1917; --card:#292524; --sunken:#221f1d;
+    --border:#44403c; --border-strong:#57534e;
+    --ink:#fafaf9; --ink-2:#d6d3d1; --ink-3:#a8a29e;
+    --brand-ink:#fdba74; --brand-accent:#fb923c; --brand-tint:#2d1b10; --brand-edge:#7c2d12;
+    --ok:#34d399; --ok-ink:#1c1917; --ok-tint:#052e21;
+    --warn:#fbbf24; --warn-ink:#1c1917; --warn-tint:#2e2206;
+    --bad:#f87171; --bad-ink:#1c1917; --bad-tint:#2e1212;
+    --info:#60a5fa; --info-tint:#10213d;
+    --shadow:0 1px 3px rgb(0 0 0/.4);
+    --shadow-lg:0 8px 28px rgb(0 0 0/.55);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --page:#1c1917; --card:#292524; --sunken:#221f1d;
+  --border:#44403c; --border-strong:#57534e;
+  --ink:#fafaf9; --ink-2:#d6d3d1; --ink-3:#a8a29e;
+  --brand-ink:#fdba74; --brand-accent:#fb923c; --brand-tint:#2d1b10; --brand-edge:#7c2d12;
+  --ok:#34d399; --ok-ink:#1c1917; --ok-tint:#052e21;
+  --warn:#fbbf24; --warn-ink:#1c1917; --warn-tint:#2e2206;
+  --bad:#f87171; --bad-ink:#1c1917; --bad-tint:#2e1212;
+  --info:#60a5fa; --info-tint:#10213d;
+  --shadow:0 1px 3px rgb(0 0 0/.4);
+  --shadow-lg:0 8px 28px rgb(0 0 0/.55);
+}
+
+*{box-sizing:border-box}
+html{direction:rtl}
+body{
+  margin:0; background:var(--page); color:var(--ink);
+  font-family:var(--font); font-size:15px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+/* Latin ids, numbers, hashes must stay LTR inside Hebrew or bidi reverses them */
+.ltr{direction:ltr; unicode-bidi:isolate; font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono); direction:ltr; unicode-bidi:isolate; font-size:.86em}
+.num{font-variant-numeric:tabular-nums}
+:focus-visible{outline:none; box-shadow:var(--ring); border-radius:var(--r-sm)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+
+/* ---------- app frame ---------- */
+.masthead{
+  background:var(--card); border-block-end:1px solid var(--border);
+  padding:var(--s3) var(--s5); display:flex; align-items:center; gap:var(--s4);
+  position:sticky; top:0; z-index:20;
+}
+.brandmark{display:flex; align-items:center; gap:var(--s3); min-width:0}
+.brandmark .glyph{
+  width:30px; height:30px; border-radius:8px; flex:none;
+  background:var(--brand-primary); color:#fff;
+  display:grid; place-items:center; font-weight:700; font-size:15px;
+}
+.brandmark h1{margin:0; font-size:17px; font-weight:700; letter-spacing:-.01em; white-space:nowrap}
+.masthead .spacer{flex:1}
+.iconbtn{
+  border:1px solid var(--border); background:var(--card); color:var(--ink-2);
+  width:34px; height:34px; border-radius:var(--r-sm); cursor:pointer; font-size:15px;
+  display:grid; place-items:center;
+}
+.iconbtn:hover{background:var(--sunken); color:var(--ink)}
+
+/* ---------- the state strip: what costs money lives here, always visible ---------- */
+.statestrip{
+  display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:1px;
+  background:var(--border); border-block-end:1px solid var(--border);
+  position:sticky; top:57px; z-index:19;   /* sits under the masthead */
+}
+.statecell{background:var(--card); padding:var(--s3) var(--s5); display:flex; align-items:center; gap:var(--s3)}
+.statecell .lab{font-size:12px; color:var(--ink-3); margin-block-end:2px}
+.statecell .val{font-weight:500; font-size:14px; display:flex; align-items:center; gap:6px}
+.statecell .grow{flex:1; min-width:0}
+.meter{
+  margin-inline-start:auto; text-align:start; padding-inline-start:var(--s4);
+  border-inline-start:1px solid var(--border);
+}
+.meter .amt{font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.2}
+.meter .sub{font-size:11px; color:var(--ink-3)}
+
+/* ---------- status: colour ALWAYS paired with an icon + word ---------- */
+.pip{width:9px; height:9px; border-radius:50%; flex:none; box-shadow:0 0 0 3px var(--pip-halo,transparent)}
+.pip.ok{background:var(--ok); --pip-halo:color-mix(in srgb,var(--ok) 18%,transparent)}
+.pip.warn{background:var(--warn); --pip-halo:color-mix(in srgb,var(--warn) 18%,transparent)}
+.pip.bad{background:var(--bad); --pip-halo:color-mix(in srgb,var(--bad) 18%,transparent)}
+.pip.off{background:var(--ink-3)}
+.pip.live{animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.45}}
+
+.badge{
+  display:inline-flex; align-items:center; gap:5px; padding:2px 9px;
+  border-radius:999px; font-size:12px; font-weight:500; white-space:nowrap;
+}
+.badge.ok{background:var(--ok); color:var(--ok-ink)}
+.badge.warn{background:var(--warn); color:var(--warn-ink)}
+.badge.bad{background:var(--bad); color:var(--bad-ink)}
+.badge.quiet{background:var(--sunken); color:var(--ink-2); border:1px solid var(--border)}
+
+/* ---------- buttons ---------- */
+.btn{
+  font-family:inherit; font-size:14px; font-weight:500; cursor:pointer;
+  border-radius:var(--r-sm); padding:9px var(--s4); border:1px solid transparent;
+  display:inline-flex; align-items:center; gap:7px; line-height:1;
+}
+.btn-primary{background:var(--brand-primary); color:#fff}       /* 5.18:1 */
+.btn-primary:hover{background:var(--brand-800)}
+.btn-ghost{background:var(--card); border-color:var(--border-strong); color:var(--ink)}
+.btn-ghost:hover{background:var(--sunken)}
+.btn-danger{background:var(--bad); color:var(--bad-ink)}
+.btn-sm{padding:6px 11px; font-size:13px}
+
+/* ---------- body: nav rail (right, RTL) + content ---------- */
+.shell{display:grid; grid-template-columns:210px 1fr; gap:0; align-items:start}
+/* Grid items must be allowed to shrink or their content sets the page width. */
+.shell > *{min-width:0}
+.rail{
+  position:sticky; top:130px; padding:var(--s4) var(--s3);
+  border-inline-start:1px solid var(--border); min-height:calc(100vh - 130px);
+}
+.rail nav{display:flex; flex-direction:column; gap:2px}
+.navlink{
+  display:flex; align-items:center; gap:var(--s3); padding:9px var(--s3);
+  border-radius:var(--r-sm); color:var(--ink-2); text-decoration:none;
+  font-size:14px; font-weight:500; cursor:pointer; border:none; background:none;
+  font-family:inherit; text-align:start; width:100%;
+}
+.navlink:hover{background:var(--sunken); color:var(--ink)}
+.navlink[aria-current="page"]{background:var(--brand-tint); color:var(--brand-ink); font-weight:700}
+.navlink .ico{width:17px; text-align:center; flex:none}
+.navlink .count{
+  margin-inline-start:auto; font-size:11px; padding:1px 7px; border-radius:999px;
+  background:var(--sunken); color:var(--ink-3); font-variant-numeric:tabular-nums;
+}
+.navlink[aria-current="page"] .count{background:var(--card); color:var(--brand-ink)}
+.railnote{
+  margin-block-start:var(--s5); padding:var(--s3); border-radius:var(--r-sm);
+  background:var(--sunken); font-size:11.5px; color:var(--ink-3); line-height:1.5;
+}
+
+.main{padding:var(--s5); max-width:1080px}
+.view[hidden]{display:none}
+.viewhead{margin-block-end:var(--s5)}
+.viewhead h2{margin:0 0 3px; font-size:21px; font-weight:700; letter-spacing:-.015em}
+.viewhead p{margin:0; color:var(--ink-3); font-size:14px}
+
+/* ---------- next-action: the single guided element ---------- */
+.nextstep{
+  display:flex; align-items:center; gap:var(--s4); padding:var(--s4) var(--s5);
+  background:var(--brand-tint); border:1px solid var(--brand-edge);
+  border-radius:var(--r); margin-block-end:var(--s5);
+}
+.nextstep .step-n{
+  width:34px; height:34px; border-radius:50%; flex:none; display:grid; place-items:center;
+  background:var(--warn); color:var(--warn-ink); font-weight:700; font-size:16px;
+}
+.nextstep .txt{flex:1; min-width:0}
+.nextstep .txt strong{display:block; font-size:15px; color:var(--brand-ink)}
+.nextstep .txt span{font-size:13px; color:var(--ink-2)}
+
+/* ---------- tiles: only three, and only because these three drive decisions ---------- */
+.tiles{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--s4); margin-block-end:var(--s5)}
+.tile{
+  background:var(--card); border:1px solid var(--border); border-radius:var(--r);
+  padding:var(--s4) var(--s5); box-shadow:var(--shadow);
+}
+.tile .lab{font-size:12.5px; color:var(--ink-3); margin-block-end:var(--s2)}
+.tile .fig{font-size:31px; font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+.tile .fig small{font-size:15px; font-weight:500; color:var(--ink-3)}
+.tile .foot{margin-block-start:var(--s2); font-size:12.5px; color:var(--ink-2); display:flex; align-items:center; gap:5px}
+
+/* ---------- panels ---------- */
+.panel{
+  background:var(--card); border:1px solid var(--border); border-radius:var(--r);
+  box-shadow:var(--shadow); margin-block-end:var(--s5); overflow:hidden;
+}
+.panel > header{
+  padding:var(--s4) var(--s5); border-block-end:1px solid var(--border);
+  display:flex; align-items:center; gap:var(--s3);
+}
+.panel > header h3{margin:0; font-size:15px; font-weight:700}
+.panel > header .sub{font-size:12.5px; color:var(--ink-3)}
+.panel > header .right{margin-inline-start:auto; display:flex; gap:var(--s2); align-items:center}
+.panel .body{padding:var(--s5)}
+
+/* ---------- dimension bars: one chart, single series, brand accent ---------- */
+.dims{display:flex; flex-direction:column; gap:var(--s3)}
+.dimrow{display:grid; grid-template-columns:150px 1fr 58px; align-items:center; gap:var(--s3)}
+.dimrow .name{font-size:13.5px; color:var(--ink-2); display:flex; align-items:center; gap:5px}
+.dimrow .gatemark{font-size:10px; padding:0 5px; border-radius:3px; background:var(--sunken); color:var(--ink-3); border:1px solid var(--border)}
+.track{height:12px; background:var(--sunken); border-radius:4px; position:relative; overflow:hidden}
+.fill{height:100%; background:var(--brand-accent); border-radius:0 4px 4px 0}
+.fill.low{background:var(--warn)}
+.median{position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--ink); opacity:.55}
+.dimrow .v{font-size:13.5px; font-weight:500; font-variant-numeric:tabular-nums; text-align:start}
+.charthint{margin-block-start:var(--s4); font-size:12px; color:var(--ink-3); display:flex; align-items:center; gap:var(--s4); flex-wrap:wrap}
+.charthint i{display:inline-block; width:14px; height:8px; border-radius:2px; vertical-align:middle; margin-inline-end:5px}
+
+/* ---------- table ---------- */
+.tablewrap{overflow-x:auto}
+table{width:100%; border-collapse:collapse; font-size:14px}
+thead th{
+  text-align:start; font-size:12px; font-weight:500; color:var(--ink-3);
+  padding:var(--s3) var(--s5); border-block-end:1px solid var(--border); white-space:nowrap;
+}
+tbody td{padding:var(--s3) var(--s5); border-block-end:1px solid var(--border)}
+tbody tr:last-child td{border-block-end:none}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--brand-tint)}
+tbody tr:focus-visible{background:var(--brand-tint); outline:none; box-shadow:inset var(--ring)}
+.score{font-weight:700; font-variant-numeric:tabular-nums}
+
+/* ---------- detail drawer ---------- */
+.scrim{position:fixed; inset:0; background:rgb(28 25 23/.35); z-index:40}
+.scrim[hidden]{display:none}
+.drawer{
+  position:fixed; inset-block:0; inset-inline-start:0; width:min(460px,92vw); z-index:41;
+  background:var(--card); border-inline-end:1px solid var(--border);
+  box-shadow:var(--shadow-lg); display:flex; flex-direction:column;
+}
+.drawer[hidden]{display:none}
+.drawer > header{padding:var(--s4) var(--s5); border-block-end:1px solid var(--border); display:flex; align-items:center; gap:var(--s3)}
+.drawer > header h3{margin:0; font-size:16px; font-weight:700}
+.drawer .scroll{overflow-y:auto; padding:var(--s5); flex:1}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:var(--s2) var(--s4); font-size:13.5px; margin-block-end:var(--s5)}
+.kv dt{color:var(--ink-3)}
+.kv dd{margin:0; font-weight:500}
+.quote{
+  background:var(--sunken); border-inline-start:3px solid var(--brand-edge);
+  border-radius:0 var(--r-sm) var(--r-sm) 0; padding:var(--s3) var(--s4);
+  font-size:13.5px; margin-block-end:var(--s3);
+}
+.quote .meta{font-size:11.5px; color:var(--ink-3); margin-block-end:3px}
+.dimline{display:flex; align-items:center; gap:var(--s3); padding:var(--s2) 0; border-block-end:1px solid var(--border); font-size:13.5px}
+.dimline:last-child{border:none}
+.dimline .n{flex:1}
+.dimline .s{font-weight:700; font-variant-numeric:tabular-nums}
+
+/* ---------- live run progress ---------- */
+.runrow{display:grid; grid-template-columns:104px 1fr 92px; align-items:center; gap:var(--s3); padding:var(--s3) 0; border-block-end:1px solid var(--border)}
+.runrow:last-child{border:none}
+.stages{display:flex; gap:3px}
+.stage{flex:1; height:7px; border-radius:2px; background:var(--sunken)}
+.stage.done{background:var(--ok)}
+.stage.active{background:var(--brand-accent); animation:breathe 1.4s ease-in-out infinite}
+.stage.fail{background:var(--bad)}
+.runrow .st{font-size:12.5px; color:var(--ink-2); text-align:start}
+
+/* ---------- intake: the screen the operator starts every batch from ---------- */
+.dropzone{
+  border:2px dashed var(--border-strong); border-radius:var(--r-lg);
+  padding:var(--s6) var(--s5); text-align:center; background:var(--sunken);
+}
+.dropzone.hot{border-color:var(--brand-accent); background:var(--brand-tint)}
+.dropzone .mark{font-size:26px; color:var(--ink-3); margin-block-end:var(--s2)}
+.dropzone h4{margin:0 0 var(--s1); font-size:15px; font-weight:700}
+.dropzone p{margin:0 0 var(--s4); font-size:13px; color:var(--ink-3)}
+.filelist{display:flex; flex-direction:column}
+.filerow{
+  display:grid; grid-template-columns:1fr auto auto; gap:var(--s3);
+  align-items:center; padding:var(--s3) var(--s5); border-block-end:1px solid var(--border);
+}
+.filerow:last-child{border-block-end:none}
+.filerow .fname{display:flex; align-items:center; gap:var(--s2); min-width:0}
+.filerow .fmeta{font-size:12.5px; color:var(--ink-3)}
+.problem{
+  display:flex; gap:var(--s3); align-items:flex-start; padding:var(--s3) var(--s4);
+  background:var(--warn-tint); border:1px solid var(--warn); border-radius:var(--r-sm);
+  font-size:13.5px; margin-block-end:var(--s3);
+}
+.problem .mark{color:var(--warn-ink); font-weight:700; flex:none}
+.checklist{display:flex; flex-direction:column; gap:var(--s2); font-size:13.5px}
+.checkitem{display:flex; align-items:center; gap:var(--s3)}
+.checkitem .box{
+  width:19px; height:19px; border-radius:5px; flex:none; display:grid; place-items:center;
+  font-size:11px; border:1px solid var(--border-strong); background:var(--card); color:var(--ink-3);
+}
+.checkitem.done .box{background:var(--ok); border-color:var(--ok); color:var(--ok-ink)}
+.checkitem.done .t{color:var(--ink-2)}
+.checkitem:not(.done) .t{font-weight:500}
+
+.empty{text-align:center; padding:var(--s7) var(--s5); color:var(--ink-3)}
+.empty .big{font-size:30px; margin-block-end:var(--s3)}
+
+@media (max-width:820px){
+  .shell{grid-template-columns:1fr}
+  .rail{position:static; min-height:0; border-inline-start:none; border-block-end:1px solid var(--border)}
+  .rail nav{flex-direction:row; overflow-x:auto; min-width:0; scrollbar-width:thin;
+            padding-block-end:2px; -webkit-overflow-scrolling:touch}
+  .navlink{white-space:nowrap; width:auto; flex:0 0 auto}
+  .railnote{display:none}
+  .statestrip{grid-template-columns:1fr}
+  .tiles{grid-template-columns:1fr}
+  .dimrow{grid-template-columns:110px 1fr 46px}
+  .main{padding:var(--s4)}
+}
+</style>
+
+<header class="masthead">
+  <div class="brandmark">
+    <div class="glyph" aria-hidden="true">ב</div>
+    <h1>מרכז בקרת איכות שיחות</h1>
+  </div>
+  <div class="spacer"></div>
+  <button class="iconbtn" id="themeBtn" title="החלפת ערכת צבעים" aria-label="החלפת ערכת צבעים">◐</button>
+</header>
+
+<!-- The strip that carries anything which costs money or can silently break. -->
+<div class="statestrip">
+  <div class="statecell">
+    <span class="pip ok live" id="gpuPip" aria-hidden="true"></span>
+    <div class="grow">
+      <div class="lab">מכונת עיבוד בענן</div>
+      <div class="val" id="gpuText">פועלת · <span class="ltr">RTX 4090</span></div>
+    </div>
+    <div class="meter">
+      <div class="amt"><span class="ltr">$0.42</span></div>
+      <div class="sub">‏1 שעה ו-14 דקות</div>
+    </div>
+    <button class="btn btn-danger btn-sm" id="stopGpu" style="margin-inline-start:var(--s4)">הפסקת המכונה</button>
+  </div>
+  <div class="statecell">
+    <span class="pip ok" aria-hidden="true"></span>
+    <div class="grow">
+      <div class="lab">שירות תמלול</div>
+      <div class="val">זמין <span class="badge quiet mono">ivrit-ai</span></div>
+    </div>
+  </div>
+  <div class="statecell">
+    <span class="pip ok" aria-hidden="true"></span>
+    <div class="grow">
+      <div class="lab">מודל השיפוט</div>
+      <div class="val">זמין <span class="badge quiet mono">dictalm2.0</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="shell">
+  <aside class="rail">
+    <nav aria-label="ניווט ראשי">
+      <button class="navlink" data-view="overview" aria-current="page"><span class="ico" aria-hidden="true">▣</span>סקירה</button>
+      <button class="navlink" data-view="intake"><span class="ico" aria-hidden="true">＋</span>הוספת שיחות</button>
+      <button class="navlink" data-view="calls"><span class="ico" aria-hidden="true">☰</span>שיחות<span class="count num">6</span></button>
+      <button class="navlink" data-view="bankers"><span class="ico" aria-hidden="true">◑</span>בנקאים<span class="count num">3</span></button>
+      <button class="navlink" data-view="calibration"><span class="ico" aria-hidden="true">◎</span>כיול</button>
+      <button class="navlink" data-view="system"><span class="ico" aria-hidden="true">⚙</span>מערכת</button>
+    </nav>
+    <div class="railnote">
+      המכונה בענן מחויבת לפי שנייה כל עוד היא פועלת. הפסיקו אותה בסיום העבודה.
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- ============ OVERVIEW ============ -->
+    <section class="view" id="view-overview">
+      <div class="viewhead">
+        <h2>סקירה</h2>
+        <p>מצב העיבוד והממצאים המרכזיים מ-6 השיחות שנותחו.</p>
+      </div>
+
+      <div class="nextstep">
+        <div class="step-n" aria-hidden="true">⚠</div>
+        <div class="txt">
+          <strong>שתי שיחות נכשלו בממד שער וממתינות לבדיקה</strong>
+          <span>ציון השער "זיהוי ואימות לקוח" ירד ל-2 ומטה, ולכן הציון הכולל הוגבל ל-59.</span>
+        </div>
+        <button class="btn btn-primary" data-goto="calls">מעבר לשיחות</button>
+      </div>
+
+      <div class="tiles">
+        <div class="tile">
+          <div class="lab">שיחות שנותחו</div>
+          <div class="fig num">6</div>
+          <div class="foot">הושלמו ללא שגיאה</div>
+        </div>
+        <div class="tile">
+          <div class="lab">ציון ממוצע</div>
+          <div class="fig num">58.3<small> / 100</small></div>
+          <div class="foot"><span class="pip off" aria-hidden="true"></span>חציון קבוצתי <span class="num">58.1</span></div>
+        </div>
+        <div class="tile">
+          <div class="lab">דורשות בדיקה</div>
+          <div class="fig num">2</div>
+          <div class="foot"><span class="badge warn">⚠ חריגת שער</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <header>
+          <h3>ציון ממוצע לפי ממד</h3>
+          <span class="sub">סולם 1–5 · הרוחב משקף את תרומת הממד לציון</span>
+        </header>
+        <div class="body">
+          <div class="dims" id="dimChart"></div>
+          <div class="charthint">
+            <span><i style="background:var(--brand-accent)"></i>ממוצע הממד</span>
+            <span><i style="background:var(--warn)"></i>מתחת לסף — דורש טיפול</span>
+            <span>⚑ ממד שער: ציון 2 ומטה מגביל את הציון הכולל</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <header>
+          <h3>שיחות אחרונות</h3>
+          <span class="sub">לחיצה על שורה פותחת את פירוט השיחה</span>
+          <div class="right"><button class="btn btn-ghost btn-sm" data-goto="calls">הצגת הכול</button></div>
+        </header>
+        <div class="tablewrap"><table id="recentTable">
+          <thead><tr>
+            <th>שיחה</th><th>בנקאי</th><th>ציון</th><th>שער</th><th>תאריך</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ============ INTAKE ============ -->
+    <section class="view" id="view-intake" hidden>
+      <div class="viewhead">
+        <h2>הוספת שיחות</h2>
+        <p>בחרו הקלטות, ודאו שהפרטים תקינים, והתחילו עיבוד.</p>
+      </div>
+
+      <div class="panel">
+        <header><h3>1 · בחירת הקלטות</h3><span class="sub">קבצי <span class="ltr">WAV</span> או <span class="ltr">MP3</span></span></header>
+        <div class="body">
+          <div class="dropzone" id="dropzone">
+            <div class="mark" aria-hidden="true">↑</div>
+            <h4>גררו לכאן הקלטות</h4>
+            <p>או בחרו קבצים מהמחשב. הקלטות סטריאו מזוהות אוטומטית לפי ערוץ.</p>
+            <button class="btn btn-ghost" id="pickFiles">בחירת קבצים</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <header>
+          <h3>2 · בדיקת הפרטים</h3>
+          <span class="sub"><span class="num">3</span> קבצים נבחרו</span>
+          <div class="right"><span class="badge warn">⚠ בעיה אחת</span></div>
+        </header>
+        <div class="body" style="padding-block-end:0">
+          <div class="problem">
+            <span class="mark" aria-hidden="true">⚠</span>
+            <div>
+              <strong>חסר מזהה בנקאי עבור <span class="mono">CALL009</span></strong><br>
+              בלי מזהה בנקאי השיחה תעובד אך לא תיכלל בדוח הבנקאי. אפשר להוסיף אותו בקובץ
+              <span class="mono">metadata.csv</span> או לבחור מהרשימה.
+            </div>
+          </div>
+        </div>
+        <div class="filelist">
+          <div class="filerow">
+            <div class="fname"><span class="badge quiet">✓</span><span class="mono">CALL007.wav</span></div>
+            <div class="fmeta">סטריאו · <span class="num">4:12</span> · בנקאי <span class="ltr">B001</span></div>
+            <div><button class="btn btn-ghost btn-sm">הסרה</button></div>
+          </div>
+          <div class="filerow">
+            <div class="fname"><span class="badge quiet">✓</span><span class="mono">CALL008.wav</span></div>
+            <div class="fmeta">סטריאו · <span class="num">6:48</span> · בנקאי <span class="ltr">B002</span></div>
+            <div><button class="btn btn-ghost btn-sm">הסרה</button></div>
+          </div>
+          <div class="filerow">
+            <div class="fname"><span class="badge warn">⚠</span><span class="mono">CALL009.wav</span></div>
+            <div class="fmeta">מונו · <span class="num">3:05</span> · בנקאי חסר</div>
+            <div><button class="btn btn-ghost btn-sm">הסרה</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <header><h3>3 · לפני ההתחלה</h3></header>
+        <div class="body">
+          <div class="checklist">
+            <div class="checkitem done"><span class="box" aria-hidden="true">✓</span><span class="t">מכונת העיבוד פועלת</span></div>
+            <div class="checkitem done"><span class="box" aria-hidden="true">✓</span><span class="t">שירות התמלול ומודל השיפוט זמינים</span></div>
+            <div class="checkitem done"><span class="box" aria-hidden="true">✓</span><span class="t">הסרת פרטים מזהים פעילה</span></div>
+            <div class="checkitem"><span class="box" aria-hidden="true"></span><span class="t">הקלטה אחת ללא מזהה בנקאי</span></div>
+          </div>
+          <div style="display:flex; gap:var(--s3); align-items:center; margin-block-start:var(--s5)">
+            <button class="btn btn-primary">התחלת עיבוד של 3 שיחות</button>
+            <span style="font-size:12.5px; color:var(--ink-3)">זמן משוער <span class="num">4</span> דקות · עלות משוערת <span class="ltr">$0.03</span></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CALLS ============ -->
+    <section class="view" id="view-calls" hidden>
+      <div class="viewhead">
+        <h2>שיחות</h2>
+        <p>כל השיחות שעובדו, עם מצב העיבוד והציון.</p>
+      </div>
+
+      <div class="panel">
+        <header>
+          <h3>עיבוד פעיל</h3>
+          <span class="sub">שלב 6 מתוך 8</span>
+          <div class="right"><span class="badge ok">● פועל</span></div>
+        </header>
+        <div class="body" id="runList"></div>
+      </div>
+
+      <div class="panel">
+        <header>
+          <h3>כל השיחות</h3>
+          <span class="sub"><span class="num">6</span> שיחות</span>
+        </header>
+        <div class="tablewrap"><table id="allTable">
+          <thead><tr>
+            <th>שיחה</th><th>בנקאי</th><th>ציון</th><th>שער</th><th>מצב</th><th>תאריך</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ============ BANKERS ============ -->
+    <section class="view" id="view-bankers" hidden>
+      <div class="viewhead">
+        <h2>בנקאים</h2>
+        <p>השוואה בין בנקאים לחציון הקבוצתי.</p>
+      </div>
+      <div class="panel">
+        <header><h3>ציון ממוצע לבנקאי</h3><span class="sub">הקו האנכי מסמן את החציון הקבוצתי</span></header>
+        <div class="body"><div class="dims" id="bankerChart"></div></div>
+      </div>
+    </section>
+
+    <!-- ============ CALIBRATION ============ -->
+    <section class="view" id="view-calibration" hidden>
+      <div class="viewhead">
+        <h2>כיול</h2>
+        <p>מידת ההתאמה בין השופט האוטומטי להערכה אנושית.</p>
+      </div>
+      <div class="tiles">
+        <div class="tile">
+          <div class="lab">‏QWK כולל</div>
+          <div class="fig num">0.83</div>
+          <div class="foot"><span class="badge ok">✓ עובר</span> הסף הוא <span class="num">0.70</span></div>
+        </div>
+        <div class="tile">
+          <div class="lab">שיחות בכיול</div>
+          <div class="fig num">6</div>
+          <div class="foot">מתוכן <span class="num">3</span> עם שני מעריכים</div>
+        </div>
+        <div class="tile">
+          <div class="lab">ממדים מסומנים</div>
+          <div class="fig num">0</div>
+          <div class="foot">אף ממד לא ירד מתחת ל-<span class="num">0.60</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <header><h3>מסקנה</h3></header>
+        <div class="body" style="color:var(--ink-2); font-size:14px">
+          השופט האוטומטי תואם להערכה האנושית ברמה שמאפשרת שימוש. כל ממד נבדק בנפרד,
+          ואף אחד מהם לא סומן כדורש בקרה אנושית.
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SYSTEM ============ -->
+    <section class="view" id="view-system" hidden>
+      <div class="viewhead">
+        <h2>מערכת</h2>
+        <p>מצב הרכיבים ופרטי הביקורת של ההרצה האחרונה.</p>
+      </div>
+      <div class="panel">
+        <header><h3>רכיבים</h3></header>
+        <div class="tablewrap"><table>
+          <thead><tr><th>רכיב</th><th>מצב</th><th>פרטים</th></tr></thead>
+          <tbody>
+            <tr><td>מכונת GPU</td><td><span class="badge ok">✓ פועלת</span></td><td class="mono">RTX 4090 · 24GB</td></tr>
+            <tr><td>שירות תמלול</td><td><span class="badge ok">✓ זמין</span></td><td class="mono">ivrit-ai/whisper-large-v3-turbo-ct2</td></tr>
+            <tr><td>מודל שיפוט</td><td><span class="badge ok">✓ זמין</span></td><td class="mono">dicta-il/dictalm2.0-instruct</td></tr>
+            <tr><td>הסרת פרטים מזהים</td><td><span class="badge ok">✓ פעיל</span></td><td>מקומי, לפני שליחה לשיפוט</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <header><h3>ביקורת ההרצה האחרונה</h3><span class="sub">נשמר עם כל ציון</span></header>
+        <div class="body">
+          <dl class="kv">
+            <dt>גרסת מחוון</dt><dd class="mono">1.0.0</dd>
+            <dt>חתימת פרומפט</dt><dd class="mono">117b9d6006d83061</dd>
+            <dt>טמפרטורה</dt><dd class="num">0.0</dd>
+            <dt>הרצה אחרונה</dt><dd class="ltr">2026-09-11 23:14</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+  <header>
+    <h3 id="drawerTitle">שיחה</h3>
+    <div style="margin-inline-start:auto; display:flex; gap:var(--s2)">
+      <button class="btn btn-ghost btn-sm" id="closeDrawer">סגירה</button>
+    </div>
+  </header>
+  <div class="scroll" id="drawerBody"></div>
+</aside>
+
+<script>
+// Real figures produced by this pipeline's own mock run - not placeholders.
+const DIMS = [
+  {id:'identification', he:'זיהוי ואימות לקוח',  avg:2.83, gate:true},
+  {id:'compliance',     he:'ציות וגילוי נאות',   avg:3.00, gate:true},
+  {id:'empathy',        he:'אמפתיה ושותפות',     avg:3.83, gate:false},
+  {id:'listening',      he:'הקשבה פעילה',        avg:3.67, gate:false},
+  {id:'clarity',        he:'מתן מידע ובהירות',   avg:3.50, gate:false},
+  {id:'resolution',     he:'פתרון הפנייה',       avg:3.33, gate:false},
+  {id:'suitability',    he:'התאמת המענה לצורך',  avg:3.33, gate:false},
+  {id:'closure',        he:'סגירה והצעד הבא',    avg:3.17, gate:false},
+];
+const CALLS = [
+  {id:'CALL006', banker:'B003', total:72.5, gate:false, date:'2026-08-12', status:'הושלם'},
+  {id:'CALL001', banker:'B001', total:62.5, gate:false, date:'2026-08-01', status:'הושלם'},
+  {id:'CALL004', banker:'B002', total:61.2, gate:false, date:'2026-08-08', status:'הושלם'},
+  {id:'CALL002', banker:'B001', total:55.0, gate:false, date:'2026-08-03', status:'הושלם'},
+  {id:'CALL003', banker:'B002', total:53.8, gate:true,  date:'2026-08-05', status:'דורש בדיקה'},
+  {id:'CALL005', banker:'B003', total:45.0, gate:true,  date:'2026-08-10', status:'דורש בדיקה'},
+];
+const BANKERS = [{id:'B001',mean:58.8,n:2},{id:'B002',mean:57.5,n:2},{id:'B003',mean:58.8,n:2}];
+const GROUP_MEDIAN = 58.1;
+const STAGES = ['קליטה','אודיו','תמלול','דוברים','הסרת מזהים','מדדים','שיפוט','דוח'];
+
+const DETAIL = {
+  CALL003:{
+    scores:{identification:2,compliance:3,empathy:4,listening:4,clarity:5,resolution:2,suitability:4,closure:2},
+    summary:'שיחה עניינית; הבנקאי טיפל בפניית הלקוח בהתאם לנהלים, עם נקודות לשיפור.',
+    evidence:[{t:'00:24',sp:'בנקאי',q:'בשמחה אבדוק. לפני כן אני צריך לזהות אותך, מה מספר תעודת הזהות שלך?'},
+              {t:'00:50',sp:'בנקאי',q:'בכיף, שיהיה לך יום נעים ותודה שפנית אלינו.'}],
+    rec:'פתח כל שיחה בבקשת שני פרטים מזהים לפחות, ואמור במפורש "הזיהוי הושלם" לפני מסירת מידע על החשבון.'
+  }
+};
+const byId = Object.fromEntries(DIMS.map(d=>[d.id,d.he]));
+
+/* ---------- render: dimension bars ---------- */
+document.getElementById('dimChart').innerHTML = DIMS.map(d=>{
+  const pct = ((d.avg-1)/4*100).toFixed(1); // matches the scoring formula
+  const low = d.avg < 3.2;
+  return `<div class="dimrow">
+    <div class="name">${d.he}${d.gate?'<span class="gatemark" title="ממד שער">⚑ שער</span>':''}</div>
+    <div class="track"><div class="fill${low?' low':''}" style="width:${pct}%"></div></div>
+    <div class="v num">${d.avg.toFixed(2)}</div>
+  </div>`;
+}).join('');
+
+/* ---------- render: banker bars with a group-median marker ---------- */
+document.getElementById('bankerChart').innerHTML = BANKERS.map(b=>{
+  const pct=(b.mean/100*100).toFixed(1), med=(GROUP_MEDIAN).toFixed(1);
+  return `<div class="dimrow">
+    <div class="name"><span class="ltr">${b.id}</span> · <span class="num">${b.n}</span> שיחות</div>
+    <div class="track"><div class="fill" style="width:${pct}%"></div>
+      <div class="median" style="inset-inline-start:${med}%" title="חציון קבוצתי"></div></div>
+    <div class="v num">${b.mean.toFixed(1)}</div>
+  </div>`;
+}).join('');
+
+/* ---------- render: tables ---------- */
+function gateBadge(g){ return g ? '<span class="badge warn">⚠ חריגה</span>' : '<span class="badge quiet">✓ תקין</span>'; }
+function rowHTML(c, withStatus){
+  return `<tr tabindex="0" data-call="${c.id}">
+    <td><span class="mono">${c.id}</span></td>
+    <td><span class="ltr">${c.banker}</span></td>
+    <td class="score num">${c.total.toFixed(1)}</td>
+    <td>${gateBadge(c.gate)}</td>
+    ${withStatus?`<td>${c.status==='דורש בדיקה'?'<span class="badge warn">⚠ דורש בדיקה</span>':'<span class="badge quiet">הושלם</span>'}</td>`:''}
+    <td><span class="ltr">${c.date}</span></td>
+  </tr>`;
+}
+document.querySelector('#recentTable tbody').innerHTML = CALLS.slice(0,4).map(c=>rowHTML(c,false)).join('');
+document.querySelector('#allTable tbody').innerHTML  = CALLS.map(c=>rowHTML(c,true)).join('');
+
+/* ---------- render: live run ---------- */
+document.getElementById('runList').innerHTML = [
+  {id:'CALL007', done:8, state:'הושלם'},
+  {id:'CALL008', done:6, state:'שיפוט'},
+  {id:'CALL009', done:0, state:'ממתין'},
+].map(r=>`<div class="runrow">
+  <div><span class="mono">${r.id}</span></div>
+  <div class="stages">${STAGES.map((s,i)=>{
+     const cls = i<r.done ? 'done' : (i===r.done && r.done>0 && r.done<8 ? 'active' : '');
+     return `<div class="stage ${cls}" title="${s}"></div>`;}).join('')}</div>
+  <div class="st">${r.state}</div>
+</div>`).join('');
+
+/* ---------- navigation ---------- */
+const views = document.querySelectorAll('.view');
+function go(name){
+  views.forEach(v=>v.hidden = (v.id !== 'view-'+name));
+  document.querySelectorAll('.navlink').forEach(b=>{
+    if(b.dataset.view===name) b.setAttribute('aria-current','page');
+    else b.removeAttribute('aria-current');
+  });
+  window.scrollTo({top:0, behavior:'instant'});
+}
+document.querySelectorAll('.navlink').forEach(b=>b.addEventListener('click',()=>go(b.dataset.view)));
+document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.goto)));
+
+/* ---------- detail drawer ---------- */
+const drawer=document.getElementById('drawer'), scrim=document.getElementById('scrim');
+function openCall(id){
+  const c = CALLS.find(x=>x.id===id); if(!c) return;
+  const d = DETAIL[id] || DETAIL.CALL003;
+  document.getElementById('drawerTitle').innerHTML = `שיחה <span class="mono">${c.id}</span>`;
+  document.getElementById('drawerBody').innerHTML = `
+    <dl class="kv">
+      <dt>בנקאי</dt><dd><span class="ltr">${c.banker}</span></dd>
+      <dt>תאריך</dt><dd><span class="ltr">${c.date}</span></dd>
+      <dt>ציון כולל</dt><dd><span class="num">${c.total.toFixed(1)}</span> / 100</dd>
+      <dt>שער</dt><dd>${gateBadge(c.gate)}</dd>
+    </dl>
+    ${c.gate?`<div class="quote" style="border-inline-start-color:var(--warn); background:var(--warn-tint)">
+      <div class="meta">מדוע הציון הוגבל</div>
+      ממד השער "זיהוי ואימות לקוח" קיבל ציון 2, ולכן הציון הכולל הוגבל ל-59.</div>`:''}
+    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">ציונים לפי ממד</h4>
+    ${Object.entries(d.scores).map(([k,v])=>`<div class="dimline">
+      <span class="n">${byId[k]}</span>
+      <span class="s" style="color:${v<=2?'var(--bad)':v>=4?'var(--ok)':'var(--ink)'}">${v}/5</span>
+    </div>`).join('')}
+    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">ציטוטי ראיה</h4>
+    ${d.evidence.map(e=>`<div class="quote">
+      <div class="meta"><span class="ltr">[${e.t}]</span> ${e.sp}</div>${e.q}</div>`).join('')}
+    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">המלצת אימון</h4>
+    <div class="quote" style="border-inline-start-color:var(--ok); background:var(--ok-tint)">${d.rec}</div>
+  `;
+  drawer.hidden=false; scrim.hidden=false;
+  document.getElementById('closeDrawer').focus();
+}
+function closeDrawer(){ drawer.hidden=true; scrim.hidden=true; }
+document.addEventListener('click',e=>{
+  const tr = e.target.closest('tr[data-call]'); if(tr) openCall(tr.dataset.call);
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape') closeDrawer();
+  const tr=e.target.closest && e.target.closest('tr[data-call]');
+  if(tr && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); openCall(tr.dataset.call); }
+});
+document.getElementById('closeDrawer').addEventListener('click',closeDrawer);
+scrim.addEventListener('click',closeDrawer);
+
+/* ---------- GPU stop (demo of the confirm-before-spend pattern) ---------- */
+document.getElementById('stopGpu').addEventListener('click',function(){
+  const pip=document.getElementById('gpuPip');
+  if(this.textContent.trim()==='הפסקת המכונה'){
+    pip.className='pip off';
+    document.getElementById('gpuText').textContent='מושבתת · לא מחויבת';
+    this.textContent='הפעלת המכונה'; this.className='btn btn-primary btn-sm';
+    document.querySelectorAll('.statestrip .pip').forEach((p,i)=>{ if(i>0) p.className='pip off'; });
+    document.querySelectorAll('.statecell .val').forEach((v,i)=>{ if(i>0) v.innerHTML='לא זמין — המכונה מושבתת'; });
+  } else {
+    pip.className='pip ok live';
+    document.getElementById('gpuText').innerHTML='פועלת · <span class="ltr">RTX 4090</span>';
+    this.textContent='הפסקת המכונה'; this.className='btn btn-danger btn-sm';
+    const labels=['זמין <span class="badge quiet mono">ivrit-ai</span>','זמין <span class="badge quiet mono">dictalm2.0</span>'];
+    document.querySelectorAll('.statestrip .pip').forEach((p,i)=>{ if(i>0) p.className='pip ok'; });
+    document.querySelectorAll('.statecell .val').forEach((v,i)=>{ if(i>0) v.innerHTML=labels[i-1]; });
+  }
+});
+
+/* ---------- intake drop affordance ---------- */
+const dz = document.getElementById('dropzone');
+if (dz) {
+  ['dragenter','dragover'].forEach(ev =>
+    dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hot'); }));
+  ['dragleave','drop'].forEach(ev =>
+    dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('hot'); }));
+  document.getElementById('pickFiles').addEventListener('click', () => dz.classList.add('hot'));
+}
+
+/* ---------- theme toggle ---------- */
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  const cur=document.documentElement.getAttribute('data-theme');
+  const dark = cur ? cur==='dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.setAttribute('data-theme', dark?'light':'dark');
+});
+</script>
