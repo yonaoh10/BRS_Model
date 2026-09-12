@@ -225,9 +225,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route in ("/", "/index.html"):
             html = PAGE.read_text(encoding="utf-8")
-            # Hand the page its own token so its fetches are authorised.
-            html = html.replace("</script>",
-                                f'\nwindow.__CALLQA_TOKEN__="{type(self).token}";\n</script>', 1)
+            # Hand the page its own token. This must land BEFORE the page's own
+            # script: that script calls loadLive() as it runs, and loadLive
+            # reads the token immediately.
+            token_tag = f'<script>window.__CALLQA_TOKEN__="{type(self).token}";</script>\n'
+            if "<script>" in html:
+                html = html.replace("<script>", token_tag + "<script>", 1)
+            else:
+                html = token_tag + html
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             return
         if route == "/api/state":

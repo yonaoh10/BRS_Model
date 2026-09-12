@@ -171,9 +171,21 @@ def main() -> int:
             ctx = browser.new_context(viewport=vp, color_scheme=theme,
                                       device_scale_factor=2, locale="he-IL")
             page = ctx.new_page()
+            js_errors: list[str] = []
+
+            def _record(msg: str, sink: list[str] = js_errors) -> None:
+                sink.append(msg)
+
+            page.on("pageerror", lambda e: _record(str(e)))
+            page.on("console", lambda m: _record(m.text)
+                    if m.type == "error" and "net::" not in m.text else None)
             page.goto(PAGE.as_uri())
             page.wait_for_timeout(1200)  # let webfonts settle
             probs = page.evaluate(AUDIT_JS)
+            # A silent ReferenceError aborts every update after it, so any
+            # page error is a failure - this is how two real bugs escaped.
+            if js_errors:
+                probs.append({'kind': 'js-error', 'items': js_errors[:5]})
             focus_bad = page.evaluate(FOCUS_JS)
             if focus_bad:
                 probs.append({"kind": "focus-invisible", "items": focus_bad})
@@ -193,9 +205,15 @@ def main() -> int:
                 page.wait_for_timeout(300)
                 page.click("#allTable tr[data-call='CALL003']")
                 page.wait_for_timeout(400)
+                # the drawer must actually open, or the audit below passes
+                # against a page that never showed it
+                if page.evaluate("() => document.getElementById('drawer').hidden"):
+                    findings.setdefault('drawer-light', []).append(
+                        {'kind': 'drawer-did-not-open',
+                         'note': 'clicking a call row left the drawer hidden'})
                 page.screenshot(path=str(OUT / "drawer.png"))
                 drawer_probs = page.evaluate(AUDIT_JS)
-                findings["drawer-light"] = drawer_probs
+                findings.setdefault("drawer-light", []).extend(drawer_probs)
             ctx.close()
         browser.close()
 

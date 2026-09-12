@@ -168,3 +168,46 @@ def test_page_is_served_with_its_token(live_server: str) -> None:
         html = resp.read().decode("utf-8")
     assert 'window.__CALLQA_TOKEN__="test-token-value"' in html
     assert 'dir="rtl"' in html or "direction:rtl" in html
+
+
+# ------------------------------------------------- live page, real browser
+
+@pytest.mark.skipif(not Path("/opt/pw-browsers/chromium-1194/chrome-linux/chrome").exists(),
+                    reason="bundled Chromium not present")
+def test_page_applies_live_data_without_js_errors(live_server: str) -> None:
+    """The page must actually consume /api/state.
+
+    Two real bugs hid here: helper functions ended up scoped inside the render
+    function, so the boot block threw ReferenceError and every update after it
+    was silently skipped. The page still looked fine because it fell back to
+    its embedded sample figures. Only a browser check catches that.
+    """
+    playwright = pytest.importorskip("playwright.sync_api")
+    chrome = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=chrome)
+        page = browser.new_context(viewport={"width": 1280, "height": 900},
+                                   locale="he-IL").new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{live_server}/?t=test-token-value")
+        page.wait_for_timeout(2000)
+
+        assert not errors, f"page threw: {errors}"
+
+        # the calibration panel must show the real verdict, not the placeholder
+        flagged = page.evaluate("() => document.getElementById('calFlagged').textContent")
+        assert flagged.isdigit()
+
+        # a call row must open the drawer and offer its generated report
+        page.click(".navlink[data-view='calls']")
+        page.wait_for_timeout(250)
+        page.click("#allTable tbody tr")
+        page.wait_for_timeout(350)
+        assert not page.evaluate("() => document.getElementById('drawer').hidden"), \
+            "clicking a call row must open the detail drawer"
+        assert not page.evaluate("() => document.getElementById('openReport').hidden"), \
+            "a served call must link to its generated report"
+        href = page.evaluate("() => document.getElementById('openReport').getAttribute('href')")
+        assert page.request.get(live_server + href).status == 200
+        browser.close()
