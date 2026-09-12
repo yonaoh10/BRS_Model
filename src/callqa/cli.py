@@ -203,6 +203,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _size_settled(path: Path, size: int, pause: float = 1.0) -> bool:
+    """Re-stat after a moment: a file still being copied keeps growing."""
+    time.sleep(pause)
+    try:
+        return path.stat().st_size == size
+    except OSError:
+        return False
+
+
 def watch_loop(
     config: Config,
     engines,  # noqa: ANN001
@@ -249,6 +258,13 @@ def watch_loop(
                 age = max(0.0, time.time() - stat.st_mtime)
                 sizes[path] = (size, now - age)
                 prev = sizes[path]
+                if age >= config.watch.stable_seconds and not _size_settled(path, size):
+                    # `cp -p` and `rsync -t` give a file the SOURCE's mtime, so
+                    # a copy that is still running can look hours old. The
+                    # mtime shortcut is only safe if the size also holds still.
+                    logger.info("%s is still being written; waiting", path.name)
+                    sizes[path] = (size, now)
+                    continue
             elif prev[0] != size:
                 sizes[path] = (size, now)
                 continue

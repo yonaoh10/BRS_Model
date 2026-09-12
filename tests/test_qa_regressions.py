@@ -402,3 +402,57 @@ class TestEndpointsAreConstrained:
 
         with pytest.raises(ValueError):
             AudioConfig(target_sample_rat=16000)
+
+
+# ------------------------------------------------- the diarizer's two APIs
+
+class TestPyannoteOutputShapes:
+    """pyannote 3.x and 4.x return different objects, and the project has to
+    read both because which one a machine has depends on when it was built."""
+
+    @staticmethod
+    def _segment(start: float, end: float):  # noqa: ANN205
+        from collections import namedtuple
+        return namedtuple("Segment", "start end")(start, end)
+
+    def test_the_three_x_annotation_is_read(self) -> None:
+        from callqa.speakers.pyannote_engine import _segments_from_output
+
+        segment = self._segment
+
+        class Annotation:
+            def itertracks(self, yield_label=False):  # noqa: ANN001, ANN202, FBT002
+                yield segment(0.0, 5.0), None, "SPEAKER_00"
+                yield segment(5.0, 9.0), None, "SPEAKER_01"
+
+        result = _segments_from_output(Annotation())
+        assert [(s.label, s.start, s.end) for s in result] == [
+            ("SPEAKER_00", 0.0, 5.0), ("SPEAKER_01", 5.0, 9.0)]
+
+    def test_the_four_x_exclusive_view_is_preferred(self) -> None:
+        from callqa.speakers.pyannote_engine import _segments_from_output
+
+        segment = self._segment
+
+        class Output:
+            speaker_diarization = [(segment(0.0, 5.0), "A"), (segment(4.5, 9.0), "B")]
+            exclusive_speaker_diarization = [(segment(0.0, 5.0), "A"), (segment(5.0, 9.0), "B")]
+
+        overlapping = _segments_from_output(Output(), prefer_exclusive=False)
+        exclusive = _segments_from_output(Output(), prefer_exclusive=True)
+        assert overlapping[1].start == 4.5
+        assert exclusive[1].start == 5.0
+
+    def test_a_bare_segment_does_not_crash(self) -> None:
+        """pyannote's Segment IS a NamedTuple, so testing isinstance(item,
+        tuple) unpacked its own floats and then asked a float for .start."""
+        from callqa.speakers.pyannote_engine import _segments_from_output
+
+        segment = self._segment
+
+        class Output:
+            exclusive_speaker_diarization = None
+            speaker_diarization = [segment(0.0, 5.0), segment(5.0, 9.0)]
+
+        result = _segments_from_output(Output())
+        assert [(s.start, s.end) for s in result] == [(0.0, 5.0), (5.0, 9.0)]

@@ -12,6 +12,8 @@ import os
 import sqlite3
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -92,11 +94,21 @@ class StateDB:
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """A connection that is committed AND closed.
+
+        `with sqlite3.connect(...)` commits but does not close, so every call
+        leaked a file descriptor; a long watch run accumulated hundreds.
+        """
         conn = sqlite3.connect(self.db_path, timeout=30)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     # -- stage tracking -------------------------------------------------
 
