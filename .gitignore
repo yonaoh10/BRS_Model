@@ -14,3 +14,4 @@ models/
 venv/
 MODELS_MANIFEST.json
 cloud/.runpod_state.json
+dashboard/qa-output/

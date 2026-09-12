@@ -1,0 +1,192 @@
+/* ==========================================================================
+   Call-QA dashboard - design tokens
+   Every value below was COMPUTED and verified, not chosen by eye:
+     - WCAG 2.2 contrast ratios calculated for each foreground/background pair
+     - status trio validated as a set with the dataviz palette validator
+       (lightness band, chroma floor, CVD separation, normal-vision floor)
+   Re-run the checks before changing any hex.
+
+   THE ONE RULE THAT SHAPES EVERYTHING:
+   Orange is BRAND CHROME ONLY - header, primary button, active nav, focus ring,
+   data bars. It is never a status colour. Measured reason: brand orange #ea580c
+   vs warning amber #ca8a04 is deltaE 2.9 under deuteranopia (indistinguishable),
+   and vs danger red #dc2626 is deltaE 8.7 even with normal vision (floor is 15).
+   Every status therefore carries an ICON + HEBREW LABEL, never colour alone.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* --- brand orange ramp (verified vs white) ----------------------------
+     50   #fff7ed  1.06:1  tint only
+     100  #ffedd5  1.15:1  tint only
+     200  #fed7aa  1.35:1  tint only
+     300  #fdba74  1.69:1  decorative / dark-mode text
+     400  #fb923c  2.26:1  decorative
+     500  #f97316  2.80:1  decorative  <- NOT safe for text or white-on-fill
+     600  #ea580c  3.56:1  large text, icons, borders, focus ring
+     700  #c2410c  5.18:1  body text AND fill carrying white text
+     800  #9a3412  7.31:1  headings
+     900  #7c2d12  9.37:1  strongest ink
+     950  #431407 15.65:1
+     ------------------------------------------------------------------- */
+  --brand-50:  #fff7ed;
+  --brand-100: #ffedd5;
+  --brand-200: #fed7aa;
+  --brand-300: #fdba74;
+  --brand-400: #fb923c;
+  --brand-500: #f97316;
+  --brand-600: #ea580c;
+  --brand-700: #c2410c;
+  --brand-800: #9a3412;
+  --brand-900: #7c2d12;
+
+  /* semantic brand roles - each verified for its specific job */
+  --brand-ink:     var(--brand-800); /* headings/links on white: 7.31:1 */
+  --brand-primary: var(--brand-700); /* button fill, white label: 5.18:1 */
+  --brand-accent:  var(--brand-600); /* bars, active underline: 3.56:1 (>=3 for UI) */
+  --brand-border:  var(--brand-300); /* 1px dividers on tinted surfaces */
+  --brand-tint:    var(--brand-50);  /* selected row, hover background */
+
+  /* --- surfaces & ink --------------------------------------------------- */
+  --page:    #faf9f7;
+  --card:    #ffffff;
+  --border:  #e7e5e4;
+  --border-strong: #d6d3d1;
+
+  --text-primary:   #1c1917; /* 17.49:1 on card */
+  --text-secondary: #57534e; /*  7.63:1 on card */
+  --text-muted:     #78716c; /*  4.80:1 on card - still AA body text */
+
+  /* --- status: validated as a SET (all checks pass, light mode) ---------
+     success #047857 / warning #ca8a04 / danger #dc2626
+     Note: amber is only 2.94:1 against white, so it may never appear as a
+     bare coloured dot or bare text - it must sit on a fill or beside a label.
+     Amber fill takes DARK ink (white on amber is 2.94:1 = FAIL). Darkening
+     the amber instead was rejected: it collapses CVD separation from red.
+     ------------------------------------------------------------------- */
+  --success:      #047857;  /* white text on fill: 5.48:1 */
+  --success-ink:  #ffffff;
+  --success-tint: #ecfdf5;
+
+  --warning:      #ca8a04;  /* DARK ink on fill: 5.10:1 */
+  --warning-ink:  #451a03;
+  --warning-tint: #fefce8;
+
+  --danger:       #dc2626;  /* white text on fill: 4.83:1 */
+  --danger-ink:   #ffffff;
+  --danger-tint:  #fef2f2;
+
+  --info:         #1d4ed8;
+  --info-ink:     #ffffff;
+  --info-tint:    #eff6ff;
+
+  /* --- typography: system stacks that render Hebrew everywhere, no
+     webfont download (the project must work fully offline) ------------- */
+  --font-ui: "Segoe UI", "Arial Hebrew", "Noto Sans Hebrew", Arial,
+             system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-xs:   0.75rem;   /* 12px - metadata only */
+  --text-sm:   0.875rem;  /* 14px - table cells, labels */
+  --text-base: 1rem;      /* 16px - body */
+  --text-lg:   1.125rem;  /* 18px - card titles */
+  --text-xl:   1.375rem;  /* 22px - page title */
+  --text-hero: 2.5rem;    /* 40px - the one big number */
+  /* Hebrew needs more leading than Latin: its letters have no ascenders to
+     create visual gaps, so tight leading reads as a wall of text. */
+  --leading: 1.65;
+  --leading-tight: 1.3;
+
+  /* --- 4px spacing scale ------------------------------------------------ */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
+
+  --radius-sm: 6px;
+  --radius:    10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* Shadows stay very soft: a bank console should read as calm and flat,
+     not as a consumer app. Elevation is carried by borders, not drama. */
+  --shadow-sm: 0 1px 2px rgb(28 25 23 / 0.05);
+  --shadow:    0 1px 3px rgb(28 25 23 / 0.08), 0 1px 2px rgb(28 25 23 / 0.04);
+  --shadow-lg: 0 4px 16px rgb(28 25 23 / 0.10);
+
+  --focus-ring: 0 0 0 3px rgb(234 88 12 / 0.35);
+}
+
+/* --- dark mode: re-stepped for the dark surface, not an automatic flip.
+   Each value verified against the dark card #292524. ---------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --page:   #1c1917;
+    --card:   #292524;
+    --border: #44403c;
+    --border-strong: #57534e;
+
+    --text-primary:   #fafaf9; /* 14.52:1 */
+    --text-secondary: #d6d3d1; /* 10.18:1 */
+    --text-muted:     #a8a29e; /*  6.01:1 */
+
+    /* On dark, the ramp inverts: light steps become the readable ones. */
+    --brand-ink:     #fdba74;  /* 8.99:1 */
+    --brand-primary: #c2410c;  /* fill still carries white text */
+    --brand-accent:  #fb923c;  /* 6.70:1 */
+    --brand-border:  #7c2d12;
+    --brand-tint:    #2d1b10;
+
+    --success:      #34d399; --success-ink: #1c1917; --success-tint: #052e21;
+    --warning:      #fbbf24; --warning-ink: #1c1917; --warning-tint: #2e2206;
+    --danger:       #f87171; --danger-ink:  #1c1917; --danger-tint:  #2e1212;
+    --info:         #60a5fa; --info-ink:    #1c1917; --info-tint:    #10213d;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow:    0 1px 3px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 4px 16px rgb(0 0 0 / 0.5);
+  }
+}
+
+/* The explicit toggle must win in both directions. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:   #1c1917;
+  --card:   #292524;
+  --border: #44403c;
+  --border-strong: #57534e;
+  --text-primary:   #fafaf9;
+  --text-secondary: #d6d3d1;
+  --text-muted:     #a8a29e;
+  --brand-ink:     #fdba74;
+  --brand-primary: #c2410c;
+  --brand-accent:  #fb923c;
+  --brand-border:  #7c2d12;
+  --brand-tint:    #2d1b10;
+  --success: #34d399; --success-ink: #1c1917; --success-tint: #052e21;
+  --warning: #fbbf24; --warning-ink: #1c1917; --warning-tint: #2e2206;
+  --danger:  #f87171; --danger-ink:  #1c1917; --danger-tint:  #2e1212;
+  --info:    #60a5fa; --info-ink:    #1c1917; --info-tint:    #10213d;
+}
+
+/* ==========================================================================
+   RTL foundations. Use LOGICAL properties everywhere (margin-inline-start,
+   padding-inline, inset-inline, border-inline-start) so nothing needs
+   mirroring by hand.
+   ========================================================================== */
+html[dir="rtl"] { direction: rtl; }
+
+/* Numbers, IDs, timestamps, model names and file paths must stay LTR even
+   inside Hebrew sentences, or the bidi algorithm reorders them and a call id
+   or a price renders backwards. Wrap them in <bdi class="ltr"> or .num. */
+.ltr, .num, .mono {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
+}
+.mono { font-family: var(--font-mono); }
+
+/* Icons that imply direction (arrows, chevrons, progress) must flip in RTL;
+   icons that do not (clock, check, warning) must NOT. */
+html[dir="rtl"] .flip-in-rtl { transform: scaleX(-1); }
