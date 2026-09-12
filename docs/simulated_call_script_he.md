@@ -13,25 +13,37 @@
 
 ## לפני שמקליטים — שתי נקודות שחוסכות עבודה חוזרת
 
-**1. הקלטה כפולה, לא הקלטה אחת.** המסלול הראשי של המערכת מפריד דוברים לפי
-ערוצי סטריאו: בנקאי בערוץ אחד, לקוח בשני. הקלטה של שיחת טלפון במכשיר אחד היא
-מונו, והיא נשלחת למסלול הדיאריזציה (pyannote) שדורש `HF_TOKEN` והורדת מודל חסום.
-הדרך הפשוטה: **כל צד מקליט את עצמו** באפליקציית הקלטה בטלפון שלו, ואז ממזגים.
+**1. הקלטה אחת מספיקה.** המערכת מפרידה בעצמה בין הדוברים בקובץ יחיד — זו דרישת
+ליבה של הפרויקט והיא ממומשת. פרטים על המודל, על השיטה ועל המגבלות נמצאים
+ב‑`docs/diarization_he.md`. אפשר להקליט את השיחה במכשיר אחד, בכל פורמט
+ש‑ffmpeg פותח (m4a של אייפון כולל), ולהריץ:
 
 ```bash
-python scripts/prepare_real_call.py --call-id REAL001 \
-    --banker-track ~/rec/me.m4a --customer-track ~/rec/friend.m4a \
-    --banker-id B900 --banker-name "שם הבנקאי"
+python -m callqa process --audio ~/rec/call.m4a --call-id REAL001 --banker-id B900
 ```
 
-הסקריפט ממיר ל‑WAV בסטריאו 16kHz (בנקאי שמאל, לקוח ימין) ומוסיף שורה
-ל‑`data/input/metadata.csv`. אם השעונים לא התחילו יחד, `--offset 2.5` מזיז את
-ערוץ הלקוח. כדי שיהיה על מה ליישר — **ששני הצדדים יספרו "שלוש, שתיים, אחת"
-בפתיחה**. סנכרון מושלם לא נדרש לצנזור או לרובריקה, אבל כן משפיע על מדדי
-הקטיעות והסבלנות.
+**אבל בשביל הבדיקה הראשונה כדאי גם להקליט בנפרד.** אם כל צד מקליט גם את עצמו
+מקומית, מקבלים שתי גרסאות של אותה שיחה: הקובץ היחיד שהמערכת תפריד לבד, ומול זה
+הפרדה ודאית שמשמשת **תשובה נכונה** למדידה. זו הדרך היחידה לדעת כמה טובה
+ההפרדה על השיחות שלכם ולא על קורפוס של מישהו אחר:
 
-אם בכל זאת הקלטתם מונו אחד: `--mono ~/rec/call.m4a`, וצריך `HF_TOKEN` לפני
-העיבוד.
+```bash
+# הקובץ שהמערכת תעבוד עליו
+python -m callqa process --audio ~/rec/call.m4a --call-id REAL001 --banker-id B900
+
+# אותה שיחה משני מסלולים, בתור אמת מידה
+python scripts/prepare_real_call.py --call-id REF001 \
+    --banker-track ~/rec/me.m4a --customer-track ~/rec/friend.m4a
+python -m callqa process --audio data/input/calls/REF001.wav --call-id REF001 \
+    --banker-id B900 --banker-channel L
+
+# וההשוואה
+python scripts/eval_diarization.py --dialog data/output/transcripts/REAL001.dialog.json \
+    --reference refs/REAL001.csv
+```
+
+כדי שאפשר יהיה ליישר בין השתיים, **ששני הצדדים יספרו "שלוש, שתיים, אחת"
+בפתיחה**. ל‑`prepare_real_call.py` יש `--offset` בשניות לתיקון הפרש התחלה.
 
 **2. הסכמה מוקלטת.** בפתיחת ההקלטה תגידו במפורש "השיחה מוקלטת ומתומללת לצורכי
 בקרת איכות", והחבר יאשר בקול. זה גם נכון משפטית וגם נבדק על ידי ממד הציות.
@@ -223,17 +235,9 @@ python scripts/prepare_real_call.py --call-id REAL001 \
 ## איך מריצים
 
 ```bash
-# 1. הכנת הקובץ (ראו למעלה)
-python scripts/prepare_real_call.py --call-id REAL001 \
-    --banker-track ~/rec/me.m4a --customer-track ~/rec/friend.m4a
-
-# 2. בדיקת התקינות של הקלט
-python -m callqa validate-inputs
-
-# 3. עיבוד השיחה
-python -m callqa process --audio data/input/calls/REAL001.wav \
-    --call-id REAL001 --banker-id B900 --banker-channel L
-echo "exit code: $?"
+# 1. עיבוד השיחה ישירות מההקלטה, בלי שום הכנה
+python -m callqa process --audio ~/rec/call.m4a --call-id REAL001 --banker-id B900
+echo "exit code: $?"   # 0 תקין, 1 דורש בדיקת אדם, 2 כשל
 
 # 4. מה יצא
 grep -o '████' data/output/redacted/REAL001.json | wc -l   # כמה פריטים נחסמו

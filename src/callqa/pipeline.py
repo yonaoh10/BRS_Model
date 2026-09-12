@@ -92,6 +92,7 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
         return CallResult(call_id=call_id, status="failed", error=str(exc))
 
     stages_completed: list[str] = []
+    review_reasons: list[str] = []
     try:
         if config.run.force:
             state.clear_call(call_id)
@@ -164,6 +165,16 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             store.mark_done("speakers", dialog_path)
         stages_completed.append("speakers")
 
+        # Who-is-who was inferred, not observed. If the evidence was close to
+        # even, the whole report could be inverted, so the call is reported and
+        # held for a human rather than published as fact.
+        if (dialog.attribution_mode == "mono_diarized"
+                and dialog.role_confidence < config.speakers.min_role_confidence):
+            review_reasons.append(
+                f"speaker roles inferred with low confidence "
+                f"({dialog.role_confidence:.2f} < {config.speakers.min_role_confidence:.2f})"
+            )
+
         # -- stage 5: redaction ------------------------------------------
         redacted_path = store.path("redacted")
         if store.is_done("redaction"):
@@ -229,7 +240,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
         result = CallResult(
             call_id=call_id,
-            status="success",
+            status="needs_human_review" if review_reasons else "success",
+            error="; ".join(review_reasons) or None,
             stages_completed=stages_completed,
             report_path=str(report_path),
             scorecard_path=str(score_path),

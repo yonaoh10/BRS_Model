@@ -3,13 +3,9 @@
 Stereo path (primary): each channel was transcribed separately with a known
 role - merge the two transcripts into one time-ordered DialogTranscript.
 
-Mono path (fallback): assign diarized speaker indices to roles using a
-documented heuristic, then merge.
-
-Role heuristic (mono): within the diarized transcript, the speaker with more
-question marks plus greeting keywords in the first 30 seconds is the banker.
-Rationale: bankers open the call with a scripted greeting and drive the
-identification questions. role_confidence reflects how decisive the signal was.
+Mono path: attribute each WORD to a diarized speaker, split transcript
+segments where the speaker changes (speakers/diarization.py), then decide
+which of the two anonymous speakers is the banker (speakers/roles.py).
 """
 
 from __future__ import annotations
@@ -19,15 +15,16 @@ import logging
 from callqa.models import (
     DialogTranscript,
     DialogTurn,
+    DiarizationQualityRecord,
+    RoleSignalRecord,
     Speaker,
     Transcript,
-    TranscriptSegment,
     VADSegment,
 )
+from callqa.speakers.diarization import DiarizedSegment, attribute_segments
+from callqa.speakers.roles import infer_roles
 
 logger = logging.getLogger(__name__)
-
-GREETING_KEYWORDS = ["שלום", "בוקר טוב", "ערב טוב", "במה אפשר לעזור", "מדבר", "מדברת", "הגעת"]
 
 
 def merge_stereo(
@@ -54,57 +51,40 @@ def merge_stereo(
     )
 
 
-def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
-    return max(0.0, min(a_end, b_end) - max(a_start, b_start))
-
-
 def assign_mono_roles(
     call_id: str,
     transcript: Transcript,
-    diarized: list[tuple[int, VADSegment]],
+    diarized: list[DiarizedSegment],
 ) -> DialogTranscript:
-    """Attach diarized speaker indices to transcript segments, then map the
-    two indices to banker/customer roles via the documented heuristic."""
-    labeled: list[tuple[int, TranscriptSegment]] = []
-    for seg in transcript.segments:
-        best_idx, best_ov = 0, -1.0
-        for idx, dseg in diarized:
-            ov = _overlap(seg.start, seg.end, dseg.start, dseg.end)
-            if ov > best_ov:
-                best_idx, best_ov = idx, ov
-        labeled.append((best_idx, seg))
+    """Build a role-labelled dialog from a mono transcript and a diarization.
 
-    # Heuristic scoring: question marks overall + greeting keywords in first 30s.
-    scores = {0: 0.0, 1: 0.0}
-    for idx, seg in labeled:
-        scores[idx] = scores.get(idx, 0.0) + seg.text.count("?")
-        if seg.start <= 30.0:
-            scores[idx] += sum(2.0 for kw in GREETING_KEYWORDS if kw in seg.text)
-    banker_idx = max(scores, key=lambda k: scores[k])
-    total = sum(scores.values())
-    role_confidence = round(scores[banker_idx] / total, 3) if total > 0 else 0.5
+    Two separate decisions, kept separate on purpose: attribution (which of the
+    two anonymous speakers said each word) and roles (which one is the banker).
+    Both record how they were reached, because a mono call's report rests on
+    inferences a stereo call's does not.
+    """
+    attribution = attribute_segments(transcript.segments, diarized)
+    decision = infer_roles(attribution.segments, call_id)
 
     turns = [
         DialogTurn(
-            speaker="banker" if idx == banker_idx else "customer",
+            speaker=_speaker_for("banker" if idx == decision.banker_index else "customer"),
             start=seg.start,
             end=seg.end,
             text=seg.text.strip(),
             words=seg.words,
         )
-        for idx, seg in labeled
+        for idx, seg in attribution.segments
         if seg.text.strip()
     ]
     turns.sort(key=lambda t: (t.start, t.end))
-    logger.info(
-        "mono role heuristic: call_id=%s banker_idx=%d confidence=%.2f",
-        call_id, banker_idx, role_confidence,
-    )
     return DialogTranscript(
         call_id=call_id,
         attribution_mode="mono_diarized",
-        role_confidence=role_confidence,
+        role_confidence=decision.confidence,
         turns=turns,
+        role_signals=[RoleSignalRecord(**signal.as_dict()) for signal in decision.signals],
+        diarization=DiarizationQualityRecord(**attribution.quality.as_dict()),
     )
 
 

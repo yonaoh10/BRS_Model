@@ -24,6 +24,35 @@
     השאלות - מסתמכים על החלוקה הזאת. מומלץ לאמת אותה מול התמליל לפני שמסיקים
     מסקנות לגבי הבנקאי.
   </div>
+  {% if role_signals %}
+  <table>
+    <thead><tr><th>סימן</th><th>מצביע עבור</th><th>משקל</th></tr></thead>
+    <tbody>
+      {% for s in role_signals %}
+      <tr>
+        <td>{{ s.he }}</td>
+        <td>{{ s.role }}{% if not s.agrees %} (מנוגד){% endif %}</td>
+        <td class="mono">{{ s.weight }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if diarization %}
+  <div class="muted">
+    הפרדת דוברים: זוהו {{ diarization.speakers_found }} דוברים,
+    {{ diarization.words_attributed }} מילים שויכו
+    {% if diarization.words_by_nearest %}
+      (מתוכן {{ diarization.words_by_nearest }} ללא חפיפה ישירה)
+    {% endif %}
+    {% if diarization.reassigned_sec %}
+      · {{ diarization.reassigned_sec }} שניות של דובר נוסף מוזגו פנימה
+    {% endif %}
+    {% if diarization.smoothed_islands %}
+      · {{ diarization.smoothed_islands }} מילים בודדות יושרו לדובר השכן
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 

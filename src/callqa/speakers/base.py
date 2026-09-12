@@ -1,17 +1,21 @@
-"""Speaker attribution protocol (mono diarization fallback)."""
+"""Speaker attribution protocol (used when a recording is not per-channel)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from callqa.models import VADSegment
+from callqa.speakers.diarization import DiarizedSegment
 
 
 @runtime_checkable
 class MonoDiarizer(Protocol):
-    """Diarizes a mono WAV into two anonymous speakers (0 and 1)."""
+    """Splits a single-channel recording into anonymous speaker segments.
 
-    def diarize(self, wav_path: Path, call_id: str) -> list[tuple[int, VADSegment]]:
-        """Returns (speaker_index, segment) tuples, time-ordered."""
+    Labels are arbitrary strings; deciding which one is the banker is a
+    separate problem, handled in speakers/roles.py.
+    """
+
+    def diarize(self, wav_path: Path, call_id: str) -> list[DiarizedSegment]:
+        """Returns time-ordered segments, each attributed to one speaker label."""
         ...
