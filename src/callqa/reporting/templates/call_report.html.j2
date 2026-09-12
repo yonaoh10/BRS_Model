@@ -11,6 +11,22 @@
   </div>
 </div>
 
+{% if attribution_mode and attribution_mode != "stereo" %}
+<div class="card">
+  <span class="badge badge-fail">ייחוס דוברים משוער</span>
+  <div class="muted">
+    ההקלטה אינה מפרידה בין הדוברים לערוצים נפרדים, ולכן החלוקה בין הבנקאי
+    ללקוח נקבעה באופן אוטומטי
+    {% if role_confidence is not none %}
+      (רמת ודאות: {{ "%.0f"|format(role_confidence * 100) }}%)
+    {% endif %}.
+    כל המדדים שתלויים בזהות הדובר - יחס דיבור, מונולוג, קטיעות, סבלנות ומספר
+    השאלות - מסתמכים על החלוקה הזאת. מומלץ לאמת אותה מול התמליל לפני שמסיקים
+    מסקנות לגבי הבנקאי.
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>ציון כולל</h2>
   <div style="display:flex; align-items:center; gap:24px;">

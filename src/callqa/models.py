@@ -72,6 +72,9 @@ class AudioArtifact(BaseModel):
     mono_wav: str | None = None        # mono path only
     sample_rate: int
     vad_engine: str
+    # How the file's channels were actually used. A file can declare two
+    # channels and still carry one recording (see audio.probe_channels).
+    channel_layout: Literal["stereo", "dual_mono", "single_channel", "mono"] = "mono"
     banker_segments: list[VADSegment] = Field(default_factory=list)
     customer_segments: list[VADSegment] = Field(default_factory=list)
     mono_segments: list[VADSegment] = Field(default_factory=list)

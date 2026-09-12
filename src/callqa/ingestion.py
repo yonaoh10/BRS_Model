@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import shutil
 import subprocess
 import wave
 from dataclasses import dataclass, field
@@ -16,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_COLUMNS = ["call_id", "banker_id", "file_name"]
 OPTIONAL_COLUMNS = ["call_date", "call_type", "banker_channel", "banker_name"]
+# .wav/.mp3 are what the bank's recorders produce. The rest are what a phone
+# produces, which is what a staged test call arrives as; they are accepted only
+# when ffmpeg is present, since the dependency-free fallback reads WAV only.
 AUDIO_EXTENSIONS = {".wav", ".mp3"}
+FFMPEG_AUDIO_EXTENSIONS = {".m4a", ".aac", ".mp4", ".ogg", ".opus", ".flac", ".wma", ".amr"}
 
 
 class IngestionError(ValueError):
@@ -148,10 +153,16 @@ def probe_audio(call: CallInput) -> CallMeta:
     """Probe the audio file (ffprobe, wave-module fallback) -> CallMeta."""
     if not call.audio_path.exists():
         raise IngestionError(f"audio file not found: {call.audio_path}")
-    if call.audio_path.suffix.lower() not in AUDIO_EXTENSIONS:
-        raise IngestionError(
-            f"unsupported audio extension '{call.audio_path.suffix}' (expected .wav/.mp3)"
-        )
+    suffix = call.audio_path.suffix.lower()
+    if suffix not in AUDIO_EXTENSIONS:
+        if suffix not in FFMPEG_AUDIO_EXTENSIONS:
+            raise IngestionError(
+                f"unsupported audio extension '{suffix}' (expected .wav/.mp3)"
+            )
+        if not shutil.which("ffmpeg"):
+            raise IngestionError(
+                f"'{suffix}' needs ffmpeg, which is not installed; convert to .wav first"
+            )
     info = _probe_with_ffprobe(call.audio_path) or _probe_with_wave(call.audio_path)
     if info is None or not info.get("streams"):
         raise IngestionError(f"could not probe audio file: {call.audio_path.name}")

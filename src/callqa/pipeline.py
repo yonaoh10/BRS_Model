@@ -221,7 +221,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
         # -- stage 8: per-call report ------------------------------------
         report_path = config.paths.output_dir / "reports" / "calls" / f"{call_id}.html"
         if not store.is_done("report") or not report_path.exists():
-            html = render_call_report(engines.rubric, meta, scorecard, features, redacted)
+            html = render_call_report(engines.rubric, meta, scorecard, features, redacted,
+                                      dialog=dialog)
             atomic_write_text(report_path, html)
             store.mark_done("report", report_path)
         stages_completed.append("report")
