@@ -93,6 +93,62 @@ def _extract_channel(
     _write_wav(dst, _resample_linear(mono, rate, target_rate), target_rate)
 
 
+# -- channel probing ---------------------------------------------------------
+
+# A file can declare two channels and still carry only one recording. Both
+# cases below break the channel-split path silently: duplicated channels put
+# BOTH speakers on both sides (talk_ratio pinned near 0.5, phantom
+# interruptions everywhere), and a dead channel leaves one party with no
+# speech at all. Neither is visible in the metadata, only in the samples.
+DUPLICATE_CHANNEL_RATIO = 0.02   # residual RMS below 2% of signal RMS
+SILENT_CHANNEL_RATIO = 0.01      # channel RMS below 1% of the louder one
+PROBE_SECONDS = 120
+
+
+def _decode_stereo(src: Path, seconds: int = PROBE_SECONDS, rate: int = 8000) -> np.ndarray | None:
+    """Decode the head of a file to (n, 2) float32. None if it is not stereo."""
+    if _have_ffmpeg():
+        proc = subprocess.run(
+            ["ffmpeg", "-v", "error", "-t", str(seconds), "-i", str(src),
+             "-ac", "2", "-ar", str(rate), "-f", "s16le", "-"],
+            capture_output=True,
+        )
+        if proc.returncode != 0 or not proc.stdout:
+            return None
+        data = np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+        if data.size < 2:
+            return None
+        return data[: (data.size // 2) * 2].reshape(-1, 2)
+    if src.suffix.lower() != ".wav":
+        return None
+    data, src_rate = _read_wav(src)
+    if data.shape[1] < 2:
+        return None
+    return data[: src_rate * seconds, :2]
+
+
+def probe_channels(src: Path) -> str:
+    """Classify what a two-channel file actually contains.
+
+    Returns "stereo" (two genuinely different recordings), "dual_mono" (the
+    same recording on both channels) or "single_channel" (one side silent).
+    """
+    samples = _decode_stereo(src)
+    if samples is None or len(samples) == 0:
+        return "stereo"
+    left, right = samples[:, 0], samples[:, 1]
+    rms_l, rms_r = float(np.sqrt((left ** 2).mean())), float(np.sqrt((right ** 2).mean()))
+    loud = max(rms_l, rms_r)
+    if loud < 1e-6:
+        return "stereo"          # silence throughout; nothing to infer
+    if min(rms_l, rms_r) < SILENT_CHANNEL_RATIO * loud:
+        return "single_channel"
+    residual = float(np.sqrt(((left - right) ** 2).mean()))
+    if residual < DUPLICATE_CHANNEL_RATIO * loud:
+        return "dual_mono"
+    return "stereo"
+
+
 # -- VAD ---------------------------------------------------------------------
 
 def energy_vad(
@@ -138,11 +194,20 @@ def energy_vad(
 
 
 def silero_vad(wav_path: Path, min_speech_ms: int = 250) -> list[VADSegment]:
-    """Silero VAD (lazy import; weights ship inside the silero-vad wheel)."""
-    from silero_vad import get_speech_timestamps, load_silero_vad, read_audio
+    """Silero VAD (lazy import; weights ship inside the silero-vad wheel).
+
+    The file is read here rather than through silero's own read_audio: that
+    helper goes via torchaudio, which in current versions refuses to decode
+    anything without torchcodec installed. By this point the input is already
+    16 kHz mono PCM, so the wave module is both sufficient and one less
+    dependency to pin.
+    """
+    import torch
+    from silero_vad import get_speech_timestamps, load_silero_vad
 
     model = _get_silero_model(load_silero_vad)
-    audio = read_audio(str(wav_path))
+    samples, _ = _read_wav(wav_path)
+    audio = torch.from_numpy(samples[:, 0].copy())
     stamps = get_speech_timestamps(
         audio, model, return_seconds=True, min_speech_duration_ms=min_speech_ms
     )
@@ -166,6 +231,10 @@ def run_vad(wav_path: Path, config: Config) -> tuple[str, list[VADSegment]]:
             return "silero", silero_vad(wav_path, config.audio.min_speech_ms)
         except ImportError:
             logger.warning("silero-vad not installed; falling back to energy VAD")
+        except Exception as exc:  # noqa: BLE001
+            # A VAD that cannot load must not fail the call: energy VAD is a
+            # real fallback, and losing the call is worse than losing accuracy.
+            logger.warning("silero VAD failed (%s); falling back to energy VAD", exc)
     return "energy", energy_vad(wav_path, config.audio.min_speech_ms)
 
 
@@ -192,7 +261,19 @@ def prepare_audio(
     rate = config.audio.target_sample_rate
     wav_dir.mkdir(parents=True, exist_ok=True)
 
-    if meta.channels >= 2:
+    layout = probe_channels(call.audio_path) if meta.channels >= 2 else "mono"
+    if layout != "stereo":
+        # Two declared channels that carry one recording: the split would
+        # produce two copies of the same conversation, so downmix and let the
+        # diarizer separate the speakers instead.
+        if meta.channels >= 2:
+            logger.warning(
+                "call_id=%s: file declares %d channels but they are %s; "
+                "treating it as a mono recording (speaker attribution will need "
+                "diarization)", call.call_id, meta.channels, layout,
+            )
+
+    if layout == "stereo":
         banker_idx = resolve_banker_channel(call, config)
         customer_idx = 1 - banker_idx
         banker_wav = wav_dir / f"{call.call_id}.banker.wav"
@@ -208,6 +289,7 @@ def prepare_audio(
             customer_wav=str(customer_wav),
             sample_rate=rate,
             vad_engine=vad_engine,
+            channel_layout="stereo",
             banker_segments=banker_segments,
             customer_segments=customer_segments,
         )
@@ -221,12 +303,13 @@ def prepare_audio(
             mono_wav=str(mono_wav),
             sample_rate=rate,
             vad_engine=vad_engine,
+            channel_layout=layout,
             mono_segments=mono_segments,
         )
     logger.info(
-        "audio done: call_id=%s stereo=%s vad=%s segments=%d",
+        "audio done: call_id=%s layout=%s vad=%s segments=%d",
         call.call_id,
-        artifact.is_stereo,
+        artifact.channel_layout,
         vad_engine,
         len(artifact.banker_segments) + len(artifact.customer_segments) + len(artifact.mono_segments),
     )

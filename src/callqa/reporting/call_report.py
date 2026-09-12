@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from callqa.models import CallMeta, Features, RedactedTranscript, ScoreCard
+from callqa.models import (
+    CallMeta,
+    DialogTranscript,
+    Features,
+    RedactedTranscript,
+    ScoreCard,
+)
 from callqa.reporting.common import (
     jinja_env,
     load_recommendations,
@@ -27,6 +33,7 @@ def render_call_report(
     features: Features,
     redacted: RedactedTranscript,
     recommendations: dict[str, list[str]] | None = None,
+    dialog: DialogTranscript | None = None,
 ) -> str:
     if recommendations is None:
         recommendations = load_recommendations()
@@ -46,4 +53,8 @@ def render_call_report(
         failed_gate_names=[by_id[g].name_he for g in scorecard.failed_gates if g in by_id],
         weakest_dim_name=by_id[weakest].name_he if weakest else None,
         recommendation=recommendation,
+        # Who-said-what is certain on a stereo recording and inferred on a mono
+        # one. A score built on an inferred split must say so on its face.
+        attribution_mode=dialog.attribution_mode if dialog else None,
+        role_confidence=dialog.role_confidence if dialog else None,
     )
