@@ -278,6 +278,10 @@ class ScoreCard(BaseModel):
     model: str
     prompt_sha256: str
     prompt_version: str
+    # Which rubric produced this score. Without it, a scorecard from before a
+    # rubric change is indistinguishable from one after it, and the two cannot
+    # honestly be averaged together.
+    rubric_sha256: str = ""
     retries: int = 0
     latency_sec: float = 0.0
     n_samples: int = 1

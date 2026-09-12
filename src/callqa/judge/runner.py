@@ -218,6 +218,7 @@ def run_judge(
         model=config.model if judge.name == "vllm" else f"mock:{judge.name}",
         prompt_sha256=prompt_sha256(*prompts_for_hash),
         prompt_version=PROMPT_VERSION,
+        rubric_sha256=rubric.sha256,
         retries=total_retries,
         latency_sec=round(time.monotonic() - start_time, 3),
         n_samples=config.n_samples,

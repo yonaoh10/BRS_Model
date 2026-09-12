@@ -35,6 +35,10 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from callqa.ingestion import sanitize_call_id  # noqa: E402
+
 COLUMNS = ["call_id", "banker_id", "file_name", "call_date", "call_type",
            "banker_channel", "banker_name"]
 SAMPLE_RATE = "16000"
@@ -84,16 +88,30 @@ def build_mono(source: Path, out: Path) -> None:
 
 
 def upsert_metadata(path: Path, row: dict[str, str]) -> None:
+    """Add or replace one row, keeping every column the file already had.
+
+    Rewriting with only this script's seven known columns silently deleted any
+    the bank had added, and doing it in place left no way back if the write
+    failed halfway.
+    """
     rows: list[dict[str, str]] = []
+    fieldnames = list(COLUMNS)
     if path.exists():
         with path.open(newline="", encoding="utf-8-sig") as fh:
-            rows = [r for r in csv.DictReader(fh) if r.get("call_id") != row["call_id"]]
+            reader = csv.DictReader(fh)
+            existing = [c for c in (reader.fieldnames or []) if c]
+            fieldnames = existing + [c for c in COLUMNS if c not in existing]
+            rows = [r for r in reader if r.get("call_id") != row["call_id"]]
+        backup = path.with_suffix(path.suffix + ".bak")
+        backup.write_bytes(path.read_bytes())
     rows.append(row)
-    with path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=COLUMNS)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
-            writer.writerow({c: r.get(c, "") for c in COLUMNS})
+            writer.writerow({c: (r.get(c) or "") for c in fieldnames})
+    tmp.replace(path)
 
 
 def main() -> int:
@@ -115,6 +133,9 @@ def main() -> int:
     if not shutil.which("ffmpeg"):
         print("ERROR: ffmpeg not found on PATH", file=sys.stderr)
         return 2
+    call_id = sanitize_call_id(args.call_id)
+    if call_id != call_id:
+        print(f"note: using call id {call_id!r} (a call id becomes a file name)")
     two_tracks = bool(args.banker_track and args.customer_track)
     if two_tracks == bool(args.mono):
         print("ERROR: give either --banker-track with --customer-track, or --mono",
@@ -123,7 +144,7 @@ def main() -> int:
 
     calls_dir = args.input_dir / "calls"
     calls_dir.mkdir(parents=True, exist_ok=True)
-    out = calls_dir / f"{args.call_id}.wav"
+    out = calls_dir / f"{call_id}.wav"
 
     if two_tracks:
         for p in (args.banker_track, args.customer_track):
@@ -140,7 +161,7 @@ def main() -> int:
         channel = ""
 
     upsert_metadata(args.input_dir / "metadata.csv", {
-        "call_id": args.call_id, "banker_id": args.banker_id,
+        "call_id": call_id, "banker_id": args.banker_id,
         "file_name": out.name, "call_date": args.call_date,
         "call_type": args.call_type, "banker_channel": channel,
         "banker_name": args.banker_name,
@@ -153,7 +174,7 @@ def main() -> int:
     else:
         print("mono: speaker attribution will need pyannote (set HF_TOKEN before processing)")
     print(f"\nnext:\n  python -m callqa validate-inputs\n"
-          f"  python -m callqa process --audio {out} --call-id {args.call_id} "
+          f"  python -m callqa process --audio {out} --call-id {call_id} "
           f"--banker-id {args.banker_id}"
           + (f" --banker-channel {channel}" if channel else ""))
     return 0

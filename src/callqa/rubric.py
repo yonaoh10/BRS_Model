@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import yaml
@@ -35,6 +36,9 @@ class RubricDimension(BaseModel):
 class Rubric(BaseModel):
     version: str
     dimensions: list[RubricDimension]
+    # Content hash of the file this was loaded from, stamped onto every
+    # scorecard so a score can be traced to the rubric that produced it.
+    sha256: str = ""
 
     @field_validator("dimensions")
     @classmethod
@@ -69,6 +73,9 @@ def load_rubric(path: str | Path | None = None) -> Rubric:
             "rubric defines no gate dimension, so the gate cap can never apply. "
             "Mark at least one dimension with gate: true."
         )
+    rubric.sha256 = hashlib.sha256(
+        resolved.read_bytes()
+    ).hexdigest()[:16]
     return rubric
 
 

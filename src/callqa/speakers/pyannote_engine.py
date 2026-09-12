@@ -132,20 +132,47 @@ def _segments_from_output(output, prefer_exclusive: bool = True) -> list[Diarize
     one assigns a single speaker to every moment, which is what word-level
     attribution wants. 3.x returns an Annotation directly.
     """
-    annotation = output
-    if prefer_exclusive and hasattr(output, "exclusive_speaker_diarization"):
-        annotation = output.exclusive_speaker_diarization
-    elif hasattr(output, "speaker_diarization"):
-        annotation = output.speaker_diarization
+    # Preference, then whatever the object actually offers. A None attribute
+    # is as absent as a missing one, and an exclusive-only result must still
+    # be readable when exclusive mode is switched off.
+    annotation = None
+    candidates = ["exclusive_speaker_diarization", "speaker_diarization"]
+    if not prefer_exclusive:
+        candidates.reverse()
+    for name in candidates:
+        value = getattr(output, name, None)
+        if value is not None:
+            annotation = value
+            break
+    if annotation is None:
+        annotation = output
 
     segments: list[DiarizedSegment] = []
     if hasattr(annotation, "itertracks"):
         for turn, _, label in annotation.itertracks(yield_label=True):
             segments.append(DiarizedSegment(str(label), float(turn.start), float(turn.end)))
     else:
-        # pyannote 4.x iterates (segment, label) pairs directly.
         for item in annotation:
-            turn, label = (item[0], item[-1]) if isinstance(item, tuple) else (item, "SPEAKER_00")
+            turn, label = _segment_and_label(item)
+            if turn is None:
+                continue
             segments.append(DiarizedSegment(str(label), float(turn.start), float(turn.end)))
     segments.sort(key=lambda s: (s.start, s.end))
     return segments
+
+
+def _segment_and_label(item) -> tuple[object | None, str]:  # noqa: ANN001
+    """Unpack one item of a 4.x annotation.
+
+    pyannote's Segment is itself a NamedTuple of (start, end), so testing for
+    `isinstance(item, tuple)` unpacked the segment's own floats and then asked
+    a float for its .start. Duck-typing on the attributes is what actually
+    distinguishes the two shapes.
+    """
+    if hasattr(item, "start") and hasattr(item, "end"):
+        return item, "SPEAKER_00"
+    if isinstance(item, (tuple, list)) and len(item) >= 2:
+        first, last = item[0], item[-1]
+        if hasattr(first, "start"):
+            return first, last
+    return None, "SPEAKER_00"
