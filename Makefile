@@ -1,4 +1,4 @@
-.PHONY: test lint sample mock-e2e clean cloud-up cloud-status cloud-down cloud-remove
+.PHONY: test lint sample mock-e2e clean up down dashboard docker-build cloud-up cloud-status cloud-down cloud-remove
 
 test:
 	python -m pytest -q
@@ -17,6 +17,23 @@ mock-e2e: sample
 
 clean:
 	rm -rf data/output data/callqa_state.db*
+
+# --- one-command bring-up with Docker ---------------------------------------
+# First time:  cp .env.example .env   (then paste keys into .env)
+up: .env
+	docker compose up --build
+
+down:
+	docker compose down
+
+dashboard: .env
+	docker compose up --build dashboard
+
+docker-build:
+	docker build -t callqa:local .
+
+.env:
+	@if [ ! -f .env ]; then cp .env.example .env && echo "created .env from .env.example - paste your keys into it"; fi
 
 # --- dev-phase cloud option (see cloud/README.md) -------------------------
 cloud-up:

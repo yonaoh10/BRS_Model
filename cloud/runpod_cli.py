@@ -29,6 +29,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from callqa.dotenv import load_dotenv, write_env_values  # noqa: E402
+
 API_BASE = "https://rest.runpod.io/v1"
 STATE_FILE = Path(__file__).parent / ".runpod_state.json"
 
@@ -47,7 +52,9 @@ def _request(method: str, path: str, payload: dict | None = None) -> dict:
     if not api_key:
         raise RunPodError(
             "RUNPOD_API_KEY is not set. Create a key at "
-            "https://console.runpod.io/user/settings (API Keys) and export it."
+            "https://console.runpod.io/user/settings (API Keys), then paste it "
+            f"into {REPO_ROOT / '.env'} on the line RUNPOD_API_KEY= "
+            "(copy .env.example to .env if the file does not exist yet)."
         )
     url = f"{API_BASE}{path}"
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -142,21 +149,31 @@ def cmd_up(args: argparse.Namespace) -> int:
 
 
 def _print_urls(state: dict) -> int:
+    """Hand the pod's endpoints to the pipeline by writing them into .env.
+
+    Printing shell exports for the operator to paste was the one step in the
+    cloud round trip that could not be automated away by a launcher, and a
+    console that prints two API keys leaves them in the scrollback. The
+    pipeline loads .env itself, so after this the next `callqa run` just works.
+    """
     pod_id = state.get("pod_id")
     if not pod_id:
         print("No pod recorded yet. Run: python cloud/runpod_cli.py up")
         return 2
+    values = {
+        "CALLQA_ASR__BASE_URL": proxy_url(pod_id, ASR_PORT),
+        "CALLQA_ASR__API_KEY": state.get("asr_api_key", ""),
+        "CALLQA_JUDGE__BASE_URL": proxy_url(pod_id, JUDGE_PORT) + "/v1",
+        "CALLQA_JUDGE__API_KEY": state.get("judge_api_key", ""),
+    }
+    target = write_env_values(values)
     print()
-    print("Put these into config/config.cloud.yaml (or export them):")
-    print(f"  asr.base_url    : {proxy_url(pod_id, ASR_PORT)}")
-    print(f"  asr.api_key     : {state.get('asr_api_key', '<unknown>')}")
-    print(f"  judge.base_url  : {proxy_url(pod_id, JUDGE_PORT)}/v1")
-    print(f"  judge.api_key   : {state.get('judge_api_key', '<unknown>')}")
+    print(f"Endpoints written to {target} (keys not shown):")
+    print(f"  ASR   : {values['CALLQA_ASR__BASE_URL']}")
+    print(f"  judge : {values['CALLQA_JUDGE__BASE_URL']}")
     print()
-    print("  export CALLQA_ASR__BASE_URL=" + proxy_url(pod_id, ASR_PORT))
-    print("  export CALLQA_ASR__API_KEY=" + state.get("asr_api_key", ""))
-    print("  export CALLQA_JUDGE__BASE_URL=" + proxy_url(pod_id, JUDGE_PORT) + "/v1")
-    print("  export CALLQA_JUDGE__API_KEY=" + state.get("judge_api_key", ""))
+    print("Next:  python -m callqa run --config config/config.cloud.yaml")
+    print("Stop paying when done:  python cloud/runpod_cli.py down")
     return 0
 
 
@@ -218,6 +235,7 @@ def cmd_destroy(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)

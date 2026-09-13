@@ -34,6 +34,7 @@ import argparse
 import hmac
 import json
 import logging
+import os
 import re
 import secrets
 import statistics
@@ -47,6 +48,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from callqa.dotenv import load_dotenv  # noqa: E402
 
 logger = logging.getLogger("callqa.dashboard")
 
@@ -295,12 +298,18 @@ def main() -> int:
     parser.add_argument("--allow-actions", action="store_true",
                         help="permit endpoints that mutate state or spend money (not yet implemented)")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--bind", default="127.0.0.1",
+                        help="interface to listen on. Only ever change this inside a "
+                             "container whose port is published to 127.0.0.1 on the host.")
     args = parser.parse_args()
+    load_dotenv()
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    Handler.token = secrets.token_urlsafe(24)
+    # A fixed token from .env keeps the URL stable across restarts, which is
+    # what makes the dashboard usable from a container; otherwise a fresh one.
+    Handler.token = os.environ.get("CALLQA_DASHBOARD_TOKEN") or secrets.token_urlsafe(24)
     Handler.output_dir = args.output_dir
     Handler.allow_actions = args.allow_actions
 
@@ -308,12 +317,19 @@ def main() -> int:
         print(f"ERROR: dashboard page missing at {PAGE}", file=sys.stderr)
         return 2
 
-    # 127.0.0.1 only - this console can start billable cloud machines.
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    # 127.0.0.1 only - this console can start billable cloud machines. The
+    # container is the one legitimate exception: it listens on all of ITS
+    # interfaces while docker publishes the port to 127.0.0.1 on the host.
+    if args.bind != "127.0.0.1":
+        logger.warning("listening on %s: make sure this port is only reachable from "
+                       "this machine", args.bind)
+    server = ThreadingHTTPServer((args.bind, args.port), Handler)
     url = f"http://127.0.0.1:{args.port}/?t={Handler.token}"
     print("\n  Call-QA dashboard is running.")
     print(f"  Open: {url}")
-    print("  (the token in the link is required; it changes each start)")
+    print("  (the token in the link is required"
+          + ("; set CALLQA_DASHBOARD_TOKEN in .env to keep it stable)"
+             if not os.environ.get("CALLQA_DASHBOARD_TOKEN") else ")"))
     print("  Press Ctrl+C to stop.\n")
     if not args.no_browser:
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()

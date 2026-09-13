@@ -28,6 +28,16 @@ real engines by config only. Emotion recognition is explicitly out of scope.
 
 ## Quick start (dev machine, mock mode)
 
+The shortest path on any machine, with or without Docker:
+
+```bash
+cp .env.example .env              # keys go here (RunPod, Hugging Face); git ignores it
+./scripts/first_run.sh            # local Python: mock pipeline + dashboard
+./scripts/first_run.sh --docker   # the same inside the container (docker compose up)
+```
+
+Step by step:
+
 ```bash
 pip install -r requirements.txt
 pip install -e .
@@ -221,6 +231,16 @@ Config lives in `config/` (`config.yaml`, `rubric.yaml`,
 באמצעות קונפיגורציה בלבד. זיהוי רגשות מוחרג במפורש מהמערכת.
 
 ## התחלה מהירה (מכונת פיתוח, מצב mock)
+
+הדרך הקצרה ביותר בכל מחשב, עם Docker או בלעדיו:
+
+```bash
+cp .env.example .env              # המפתחות נכנסים לכאן (RunPod, Hugging Face); git מתעלם מהקובץ
+./scripts/first_run.sh            # פייתון מקומי: פייפליין mock + דשבורד
+./scripts/first_run.sh --docker   # אותו דבר בתוך הקונטיינר (docker compose up)
+```
+
+שלב אחר שלב:
 
 ```bash
 pip install -r requirements.txt
