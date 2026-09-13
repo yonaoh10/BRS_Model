@@ -456,3 +456,70 @@ class TestPyannoteOutputShapes:
 
         result = _segments_from_output(Output())
         assert [(s.start, s.end) for s in result] == [(0.0, 5.0), (5.0, 9.0)]
+
+
+# --------------------------------------------------------- the .env round trip
+
+class TestDotenv:
+    @pytest.fixture(autouse=True)
+    def _restore_environment(self):  # noqa: ANN202
+        """These tests apply values to the real process environment, exactly
+        as the loader does for the CLI; nothing may outlive the test."""
+        import os
+
+        saved = dict(os.environ)
+        yield
+        os.environ.clear()
+        os.environ.update(saved)
+
+    def test_shell_values_win_over_the_file(self, tmp_path: Path, monkeypatch) -> None:
+        from callqa.dotenv import load_dotenv
+
+        env = tmp_path / ".env"
+        env.write_text("RUNPOD_API_KEY=from-file\nHF_TOKEN=hf-file\n", encoding="utf-8")
+        monkeypatch.setenv("RUNPOD_API_KEY", "from-shell")
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        applied = load_dotenv(env)
+        assert applied == ["HF_TOKEN"]
+        import os
+        assert os.environ["RUNPOD_API_KEY"] == "from-shell"
+
+    def test_empty_placeholders_are_not_applied(self, tmp_path: Path, monkeypatch) -> None:
+        """`.env.example` ships every key blank; a blank must not shadow a
+        value the operator set elsewhere or read as 'configured'."""
+        from callqa.dotenv import load_dotenv
+
+        env = tmp_path / ".env"
+        env.write_text("RUNPOD_API_KEY=\n", encoding="utf-8")
+        monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+        assert load_dotenv(env) == []
+
+    def test_endpoints_are_written_without_losing_other_lines(self, tmp_path: Path,
+                                                               monkeypatch) -> None:
+        """runpod_cli hands the pod's endpoints to the pipeline through .env;
+        the operator's own lines and comments must survive that write."""
+        from callqa.dotenv import write_env_values
+
+        env = tmp_path / ".env"
+        env.write_text("# keep me\nRUNPOD_API_KEY=rp\nCALLQA_ASR__BASE_URL=\n", encoding="utf-8")
+        write_env_values({"CALLQA_ASR__BASE_URL": "https://x/asr",
+                          "CALLQA_JUDGE__BASE_URL": "https://x/v1"}, env)
+        text = env.read_text(encoding="utf-8")
+        assert "# keep me" in text and "RUNPOD_API_KEY=rp" in text
+        assert "CALLQA_ASR__BASE_URL=https://x/asr" in text
+        assert text.count("CALLQA_ASR__BASE_URL=") == 1
+        assert oct(env.stat().st_mode & 0o777) == "0o600"
+
+    def test_the_example_file_parses_and_names_every_key_the_code_reads(self) -> None:
+        import re
+
+        from callqa.dotenv import parse_env_file
+
+        example = Path(__file__).resolve().parent.parent / ".env.example"
+        keys = set(parse_env_file(example.read_text(encoding="utf-8")))
+        assert {"RUNPOD_API_KEY", "HF_TOKEN", "CALLQA_JUDGE__API_KEY",
+                "CALLQA_ASR__BASE_URL", "CALLQA_DASHBOARD_TOKEN"} <= keys
+        # nothing in the example may carry a value: it is a template
+        for line in example.read_text(encoding="utf-8").splitlines():
+            if re.match(r"^[A-Z_]+=", line):
+                assert line.endswith("="), f"template line has a value: {line}"

@@ -76,7 +76,8 @@ the Claude Code web environment's network settings.
    - Give it Read/Write access, copy the key (shown once).
 
 **3. Hand the key over**
-   - On your own machine: `export RUNPOD_API_KEY=...`
+   - On your own machine: `cp .env.example .env`, then paste the key on the
+     `RUNPOD_API_KEY=` line. Every command in this project loads `.env`.
    - For Claude to drive it: paste the key into the Claude Code web
      environment as the environment variable `RUNPOD_API_KEY`, and add
      `rest.runpod.io` to the allowed domains
@@ -86,7 +87,7 @@ the Claude Code web environment's network settings.
 **4. Start the machine**
    ```bash
    python cloud/runpod_cli.py up            # add --gpu "NVIDIA RTX A6000" for 48GB
-   python cloud/runpod_cli.py urls          # prints URLs + generated secrets
+   python cloud/runpod_cli.py urls          # writes the endpoints + secrets into .env
    ```
 
 **5. Install on the machine** (once per new volume)
@@ -101,12 +102,9 @@ the Claude Code web environment's network settings.
      10–20 minutes the first time; later starts reuse the volume.
 
 **6. Point your laptop at it**
+   Nothing to export: step 4 wrote the four `CALLQA_*` endpoint variables into
+   `.env`, and the pipeline reads them from there.
    ```bash
-   export CALLQA_ASR__BASE_URL=...      # all four printed by `runpod_cli.py urls`
-   export CALLQA_ASR__API_KEY=...
-   export CALLQA_JUDGE__BASE_URL=...
-   export CALLQA_JUDGE__API_KEY=...
-
    python -m callqa run --config config/config.cloud.yaml
    python -m callqa report --config config/config.cloud.yaml
    ```
@@ -227,7 +225,8 @@ option was never in that path.
    - הרשאת קריאה/כתיבה, והעתק את המפתח (מוצג פעם אחת בלבד).
 
 **3. מסירת המפתח**
-   - במחשב שלך: `export RUNPOD_API_KEY=...`
+   - במחשב שלך: `cp .env.example .env`, ואז הדבק את המפתח בשורה
+     `RUNPOD_API_KEY=`. כל פקודה בפרויקט טוענת את `.env`.
    - כדי שקלוד יפעיל את זה: הדבק את המפתח בסביבת Claude Code כמשתנה הסביבה
      `RUNPOD_API_KEY`, והוסף את `rest.runpod.io` לדומיינים המורשים
      ([תיעוד](https://code.claude.com/docs/en/claude-code-on-the-web)).
@@ -237,7 +236,7 @@ option was never in that path.
 **4. הפעלת המכונה**
    ```bash
    python cloud/runpod_cli.py up            # הוסף --gpu "NVIDIA RTX A6000" עבור 48GB
-   python cloud/runpod_cli.py urls          # מדפיס כתובות + סודות שנוצרו
+   python cloud/runpod_cli.py urls          # כותב את הכתובות והסודות לתוך .env
    ```
 
 **5. התקנה על המכונה** (פעם אחת לכל אחסון חדש)
@@ -252,12 +251,9 @@ option was never in that path.
      הראשונה; הפעלות הבאות משתמשות באחסון הקיים.
 
 **6. הפניית המחשב שלך אליה**
+   אין מה לייצא: שלב 4 כתב את ארבעת משתני `CALLQA_*` לתוך `.env`,
+   והפייפליין קורא אותם משם.
    ```bash
-   export CALLQA_ASR__BASE_URL=...      # כל הארבעה מודפסים על ידי `runpod_cli.py urls`
-   export CALLQA_ASR__API_KEY=...
-   export CALLQA_JUDGE__BASE_URL=...
-   export CALLQA_JUDGE__API_KEY=...
-
    python -m callqa run --config config/config.cloud.yaml
    python -m callqa report --config config/config.cloud.yaml
    ```

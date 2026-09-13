@@ -1,0 +1,48 @@
+# One command to bring the whole system up on any machine with Docker:
+#
+#   cp .env.example .env            # paste RUNPOD_API_KEY etc. into .env
+#   docker compose up --build       # mock pipeline on synthetic calls + dashboard
+#   open http://127.0.0.1:8765/?t=<CALLQA_DASHBOARD_TOKEN from .env>
+#
+# Real recordings go in data/input/calls/ with a metadata.csv beside them;
+# then:  docker compose run --rm pipeline run
+# With a GPU box started by cloud/runpod_cli.py:
+#        docker compose run --rm pipeline run --config config/config.cloud.yaml
+
+x-common: &common
+  build: .
+  image: callqa:local
+  env_file:
+    - path: .env
+      required: false
+  volumes:
+    - ./data:/app/data
+    - ./config:/app/config
+    - ./cloud:/app/cloud          # so runpod_cli's state file persists
+  working_dir: /app
+
+services:
+  # The pipeline itself. Exits when the batch is done.
+  pipeline:
+    <<: *common
+    command: ["run", "--mock"]
+    # Reaching a GPU box on RunPod, or the bank's vLLM, is outbound only;
+    # nothing listens here.
+
+  # The operator console. Published ONLY to the host's loopback address.
+  dashboard:
+    <<: *common
+    command: ["dashboard"]
+    ports:
+      - "127.0.0.1:8765:8765"
+    depends_on:
+      pipeline:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Production-style ingestion: watches data/input/calls/ for new recordings.
+  watch:
+    <<: *common
+    command: ["watch"]
+    profiles: ["watch"]
+    restart: unless-stopped

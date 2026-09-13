@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from callqa.config import Config, load_config
+from callqa.dotenv import load_dotenv
 from callqa.models import (
     EXIT_FAILED,
     EXIT_NEEDS_HUMAN_REVIEW,
@@ -431,6 +432,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Before the parser: config overrides come from the environment, and the
+    # operator's `.env` is where the endpoint of a GPU box or a judge key lives.
+    load_dotenv()
     args = build_parser().parse_args(argv)
     _setup_logging(getattr(args, "verbose", False))
     return args.func(args)
