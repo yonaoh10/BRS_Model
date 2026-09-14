@@ -6,7 +6,10 @@
 # vLLM. The only extra is cloud/asr_server.py, which exposes the SAME
 # FasterWhisperEngine over HTTP so a laptop can reach it.
 #
-# Usage on the pod (RunPod web terminal):
+# Normally this runs unattended as the pod's container start command
+# (runpod_cli.py passes it via dockerStartCmd and sets the env vars below at
+# pod creation), so `runpod_cli.py up` is the entire bring-up. To run it by
+# hand in a web terminal instead:
 #   export CALLQA_ASR_API_KEY=...      # printed by: runpod_cli.py urls
 #   export VLLM_API_KEY=...            # printed by: runpod_cli.py urls
 #   export CALLQA_LLM_MODEL=dicta-il/dictalm2.0-instruct
@@ -35,7 +38,14 @@ python scripts/download_models.py --asr --models-dir models
 python scripts/download_models.py --llm --llm-model "$LLM_MODEL" --models-dir models
 
 echo "=== 4/5 judge: vLLM on :8000 ==="
-nohup vllm serve "$LLM_MODEL" \
+# Serve the copy download_models.py just fetched (it lives on the persistent
+# volume), but keep the HF id as the served name so clients address the model
+# by id. Serving the id directly made vLLM download the weights a second time
+# into its own cache, which the container disk paid for on every boot.
+LLM_LOCAL_DIR="models/${LLM_MODEL//\//--}"   # same mapping as download_models.py
+[ -d "$LLM_LOCAL_DIR" ] || LLM_LOCAL_DIR="$LLM_MODEL"
+nohup vllm serve "$LLM_LOCAL_DIR" \
+    --served-model-name "$LLM_MODEL" \
     --port 8000 \
     --max-model-len 8192 \
     --api-key "$VLLM_API_KEY" \

@@ -533,3 +533,11 @@ def build_redactor(config: RedactionConfig, mock: bool) -> Redactor:
     except ImportError:
         logger.warning("presidio not installed; using built-in regex redactor")
         return RegexRedactor(config)
+    except Exception as exc:  # noqa: BLE001 - degrade, never block redaction
+        # Presidio imports fine but cannot construct - typically the spaCy
+        # model its AnalyzerEngine loads (en_core_web_lg) is not installed,
+        # which raises OSError, not ImportError. Redaction itself must never
+        # die with it: the built-in recognizers do all the Hebrew-specific
+        # work and presidio only layers international extras on top.
+        logger.warning("presidio unavailable (%s); using built-in regex redactor", exc)
+        return RegexRedactor(config)
