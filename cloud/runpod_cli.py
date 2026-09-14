@@ -42,6 +42,33 @@ DEFAULT_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 ASR_PORT = 8001
 JUDGE_PORT = 8000
 
+# Runs as the container's start command, so `up` is the whole bring-up: no
+# web terminal, no manual exports. The repo URL, model id and both service
+# keys arrive through the pod's env (set at creation below); the volume at
+# /workspace keeps the clone and the models across stop/start, and the
+# trailing sleep keeps the container alive after bootstrap has launched the
+# two services in the background. All output lands on the volume so a failed
+# boot can be read later.
+POD_START_CMD = (
+    "set -x; mkdir -p /workspace/logs; "
+    "exec > >(tee -a /workspace/logs/bootstrap.log) 2>&1; "
+    # SSH first, so a failed bootstrap can still be reached and read.
+    'if [ -n "${PUBLIC_KEY:-}" ]; then mkdir -p /root/.ssh; '
+    'echo "$PUBLIC_KEY" > /root/.ssh/authorized_keys; '
+    "chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys; "
+    "service ssh start || /usr/sbin/sshd || true; fi; "
+    "command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git); "
+    "cd /workspace; "
+    '[ -d BRS_Model/.git ] || git clone "$CALLQA_REPO_URL" BRS_Model; '
+    "cd BRS_Model; git pull --ff-only || true; "
+    "bash cloud/bootstrap_pod.sh; "
+    # Diarization weights are gated; fetched only when the operator put
+    # HF_TOKEN in .env. Harmless no-op otherwise.
+    'if [ -n "${HF_TOKEN:-}" ]; then '
+    "python scripts/download_models.py --diarization --models-dir models || true; fi; "
+    "sleep infinity"
+)
+
 
 class RunPodError(RuntimeError):
     pass
@@ -65,6 +92,9 @@ def _request(method: str, path: str, payload: dict | None = None) -> dict:
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # Cloudflare in front of the RunPod API rejects urllib's default
+            # Python-urllib/x.y User-Agent with a 403 (error code 1010).
+            "User-Agent": "callqa-runpod-cli/1.0",
         },
     )
     try:
@@ -124,12 +154,16 @@ def cmd_up(args: argparse.Namespace) -> int:
             "containerDiskInGb": args.disk,
             "volumeInGb": args.volume,
             "volumeMountPath": "/workspace",
-            "ports": [f"{ASR_PORT}/http", f"{JUDGE_PORT}/http"],
+            "ports": [f"{ASR_PORT}/http", f"{JUDGE_PORT}/http", "22/tcp"],
+            "dockerStartCmd": ["bash", "-c", POD_START_CMD],
             "env": {
                 "CALLQA_ASR_API_KEY": state["asr_api_key"],
                 "VLLM_API_KEY": state["judge_api_key"],
                 "CALLQA_REPO_URL": args.repo_url,
                 "CALLQA_LLM_MODEL": args.llm_model,
+                **({"PUBLIC_KEY": args.ssh_public_key} if args.ssh_public_key else {}),
+                **({"HF_TOKEN": os.environ["HF_TOKEN"]}
+                   if os.environ.get("HF_TOKEN") else {}),
             },
         }
         print(f"Creating pod ({args.gpu})...")
@@ -143,8 +177,10 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     state["last_started_at"] = time.time()
     save_state(state)
-    print(f"Pod {pod_id} starting. First boot must download models; expect 10-20 minutes.")
-    print("Then run the bootstrap on the pod (see cloud/README.md step 5).")
+    print(f"Pod {pod_id} starting. It bootstraps itself (clone + deps + models + serve);")
+    print("first boot downloads the models, expect 10-20 minutes. Progress is written to")
+    print("/workspace/logs/bootstrap.log on the pod. Poll readiness with:")
+    print("  python cloud/runpod_cli.py status")
     return _print_urls(state)
 
 
@@ -249,6 +285,8 @@ def main() -> int:
     p.add_argument("--volume", type=int, default=60, help="persistent volume GB (holds models)")
     p.add_argument("--llm-model", default="dicta-il/dictalm2.0-instruct")
     p.add_argument("--repo-url", default="https://github.com/yonaoh10/BRS_Model.git")
+    p.add_argument("--ssh-public-key", default=None,
+                   help="OpenSSH public key line; when set, the pod runs sshd on 22/tcp")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("status", help="show pod status and running cost")

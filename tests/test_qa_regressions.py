@@ -523,3 +523,21 @@ class TestDotenv:
         for line in example.read_text(encoding="utf-8").splitlines():
             if re.match(r"^[A-Z_]+=", line):
                 assert line.endswith("="), f"template line has a value: {line}"
+
+
+class TestPresidioConstructionFailure:
+    def test_a_presidio_that_imports_but_cannot_construct_degrades_to_regex(self, monkeypatch) -> None:
+        """PresidioRedactor() loads a spaCy model (en_core_web_lg) that is not
+        on PyPI; on a machine with presidio installed but the model missing,
+        construction raises OSError, not ImportError. build_redactor caught
+        only ImportError, so a half-installed presidio killed the whole
+        engine container instead of falling back to the built-in redactor."""
+        from callqa import redaction
+        from callqa.config import RedactionConfig
+
+        def boom(self, config):  # noqa: ANN001, ARG001
+            raise OSError("[E050] Can't find model 'en_core_web_lg'")
+
+        monkeypatch.setattr(redaction.PresidioRedactor, "__init__", boom)
+        redactor = redaction.build_redactor(RedactionConfig(), mock=False)
+        assert redactor.name == "regex"
