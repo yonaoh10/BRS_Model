@@ -6,32 +6,67 @@
   <div class="muted">
     מזהה שיחה: {{ meta.call_id }} · מזהה בנקאי: {{ meta.banker_id }}
     {% if meta.call_date %} · תאריך: {{ meta.call_date }}{% endif %}
-    · משך: {{ meta.duration_sec | mmss }} דקות
+    · משך: {{ meta.duration_sec | mmss }} (דק':שנ')
     {% if meta.call_type %} · סוג שיחה: {{ meta.call_type }}{% endif %}
   </div>
 </div>
 
+{% if scorecard.judge_engine == "mock" %}
+<div class="card" style="border-right: 4px solid #c0392b;">
+  <span class="badge badge-fail">דוח הדגמה - שיפוט מדומה</span>
+  <div>
+    הציונים, הנימוקים והציטוטים בדוח זה נוצרו על-ידי מנוע בדיקה (mock)
+    לצורכי פיתוח, ואינם משקפים הערכה של השיחה או של הבנקאי.
+    <strong>אין להשתמש בדוח זה להערכת עובד.</strong>
+  </div>
+</div>
+{% endif %}
+
+{% if review_reasons %}
+<div class="card" style="border-right: 4px solid #9a6700;">
+  <span class="badge badge-warn">השיחה ממתינה לבדיקה אנושית</span>
+  <div class="muted">
+    המערכת אינה עומדת מאחורי המספרים בדוח זה ללא אישור אנושי, מהסיבות הבאות:
+    <ul>{% for r in review_reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+  </div>
+</div>
+{% endif %}
+
 {% if attribution_mode and attribution_mode != "stereo" %}
 <div class="card">
-  <span class="badge badge-fail">ייחוס דוברים משוער</span>
-  <div class="muted">
-    ההקלטה אינה מפרידה בין הדוברים לערוצים נפרדים, ולכן החלוקה בין הבנקאי
-    ללקוח נקבעה באופן אוטומטי
+  <span class="badge badge-warn">ייחוס דוברים אוטומטי</span>
+  <div>
+    {% if diarization %}
+    החלוקה בין בנקאי ללקוח נקבעה אוטומטית: זוהו
+    {{ diarization.speakers_found }} דוברים וכל
+    {{ diarization.words_attributed }} המילים שויכו לדובר
+    {%- if diarization.words_by_nearest is not none and diarization.words_attributed %}
+      ({{ "%.1f" | format(100 - 100 * diarization.words_by_nearest / diarization.words_attributed) }}%
+      על סמך חפיפה ישירה בין התמלול לזיהוי הדוברים)
+    {%- endif %}.
+    {% else %}
+    החלוקה בין בנקאי ללקוח נקבעה אוטומטית.
+    {% endif %}
     {% if role_confidence is not none %}
-      (רמת ודאות: {{ "%.0f"|format(role_confidence * 100) }}%)
-    {% endif %}.
-    כל המדדים שתלויים בזהות הדובר - יחס דיבור, מונולוג, קטיעות, סבלנות ומספר
-    השאלות - מסתמכים על החלוקה הזאת. מומלץ לאמת אותה מול התמליל לפני שמסיקים
-    מסקנות לגבי הבנקאי.
+      זיהוי מי מהדוברים הוא הבנקאי:
+      <strong>רמת ודאות {{ "%.0f"|format(role_confidence * 100) }}%</strong>
+      (טווח 0-100%{% if min_role_confidence is not none %}; מתחת ל-{{ "%.0f"|format(min_role_confidence * 100) }}%
+      השיחה מועברת אוטומטית לבדיקה אנושית{% endif %}), על סמך מאזן הסימנים בטבלה שלהלן.
+    {% endif %}
+  </div>
+  <div class="muted">
+    ההקלטה חד-ערוצית ולכן הזהות הוסקה ולא נצפתה: מומלץ לאמת מדגמית מול
+    התמליל לפני הסקת מסקנות אישיות לגבי הבנקאי. המדדים התלויים בזהות הדובר
+    (יחס דיבור, מונולוג, קטיעות, סבלנות, שאלות) מסתמכים על חלוקה זו.
   </div>
   {% if role_signals %}
   <table>
-    <thead><tr><th>סימן</th><th>מצביע עבור</th><th>משקל</th></tr></thead>
+    <thead><tr><th>סימן</th><th>מצביע עבור</th><th>משקל בהחלטה</th></tr></thead>
     <tbody>
       {% for s in role_signals %}
       <tr>
         <td>{{ s.he }}</td>
-        <td>{{ s.role }}{% if not s.agrees %} (מנוגד){% endif %}</td>
+        <td>{{ s.role }}</td>
         <td class="mono">{{ s.weight }}</td>
       </tr>
       {% endfor %}
@@ -40,16 +75,13 @@
   {% endif %}
   {% if diarization %}
   <div class="muted">
-    הפרדת דוברים: זוהו {{ diarization.speakers_found }} דוברים,
-    {{ diarization.words_attributed }} מילים שויכו
-    {% if diarization.words_by_nearest %}
-      (מתוכן {{ diarization.words_by_nearest }} ללא חפיפה ישירה)
-    {% endif %}
     {% if diarization.reassigned_sec %}
-      · {{ diarization.reassigned_sec }} שניות של דובר נוסף מוזגו פנימה
+      {{ diarization.reassigned_sec }} שניות של דובר נוסף מוזגו פנימה ·
     {% endif %}
-    {% if diarization.smoothed_islands %}
-      · {{ diarization.smoothed_islands }} מילים בודדות יושרו לדובר השכן
+    {% if diarization.smoothed_islands == 1 %}
+      מילה בודדת אחת יושרה לדובר השכן
+    {% elif diarization.smoothed_islands %}
+      {{ diarization.smoothed_islands }} מילים בודדות יושרו לדובר השכן
     {% endif %}
   </div>
   {% endif %}
@@ -61,13 +93,16 @@
   <div style="display:flex; align-items:center; gap:24px;">
     <div class="score-big" style="color: {{ total_color }};">{{ scorecard.weighted_total }}</div>
     <div>
-      <div>מתוך 100 (ממוצע משוקלל של ממדי המחוון)</div>
+      <div>מתוך 100 · כל ממד (1-5) ממופה לסולם 0-100 כך ש-1=0, 3=50, 5=100,
+        ומשוקלל לפי משקלי המחוון</div>
       {% if scorecard.gate_failed %}
         <span class="badge badge-fail">חריגת שער: הציון הוגבל ל-59</span>
         <div class="muted">ממדי שער שנכשלו: {{ failed_gate_names | join(", ") }}</div>
       {% else %}
         <span class="badge badge-ok">כל ממדי השער תקינים</span>
       {% endif %}
+      <div class="muted">ממדי שער (זיהוי ואימות, ציות וגילוי נאות): ציון 2 ומטה
+        באחד מהם מגביל את הציון הכולל ל-59 לכל היותר, ללא תלות ביתר הממדים.</div>
       {% if scorecard.truncated %}
         <div class="muted">שיחה ארוכה: ההערכה בוצעה על תמליל מקוצר (ממדי השער הוערכו על תחילת השיחה).</div>
       {% endif %}

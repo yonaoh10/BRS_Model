@@ -77,7 +77,8 @@ def test_the_report_says_the_roles_were_inferred(mono_result) -> None:  # noqa: 
     _, workspace = mono_result
     html = (workspace.paths.output_dir / "reports" / "calls" / "MONO001.html").read_text(
         encoding="utf-8")
-    assert "ייחוס דוברים משוער" in html, "a mono call must not read as certain"
+    assert "ייחוס דוברים אוטומטי" in html, "a mono call must not read as certain"
+    assert "הזהות הוסקה ולא נצפתה" in html, "the report must say roles were inferred"
 
 
 def test_a_near_coin_flip_is_held_for_a_human(tmp_path: Path, workspace, engines) -> None:  # noqa: ANN001
