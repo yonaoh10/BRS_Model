@@ -10,7 +10,9 @@
 #        docker compose run --rm pipeline run --config config/config.cloud.yaml
 
 x-common: &common
-  build: .
+  build:
+    context: .
+    target: base
   image: callqa:local
   env_file:
     - path: .env
@@ -35,10 +37,38 @@ services:
     command: ["dashboard"]
     ports:
       - "127.0.0.1:8765:8765"
-    depends_on:
-      pipeline:
-        condition: service_completed_successfully
+    # No depends_on on the pipeline: the dashboard tolerates empty or partial
+    # state by design, and a batch with a needs_human_review call exits 1,
+    # which under service_completed_successfully silently kept the dashboard
+    # from ever starting.
     restart: unless-stopped
+
+  # Real ASR + diarization on this machine's CPU (torch has no macOS x86_64
+  # wheels, so the models can only run inside the Linux container). Audio
+  # never leaves the machine; only the redacted transcript goes to the judge.
+  #   one-time download:  HF_HUB_OFFLINE=0 docker compose run --rm \
+  #       --entrypoint python server scripts/download_models.py --asr --diarization
+  #   process a call:     docker compose run --rm server process --audio ...
+  server:
+    <<: *common
+    build:
+      context: .
+      target: server
+    image: callqa:server
+    profiles: ["server"]
+    environment:
+      # The warm HF cache must land inside the mounted models/ volume or it
+      # dies with the container and the next offline run fails obscurely.
+      HF_HOME: /app/models/hf
+      # Baked to 1 in the image; the one-off model download overrides it to 0.
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${HF_HUB_OFFLINE:-1}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./cloud:/app/cloud
+      - ./models:/app/models
+      - ./Calls:/app/Calls:ro
 
   # Production-style ingestion: watches data/input/calls/ for new recordings.
   watch:
