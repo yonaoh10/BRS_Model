@@ -600,3 +600,38 @@ class TestEvidenceQuoteSnapping:
                 timestamp="00:05", speaker="banker")])})
         problems = verify_evidence(resp, self._redacted())
         assert any("not found verbatim" in p for p in problems)
+
+
+class TestASRSpacedHyphenDigitRuns:
+    def test_id_dictated_with_space_hyphen_separators_is_masked(self) -> None:
+        """The real ivrit.ai ASR writes dictated numbers as '314 -15992 -6265'
+        (a space BEFORE each hyphen). DIGIT_RUN_RE allowed only one separator
+        char between digits, so the run split into fragments below the masking
+        threshold and a complete national ID left the redaction stage unmasked
+        on the first real recording (REAL002)."""
+        from callqa.config import RedactionConfig
+        from callqa.models import DialogTranscript, DialogTurn
+        from callqa.redaction import RegexRedactor
+
+        dialog = DialogTranscript(call_id="C1", attribution_mode="stereo", turns=[
+            DialogTurn(speaker="banker", start=0.0, end=4.0,
+                       text="תודה, אני חוזר על זה לוודא 314 -15992 -6265. הכל נכון?"),
+        ])
+        red = RegexRedactor(RedactionConfig())._redact(dialog, [])
+        assert "15992" not in red.turns[0].text
+        assert "6265" not in red.turns[0].text
+        assert "█" in red.turns[0].text
+
+    def test_amounts_with_plain_spaces_are_still_not_joined_into_ids(self) -> None:
+        """The guard the one-separator rule was protecting: two amounts
+        separated by a space must not merge into one maskable run."""
+        from callqa.config import RedactionConfig
+        from callqa.models import DialogTranscript, DialogTurn
+        from callqa.redaction import RegexRedactor
+
+        dialog = DialogTranscript(call_id="C2", attribution_mode="stereo", turns=[
+            DialogTurn(speaker="banker", start=0.0, end=4.0,
+                       text="זה עולה 500 300 שקל בסך הכול."),
+        ])
+        red = RegexRedactor(RedactionConfig())._redact(dialog, [])
+        assert red.turns[0].text == "זה עולה 500 300 שקל בסך הכול."
