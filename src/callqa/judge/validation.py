@@ -98,11 +98,34 @@ def _snap_quote_to_turn(quote: str, raw_turn: str) -> str | None:
     return best_span if best_ratio >= SNAP_MIN_SIMILARITY else None
 
 
+_SPEAKER_LABEL_RE = re.compile(r"\s*(?:בנקאי|לקוח)\s*:\s*")
+
+
+def _same_speaker_blocks(redacted: RedactedTranscript) -> list[tuple[str, str]]:
+    """(speaker, raw text) for each run of consecutive same-speaker turns.
+
+    Verification used to check quotes per TURN, but ASR segmentation splits
+    one utterance into consecutive turns mid-sentence ("...שביצעת ב-10
+    לחודש," / "30 שקלים...") and the judge rightly quotes the natural
+    sentence - which then failed as a "cross-turn splice". Text spanning
+    consecutive turns of the SAME speaker is something that speaker actually
+    said, contiguously; only a splice across a speaker change is invented.
+    """
+    blocks: list[tuple[str, str]] = []
+    for turn in redacted.turns:
+        if blocks and blocks[-1][0] == turn.speaker:
+            blocks[-1] = (turn.speaker, blocks[-1][1] + " " + turn.text)
+        else:
+            blocks.append((turn.speaker, turn.text))
+    return blocks
+
+
 def verify_evidence(response: JudgeResponse, redacted: RedactedTranscript) -> list[str]:
     """Return a list of human-readable problems (empty = all quotes verified)."""
-    # Per turn, never joined: a quote spliced across a turn boundary is not
-    # something anybody said.
-    turns = [(t.speaker, normalize_for_match(t.text)) for t in redacted.turns]
+    # Per same-speaker block, never joined across a speaker change: a quote
+    # spliced across two speakers is not something anybody said.
+    raw_blocks = _same_speaker_blocks(redacted)
+    turns = [(speaker, normalize_for_match(text)) for speaker, text in raw_blocks]
     call_end = max((t.end for t in redacted.turns), default=0.0)
     problems: list[str] = []
     for dim_id, dim_score in response.scores.items():
@@ -110,6 +133,12 @@ def verify_evidence(response: JudgeResponse, redacted: RedactedTranscript) -> li
             problems.append(f"dimension '{dim_id}': no evidence quote provided")
             continue
         for ev in dim_score.evidence:
+            # The prompt renders turns as "[mm:ss] בנקאי: text", and models
+            # copy the speaker labels into quotes - leading, and mid-quote
+            # when they quote across our line breaks. The labels are a
+            # formatting artifact of our own prompt, not invented content -
+            # strip them everywhere rather than reject the quote.
+            ev.quote = _SPEAKER_LABEL_RE.sub(" ", ev.quote).strip()
             needle = normalize_for_match(ev.quote)
             if len(needle) < MIN_QUOTE_CHARS:
                 problems.append(
@@ -120,8 +149,8 @@ def verify_evidence(response: JudgeResponse, redacted: RedactedTranscript) -> li
             holders = [speaker for speaker, text in turns if needle in text]
             if not holders:
                 # Near-verbatim rescue: snap to the real span if one exists.
-                for turn in redacted.turns:
-                    snapped = _snap_quote_to_turn(ev.quote, turn.text)
+                for _speaker, block_text in raw_blocks:
+                    snapped = _snap_quote_to_turn(ev.quote, block_text)
                     if snapped is not None:
                         logging.getLogger(__name__).info(
                             "evidence quote snapped to transcript: %r -> %r",

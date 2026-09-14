@@ -155,7 +155,12 @@ def normalize_for_detection(text: str) -> tuple[str, list[int]]:
 # which is how a number split across two transcript turns appears once the
 # dialog is joined), hyphens, dots and the various dashes an ASR may emit.
 SEPARATORS = " \t\n -.‐‑‒–—/"
-DIGIT_RUN_RE = re.compile(rf"\d(?:[{re.escape(SEPARATORS)}]?\d)*")
+# Up to TWO separator chars between digit groups: the real ivrit.ai ASR
+# writes dictated numbers as "314 -15992 -6265" (space before the hyphen),
+# and with only one separator allowed the run split into fragments below the
+# masking threshold - a full national ID left redaction unmasked on the
+# first real recording.
+DIGIT_RUN_RE = re.compile(rf"\d(?:[{re.escape(SEPARATORS)}]{{0,2}}\d)*")
 # Separators that a real account or card number can contain. Spaces and
 # newlines are excluded here so that "500 300 שקל" is not read as one number,
 # while a checksum-backed identifier is still allowed to contain them.
@@ -210,8 +215,16 @@ def _classify_run(text: str, start: int, end: int) -> str | None:
     """Decide what a digit run is, from its digits and its surroundings."""
     raw = text[start:end]
     digits = re.sub(r"\D", "", raw)
-    separators = {ch for ch in raw if not ch.isdigit()}
-    structural_only = separators <= STRUCTURAL_SEPARATORS
+    # A run is "structural" when every gap between digit groups contains at
+    # least one structural character. Two amounts joined by a bare space
+    # ("500 300 שקל") stay two numbers, but the real ASR's dictation style
+    # "314 -15992 -6265" (space before each hyphen) is one identifier - the
+    # old separators-as-a-set test called any run containing a space
+    # non-structural and let a complete national ID through unmasked.
+    gaps = [g for g in re.split(r"\d+", raw) if g]
+    structural_only = all(
+        any(ch in STRUCTURAL_SEPARATORS for ch in gap) for gap in gaps
+    )
 
     if len(digits) < 4:
         return None

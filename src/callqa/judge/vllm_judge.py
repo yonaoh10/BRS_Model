@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 
@@ -67,10 +68,19 @@ class VLLMJudge:
         layout failure mode; only the CONTENT of strings is left to the
         model, and evidence verification already polices that.
         """
+        # Length caps are part of the grammar, not a polite request: on the
+        # first real call dictalm2.0 spent the whole 4000-token budget on
+        # reasoning prose across six retries and never finished the JSON.
+        # Bounded strings and arrays make the complete scorecard physically
+        # fit inside the model's context budget.
         evidence = {
             "type": "object",
             "properties": {
-                "quote": {"type": "string"},
+                # minLength too: dictalm quoted the call's opening grunt
+                # ("אה?") as evidence for three dimensions across six
+                # retries; a quote below the verifier's minimum is now
+                # unrepresentable rather than politely discouraged.
+                "quote": {"type": "string", "minLength": 12, "maxLength": 160},
                 "timestamp": {"type": "string", "pattern": "^[0-9]{1,4}:[0-5][0-9]$"},
                 "speaker": {"type": "string", "enum": ["banker", "customer"]},
             },
@@ -81,8 +91,9 @@ class VLLMJudge:
             "type": "object",
             "properties": {
                 "score": {"type": "integer", "minimum": 1, "maximum": 5},
-                "reasoning_he": {"type": "string"},
-                "evidence": {"type": "array", "items": evidence, "minItems": 1},
+                "reasoning_he": {"type": "string", "maxLength": 400},
+                "evidence": {"type": "array", "items": evidence,
+                             "minItems": 1, "maxItems": 2},
             },
             "required": ["score", "reasoning_he", "evidence"],
             "additionalProperties": False,
@@ -96,9 +107,10 @@ class VLLMJudge:
                     "required": list(dimension_ids),
                     "additionalProperties": False,
                 },
-                "strengths_he": {"type": "array", "items": {"type": "string"}},
-                "development_area_he": {"type": "string"},
-                "summary_he": {"type": "string"},
+                "strengths_he": {"type": "array", "maxItems": 4,
+                                 "items": {"type": "string", "maxLength": 200}},
+                "development_area_he": {"type": "string", "maxLength": 500},
+                "summary_he": {"type": "string", "maxLength": 500},
             },
             "required": ["scores", "strengths_he", "development_area_he", "summary_he"],
             "additionalProperties": False,
@@ -151,11 +163,16 @@ class VLLMJudge:
             merged = f"{request.system_prompt}\n\n{request.user_prompt}"
             return self._chat([{"role": "user", "content": merged}], response_format)
 
-    def _chat(self, messages: list[dict[str, str]], response_format: dict) -> str:
+    _CTX_BUDGET_RE = re.compile(
+        r"maximum context length is (\d+) tokens and your request has (\d+) input tokens"
+    )
+
+    def _chat(self, messages: list[dict[str, str]], response_format: dict,
+              max_tokens: int | None = None) -> str:
         payload = {
             "model": self.config.model,
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens or self.config.max_tokens,
             "response_format": response_format,
             "messages": messages,
         }
@@ -177,6 +194,18 @@ class VLLMJudge:
                 detail = exc.read().decode("utf-8", errors="replace")[:300]
             except OSError:
                 pass
+            # Retry prompts grow (validation feedback is appended), and a
+            # fixed max_tokens eventually no longer fits the model context.
+            # vLLM's 400 names the exact budget - shrink to it and resend.
+            budget = self._CTX_BUDGET_RE.search(detail)
+            if budget and max_tokens is None:
+                ctx, used = int(budget.group(1)), int(budget.group(2))
+                available = ctx - used - 16
+                if available >= 512:
+                    logger.info("max_tokens %d does not fit (%d input / %d ctx); "
+                                "retrying with %d",
+                                self.config.max_tokens, used, ctx, available)
+                    return self._chat(messages, response_format, max_tokens=available)
             raise VLLMJudgeError(f"vLLM request failed: {exc}: {detail}") from exc
         except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
             raise VLLMJudgeError(f"vLLM request failed: {exc}") from exc

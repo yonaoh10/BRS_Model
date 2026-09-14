@@ -27,21 +27,41 @@ class FasterWhisperEngine:
                 f"ASR model directory is missing or empty: {model_dir}. "
                 "Run scripts/download_models.py --asr on the server first."
             )
-        try:
-            from faster_whisper import WhisperModel  # lazy import
-        except ImportError as exc:
+        # find_spec, not an import: merely importing faster_whisper pulls in
+        # ctranslate2 and its OpenMP runtime, which must stay out of processes
+        # that will also load torch (see the `model` property).
+        import importlib.util
+
+        if importlib.util.find_spec("faster_whisper") is None:
             raise ImportError(
                 "faster-whisper is not installed. Install requirements-server.txt "
                 "on the server (see README deployment section)."
-            ) from exc
+            )
         self.config = config
-        # local_files_only guards against any accidental network access.
-        self.model = WhisperModel(
-            str(model_dir),
-            compute_type=config.compute_type,
-            local_files_only=True,
-        )
-        logger.info("faster-whisper model loaded from %s", model_dir)
+        self._model_dir = model_dir
+        self._model = None
+
+    @property
+    def model(self):  # noqa: ANN201 - WhisperModel is a lazy import
+        """Loaded on first transcription, not at engine construction.
+
+        A resumed run whose ASR stage is already complete never calls
+        transcribe(), and eagerly holding the CT2 model there wasted ~1 GB
+        and - on Intel macOS - put ctranslate2's OpenMP runtime and torch's
+        into one process for nothing, which is exactly the duplicate-libiomp
+        setup that aborts or segfaults.
+        """
+        if self._model is None:
+            from faster_whisper import WhisperModel  # lazy import
+
+            # local_files_only guards against any accidental network access.
+            self._model = WhisperModel(
+                str(self._model_dir),
+                compute_type=self.config.compute_type,
+                local_files_only=True,
+            )
+            logger.info("faster-whisper model loaded from %s", self._model_dir)
+        return self._model
 
     def transcribe(
         self,
