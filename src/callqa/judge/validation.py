@@ -14,6 +14,7 @@ again with the reason.
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from pydantic import ValidationError
@@ -64,6 +65,39 @@ def parse_judge_response(raw: str) -> JudgeResponse:
         raise JudgeValidationError(f"output does not match the required schema: {exc}") from exc
 
 
+SNAP_MIN_SIMILARITY = 0.90
+
+
+def _snap_quote_to_turn(quote: str, raw_turn: str) -> str | None:
+    """Return the verbatim span of raw_turn best matching the quote, or None.
+
+    Judges at the 7-14B tier produce NEAR-quotes: a dropped conjunction, a
+    reordered word ("אני מזמין" for "ומזמין"). Rejecting those outright made
+    an otherwise sound scorecard unobtainable, but accepting the model's text
+    would put words in the transcript's mouth. The compromise keeps the
+    guarantee: slide a word window over the REAL turn text, and if some
+    window is >= SNAP_MIN_SIMILARITY similar (after match-normalisation),
+    the evidence quote is REPLACED with that real window - the scorecard
+    only ever contains text that was actually said. Cross-turn splices stay
+    rejected because the window never leaves one turn.
+    """
+    from difflib import SequenceMatcher
+
+    words = raw_turn.split()
+    target = normalize_for_match(quote)
+    if not words or not target:
+        return None
+    n_quote = max(1, len(quote.split()))
+    best_ratio, best_span = 0.0, None
+    for size in range(max(1, n_quote - 2), min(len(words), n_quote + 2) + 1):
+        for start in range(0, len(words) - size + 1):
+            span = " ".join(words[start:start + size])
+            ratio = SequenceMatcher(None, target, normalize_for_match(span)).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_span = ratio, span
+    return best_span if best_ratio >= SNAP_MIN_SIMILARITY else None
+
+
 def verify_evidence(response: JudgeResponse, redacted: RedactedTranscript) -> list[str]:
     """Return a list of human-readable problems (empty = all quotes verified)."""
     # Per turn, never joined: a quote spliced across a turn boundary is not
@@ -84,6 +118,18 @@ def verify_evidence(response: JudgeResponse, redacted: RedactedTranscript) -> li
                 )
                 continue
             holders = [speaker for speaker, text in turns if needle in text]
+            if not holders:
+                # Near-verbatim rescue: snap to the real span if one exists.
+                for turn in redacted.turns:
+                    snapped = _snap_quote_to_turn(ev.quote, turn.text)
+                    if snapped is not None:
+                        logging.getLogger(__name__).info(
+                            "evidence quote snapped to transcript: %r -> %r",
+                            ev.quote[:60], snapped[:60])
+                        ev.quote = snapped
+                        holders = [s for s, text in turns
+                                   if normalize_for_match(snapped) in text]
+                        break
             if not holders:
                 problems.append(
                     f"dimension '{dim_id}': quote not found verbatim in transcript: "

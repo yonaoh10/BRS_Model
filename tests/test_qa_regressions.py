@@ -560,3 +560,43 @@ class TestGershayimInJudgePrompt:
         out = format_transcript(red)
         assert 'חו״ל' in out and 'ש״ח' in out
         assert 'חו"ל' not in out and 'ש"ח' not in out
+
+
+class TestEvidenceQuoteSnapping:
+    def _redacted(self):
+        from callqa.models import RedactedTranscript, RedactedTurn
+        return RedactedTranscript(call_id="C1", engine="regex", turns=[
+            RedactedTurn(speaker="banker", start=0.0, end=8.0,
+                         text="אני מבטל את החסימה ומזמין לך כרטיס חדש עם מספר חדש ליתר ביטחון."),
+            RedactedTurn(speaker="customer", start=8.0, end=12.0,
+                         text="אוקיי תודה רבה על הטיפול המהיר והאדיב."),
+        ])
+
+    def test_near_verbatim_quote_snaps_to_the_real_span(self) -> None:
+        """7-14B judges emit NEAR-quotes (a dropped conjunction: 'אני מזמין'
+        for 'ומזמין'), and rejecting them made a valid scorecard unreachable.
+        The snap replaces the quote with the real transcript span, so the
+        stored evidence is still only text that was actually said."""
+        from callqa.judge.validation import verify_evidence
+        from callqa.models import DimensionScore, Evidence, JudgeResponse
+
+        resp = JudgeResponse(scores={"listening": DimensionScore(
+            score=4, reasoning_he="ok", evidence=[Evidence(
+                quote="אני מזמין לך כרטיס חדש עם מספר חדש ליתר ביטחון.",
+                timestamp="00:05", speaker="banker")])})
+        problems = verify_evidence(resp, self._redacted())
+        assert problems == []
+        assert "ומזמין" in resp.scores["listening"].evidence[0].quote
+
+    def test_invented_quote_still_rejected(self) -> None:
+        """Snapping must not weaken the anti-hallucination gate: text far from
+        anything in the transcript is still refused."""
+        from callqa.judge.validation import verify_evidence
+        from callqa.models import DimensionScore, Evidence, JudgeResponse
+
+        resp = JudgeResponse(scores={"listening": DimensionScore(
+            score=4, reasoning_he="ok", evidence=[Evidence(
+                quote="הבטחתי לך ריבית של עשרים אחוז על הפיקדון הזה",
+                timestamp="00:05", speaker="banker")])})
+        problems = verify_evidence(resp, self._redacted())
+        assert any("not found verbatim" in p for p in problems)

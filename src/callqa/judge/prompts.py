@@ -153,7 +153,13 @@ def _json_schema_block(dimensions: list[RubricDimension]) -> str:
         '  "strengths_he": ["..."],\n'
         '  "development_area_he": "...",\n'
         '  "summary_he": "..."\n'
-        "}"
+        "}\n"
+        # Stated up front because models otherwise quote two-word fragments
+        # ("ערב טוב.") that verification rejects as too short, and the retry
+        # loop burns attempts teaching a rule we already knew.
+        "כל ציטוט חייב להיות משפט אחד קצר, רציף ומדויק מהתמליל: לפחות 8 תווים "
+        "(לא כולל רווחים ופיסוק) ולכל היותר משפט אחד. אל תצטט שתי מילים בודדות, "
+        "ואל תחבר קטעים משני משפטים - ציטוט ארוך שאינו תו-בתו ייפסל."
     )
 
 
