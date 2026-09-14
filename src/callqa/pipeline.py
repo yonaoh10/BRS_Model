@@ -292,7 +292,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
         report_path = config.paths.output_dir / "reports" / "calls" / f"{call_id}.html"
         if not store.is_done("report") or not _report_is_intact(report_path):
             html = render_call_report(engines.rubric, meta, scorecard, features, redacted,
-                                      dialog=dialog)
+                                      dialog=dialog, review_reasons=review_reasons,
+                                      min_role_confidence=config.speakers.min_role_confidence)
             atomic_write_text(report_path, html)
             store.mark_done("report", report_path)
         stages_completed.append("report")

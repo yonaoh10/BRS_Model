@@ -51,6 +51,8 @@ def render_call_report(
     redacted: RedactedTranscript,
     recommendations: dict[str, list[str]] | None = None,
     dialog: DialogTranscript | None = None,
+    review_reasons: list[str] | None = None,
+    min_role_confidence: float | None = None,
 ) -> str:
     if recommendations is None:
         recommendations = load_recommendations()
@@ -77,6 +79,10 @@ def render_call_report(
         # one. A score built on an inferred split must say so on its face.
         attribution_mode=dialog.attribution_mode if dialog else None,
         role_confidence=dialog.role_confidence if dialog else None,
+        # The report is what a human reviewer holds; a call the pipeline
+        # itself does not stand behind must say so on its face.
+        review_reasons=review_reasons or [],
+        min_role_confidence=min_role_confidence,
         role_signals=[
             {
                 "he": SIGNAL_NAMES_HE.get(s.name, s.name),
