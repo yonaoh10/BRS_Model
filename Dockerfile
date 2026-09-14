@@ -1,7 +1,7 @@
 # Call-QA pipeline image (CPU). Runs the whole pipeline in mock mode out of the
 # box, and the real ASR/judge stages against a GPU box via config.cloud.yaml.
 # Not the bank deployment - that follows the offline runbook in README.md.
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
@@ -31,3 +31,13 @@ RUN mkdir -p data/input/calls data/output
 
 ENTRYPOINT ["scripts/docker_entrypoint.sh"]
 CMD ["run", "--mock"]
+
+# Real-model stage: ASR + diarization run inside this container, because
+# pyannote needs torch >= 2.8 and PyTorch stopped shipping macOS x86_64
+# wheels at 2.2. The extra index serves CPU-only torch wheels; the default
+# PyPI wheel bundles CUDA and would add gigabytes that no dev laptop uses.
+# The bank's GPU server installs requirements-server.txt directly instead.
+FROM base AS server
+COPY requirements-server.txt ./
+RUN pip install --no-cache-dir -r requirements-server.txt \
+    --extra-index-url https://download.pytorch.org/whl/cpu
