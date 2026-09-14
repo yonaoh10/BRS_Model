@@ -15,4 +15,10 @@ torchaudio==2.8.0
 torchcodec==0.7.0
 transformers==4.48.0
 # vLLM is typically installed separately (its own CUDA-matched wheel):
-# vllm==0.6.6
+# vllm==0.11.2
+#
+# WARNING: installing vLLM after these pins can UPGRADE torch (vllm 0.11.2
+# brings torch 2.9). torchcodec is ABI-paired with torch and does not fail
+# with an ImportError when mismatched - it core-dumps the interpreter
+# (std::length_error) the moment pyannote imports it. If vLLM moved torch,
+# reinstall the matching pair, e.g. torch 2.9.x -> torchcodec==0.8.*.

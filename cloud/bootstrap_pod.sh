@@ -49,7 +49,10 @@ nohup vllm serve "$LLM_LOCAL_DIR" \
     --port 8000 \
     --max-model-len 8192 \
     --api-key "$VLLM_API_KEY" \
+    --gpu-memory-utilization 0.85 \
     > "$LOGDIR/vllm.log" 2>&1 &
+# 0.85, not the 0.90 default: the ASR server on :8001 shares this GPU and
+# holds ~2.5 GB; at 0.90 vLLM refuses to start when ASR wins the boot race.
 
 echo "=== 5/5 ASR server on :8001 ==="
 nohup env CALLQA_ASR_API_KEY="$CALLQA_ASR_API_KEY" \

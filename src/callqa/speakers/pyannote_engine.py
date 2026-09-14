@@ -118,11 +118,21 @@ class LazyPyannoteDiarizer:
 
 
 def _from_pretrained_with_token(pipeline_cls, model: str, token: str | None):  # noqa: ANN001,ANN202
-    """`token=` in pyannote.audio 4.x, `use_auth_token=` in 3.x."""
+    """`token=` in pyannote.audio 4.x, `use_auth_token=` in 3.0-3.3.
+
+    3.4 removed the parameter entirely and relies on huggingface_hub reading
+    HF_TOKEN from the environment, so the last resort is no kwarg at all.
+    """
     try:
         return pipeline_cls.from_pretrained(model, token=token)
     except TypeError:
+        pass
+    try:
         return pipeline_cls.from_pretrained(model, use_auth_token=token)
+    except TypeError:
+        if token:
+            os.environ.setdefault("HF_TOKEN", token)
+        return pipeline_cls.from_pretrained(model)
 
 
 def _segments_from_output(output, prefer_exclusive: bool = True) -> list[DiarizedSegment]:  # noqa: ANN001

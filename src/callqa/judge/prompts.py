@@ -9,6 +9,7 @@ objective features block, and the redacted dialog transcript with
 from __future__ import annotations
 
 import hashlib
+import re
 
 from callqa.models import Features, RedactedTranscript
 from callqa.rubric import RubricDimension
@@ -22,8 +23,17 @@ SYSTEM_PROMPT_HE = (
     "מחוון הערכה עם עוגנים התנהגותיים, ונתונים אובייקטיביים שחושבו מהשיחה. "
     "עליך להעריך את הבנקאי בלבד, על סמך המחוון בלבד, בהתבסס אך ורק על מה שנאמר בתמליל. "
     "כל ציטוט (quote) חייב להופיע בתמליל מילה במילה - אסור להמציא, לקצר או לנסח מחדש ציטוטים. "
+    # Multilingual judges (observed with Qwen) translate quotes into their
+    # dominant language, which evidence verification then rightly rejects.
+    "הציטוטים חייבים להישאר בעברית, מועתקים תו-בתו מהתמליל - אסור לתרגם אותם "
+    "לשפה אחרת, וכל שדות הטקסט ייכתבו בעברית בלבד. "
     "כתוב תחילה ניתוח קצר לכל ממד בשדה reasoning_he, ולאחר מכן החזר JSON תקין בלבד, "
-    "ללא טקסט נוסף לפני או אחרי."
+    "ללא טקסט נוסף לפני או אחרי. "
+    # An ASCII '"' inside a value ends the JSON string mid-sentence; smaller
+    # models do this when they quote the customer inside reasoning_he, and
+    # under guided decoding the output derails irrecoverably. Hebrew ״ is safe.
+    'בתוך ערכי טקסט אסור להשתמש בתו \'"\' - אם צריך מרכאות, השתמש אך ורק '
+    "במרכאות עבריות ״...״."
 )
 
 
@@ -32,13 +42,23 @@ def mmss(seconds: float) -> str:
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
+# ASCII '"' used as gershayim inside Hebrew abbreviations (חו"ל, ת"ז, ש"ח).
+# The judge must quote the transcript verbatim inside JSON strings, and a
+# bare '"' terminates the string mid-word - observed derailing vLLM's
+# json_object guided decoding into an unrecoverable whitespace loop. Folding
+# to the real gershayim (U+05F4) is JSON-safe, typographically correct, and
+# invisible to evidence verification (normalize_for_match strips both).
+_GERSHAYIM_RE = re.compile(r'(?<=[א-ת])"(?=[א-ת])')
+
+
 def format_transcript(redacted: RedactedTranscript, max_chars: int | None = None,
                       max_seconds: float | None = None) -> str:
     lines = []
     for turn in redacted.turns:
         if max_seconds is not None and turn.start > max_seconds:
             break
-        lines.append(f"[{mmss(turn.start)}] {SPEAKER_HE[turn.speaker]}: {turn.text}")
+        text = _GERSHAYIM_RE.sub("״", turn.text)
+        lines.append(f"[{mmss(turn.start)}] {SPEAKER_HE[turn.speaker]}: {text}")
     text = "\n".join(lines)
     if max_chars is not None and len(text) > max_chars:
         text = _elide_middle(lines, max_chars)

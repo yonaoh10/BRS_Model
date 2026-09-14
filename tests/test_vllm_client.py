@@ -101,7 +101,11 @@ def test_complete_sends_openai_payload_without_auth(fake_server) -> None:
     p = post["payload"]
     assert p["model"] == "test-model"
     assert p["temperature"] == 0.0 and p["max_tokens"] == 123
-    assert p["response_format"] == {"type": "json_object"}
+    # Structured output: the full scorecard schema is pinned server-side so
+    # layout failures (stray keys, quote-derailed strings) cannot happen.
+    assert p["response_format"]["type"] == "json_schema"
+    schema = p["response_format"]["json_schema"]["schema"]
+    assert schema["properties"]["scores"]["required"] == []  # helper request has no dims
     assert [m["role"] for m in p["messages"]] == ["system", "user"]
 
 
