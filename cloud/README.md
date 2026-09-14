@@ -90,16 +90,15 @@ the Claude Code web environment's network settings.
    python cloud/runpod_cli.py urls          # writes the endpoints + secrets into .env
    ```
 
-**5. Install on the machine** (once per new volume)
-   - Open the pod's **web terminal** from the RunPod console.
-   - Clone and bootstrap:
-     ```bash
-     cd /workspace && git clone https://github.com/yonaoh10/BRS_Model.git
-     cd BRS_Model && bash cloud/bootstrap_pod.sh
-     ```
-   - It installs deps, downloads models with the project's own
-     `download_models.py`, then starts vLLM and the ASR server. Takes
-     10–20 minutes the first time; later starts reuse the volume.
+**5. Installation is automatic**
+   - `up` passes a container start command, so the pod bootstraps itself:
+     clone, deps, models via the project's own `download_models.py`, then
+     vLLM and the ASR server. Takes 10–20 minutes the first time; later
+     starts reuse the volume. Progress: `/workspace/logs/bootstrap.log`.
+   - If the repository is **private**, the pod cannot clone it; copy the
+     tree over SSH instead (`up --ssh-public-key "$(cat ~/.ssh/<key>.pub)"`,
+     then `tar`/`scp` to `/workspace/BRS_Model` and run
+     `bash cloud/bootstrap_pod.sh` there yourself).
 
 **6. Point your laptop at it**
    Nothing to export: step 4 wrote the four `CALLQA_*` endpoint variables into
@@ -239,16 +238,14 @@ option was never in that path.
    python cloud/runpod_cli.py urls          # כותב את הכתובות והסודות לתוך .env
    ```
 
-**5. התקנה על המכונה** (פעם אחת לכל אחסון חדש)
-   - פתח את ה-**web terminal** של הפוד מהקונסולה של RunPod.
-   - שכפל והרץ:
-     ```bash
-     cd /workspace && git clone https://github.com/yonaoh10/BRS_Model.git
-     cd BRS_Model && bash cloud/bootstrap_pod.sh
-     ```
-   - הסקריפט מתקין תלויות, מוריד מודלים באמצעות `download_models.py` של
-     הפרויקט עצמו, ואז מפעיל את vLLM ואת שרת התמלול. 10–20 דקות בפעם
-     הראשונה; הפעלות הבאות משתמשות באחסון הקיים.
+**5. ההתקנה אוטומטית**
+   - `up` מעביר לפוד פקודת הפעלה, כך שהוא מתקין את עצמו: שכפול, תלויות,
+     מודלים באמצעות `download_models.py` של הפרויקט עצמו, ואז vLLM ושרת
+     התמלול. 10–20 דקות בפעם הראשונה; הפעלות הבאות משתמשות באחסון הקיים.
+     התקדמות: `/workspace/logs/bootstrap.log`.
+   - אם המאגר **פרטי**, הפוד לא יכול לשכפל אותו; העבר את העץ ב‑SSH
+     (`up --ssh-public-key "$(cat ~/.ssh/<key>.pub)"`, ואז `tar`/`scp` אל
+     `/workspace/BRS_Model` והרץ שם `bash cloud/bootstrap_pod.sh` בעצמך).
 
 **6. הפניית המחשב שלך אליה**
    אין מה לייצא: שלב 4 כתב את ארבעת משתני `CALLQA_*` לתוך `.env`,

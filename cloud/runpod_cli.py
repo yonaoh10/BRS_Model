@@ -50,18 +50,29 @@ JUDGE_PORT = 8000
 # two services in the background. All output lands on the volume so a failed
 # boot can be read later.
 POD_START_CMD = (
-    "set -x; mkdir -p /workspace/logs; "
+    # NO `set -x` here: the command tests $HF_TOKEN and $PUBLIC_KEY, and -x
+    # would trace the secret values into bootstrap.log.
+    "mkdir -p /workspace/logs; "
     "exec > >(tee -a /workspace/logs/bootstrap.log) 2>&1; "
     # SSH first, so a failed bootstrap can still be reached and read.
     'if [ -n "${PUBLIC_KEY:-}" ]; then mkdir -p /root/.ssh; '
     'echo "$PUBLIC_KEY" > /root/.ssh/authorized_keys; '
     "chmod 700 /root/.ssh; chmod 600 /root/.ssh/authorized_keys; "
+    "command -v sshd >/dev/null || (apt-get update -qq && "
+    "apt-get install -y -qq openssh-server); "
+    # A fresh container has no SSH host keys and sshd refuses to start
+    # without them; -A generates any that are missing.
+    "ssh-keygen -A; mkdir -p /run/sshd; "
     "service ssh start || /usr/sbin/sshd || true; fi; "
     "command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git); "
     "cd /workspace; "
-    '[ -d BRS_Model/.git ] || git clone "$CALLQA_REPO_URL" BRS_Model; '
-    "cd BRS_Model; git pull --ff-only || true; "
-    "bash cloud/bootstrap_pod.sh; "
+    "if [ ! -d BRS_Model/.git ]; then "
+    'GIT_TERMINAL_PROMPT=0 git clone "$CALLQA_REPO_URL" BRS_Model '
+    "|| echo 'ERROR: clone failed. A private repo cannot be cloned from the "
+    "pod; rsync the working tree to /workspace/BRS_Model over SSH instead "
+    "and run cloud/bootstrap_pod.sh by hand.'; fi; "
+    "cd BRS_Model 2>/dev/null && { git pull --ff-only || true; "
+    "bash cloud/bootstrap_pod.sh; }; "
     # Diarization weights are gated; fetched only when the operator put
     # HF_TOKEN in .env. Harmless no-op otherwise.
     'if [ -n "${HF_TOKEN:-}" ]; then '

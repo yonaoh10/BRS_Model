@@ -541,3 +541,22 @@ class TestPresidioConstructionFailure:
         monkeypatch.setattr(redaction.PresidioRedactor, "__init__", boom)
         redactor = redaction.build_redactor(RedactionConfig(), mock=False)
         assert redactor.name == "regex"
+
+
+class TestGershayimInJudgePrompt:
+    def test_ascii_quote_inside_hebrew_word_is_folded_to_gershayim(self) -> None:
+        """Hebrew abbreviations carry an ASCII '"' (חו"ל, ש"ח, ת"ז). The judge
+        must quote the transcript verbatim inside JSON strings, and a bare '"'
+        ends the string mid-word - observed derailing vLLM's guided decoding
+        into an unrecoverable whitespace loop. The prompt now carries U+05F4
+        instead; evidence verification strips both, so quotes still match."""
+        from callqa.judge.prompts import format_transcript
+        from callqa.models import RedactedTranscript, RedactedTurn
+
+        red = RedactedTranscript(call_id="C1", engine="regex", turns=[
+            RedactedTurn(speaker="banker", start=0.0, end=2.0,
+                         text='חיוב בחו"ל של 100 ש"ח'),
+        ])
+        out = format_transcript(red)
+        assert 'חו״ל' in out and 'ש״ח' in out
+        assert 'חו"ל' not in out and 'ש"ח' not in out

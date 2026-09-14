@@ -34,7 +34,10 @@ class VLLMJudge:
             )
 
     def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
+        # A real User-Agent, because CDNs in front of hosted endpoints
+        # (RunPod's proxy runs Cloudflare) reject urllib's default
+        # Python-urllib/x.y with a 403 before the request reaches vLLM.
+        headers = {"Content-Type": "application/json", "User-Agent": "callqa-judge/1.0"}
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         return headers
@@ -53,16 +56,108 @@ class VLLMJudge:
             ) from exc
         logger.info("vLLM endpoint reachable at %s", self.config.base_url)
 
+    @staticmethod
+    def _scorecard_schema(dimension_ids: list[str]) -> dict:
+        """JSON schema enforced by vLLM's structured output (xgrammar).
+
+        `json_object` mode only guarantees syntax, and models at the 7-14B
+        tier were observed breaking even that (an unescaped '"' inside a
+        value derails guided decoding), inventing extra keys, and moving
+        top-level fields into `scores`. Pinning the full shape removes every
+        layout failure mode; only the CONTENT of strings is left to the
+        model, and evidence verification already polices that.
+        """
+        evidence = {
+            "type": "object",
+            "properties": {
+                "quote": {"type": "string"},
+                "timestamp": {"type": "string", "pattern": "^[0-9]{1,4}:[0-5][0-9]$"},
+                "speaker": {"type": "string", "enum": ["banker", "customer"]},
+            },
+            "required": ["quote", "timestamp", "speaker"],
+            "additionalProperties": False,
+        }
+        dimension = {
+            "type": "object",
+            "properties": {
+                "score": {"type": "integer", "minimum": 1, "maximum": 5},
+                "reasoning_he": {"type": "string"},
+                "evidence": {"type": "array", "items": evidence, "minItems": 1},
+            },
+            "required": ["score", "reasoning_he", "evidence"],
+            "additionalProperties": False,
+        }
+        return {
+            "type": "object",
+            "properties": {
+                "scores": {
+                    "type": "object",
+                    "properties": dict.fromkeys(dimension_ids, dimension),
+                    "required": list(dimension_ids),
+                    "additionalProperties": False,
+                },
+                "strengths_he": {"type": "array", "items": {"type": "string"}},
+                "development_area_he": {"type": "string"},
+                "summary_he": {"type": "string"},
+            },
+            "required": ["scores", "strengths_he", "development_area_he", "summary_he"],
+            "additionalProperties": False,
+        }
+
     def complete(self, request: JudgeRequest) -> str:
+        messages = [
+            {"role": "system", "content": request.system_prompt},
+            {"role": "user", "content": request.user_prompt},
+        ]
+        schema = self._scorecard_schema([d.id for d in request.dimensions])
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": "scorecard", "schema": schema},
+        }
+        try:
+            return self._chat(messages, response_format)
+        except VLLMJudgeError as exc:
+            # Older/other OpenAI-compatible servers may not implement
+            # json_schema; degrade to plain json_object mode.
+            text = str(exc)
+            if "json_schema" in text or "response_format" in text:
+                logger.warning("endpoint rejected json_schema structured output; "
+                               "falling back to json_object mode")
+                return self._chat_with_role_fallback(
+                    request, {"type": "json_object"})
+            if "alternate" in text or "system role" in text.lower():
+                merged = f"{request.system_prompt}\n\n{request.user_prompt}"
+                return self._chat([{"role": "user", "content": merged}], response_format)
+            raise
+
+    def _chat_with_role_fallback(self, request: JudgeRequest,
+                                 response_format: dict) -> str:
+        messages = [
+            {"role": "system", "content": request.system_prompt},
+            {"role": "user", "content": request.user_prompt},
+        ]
+        try:
+            return self._chat(messages, response_format)
+        except VLLMJudgeError as exc:
+            # Some chat templates (Mistral-family, e.g. dictalm2.0-instruct)
+            # accept no system role at all and vLLM rejects the request with
+            # "roles must alternate". The instructions still apply - they
+            # just have to travel inside the user turn.
+            text = str(exc)
+            if "alternate" not in text and "system role" not in text.lower():
+                raise
+            logger.info("model's chat template rejects a system message; "
+                        "resending with the system prompt merged into the user turn")
+            merged = f"{request.system_prompt}\n\n{request.user_prompt}"
+            return self._chat([{"role": "user", "content": merged}], response_format)
+
+    def _chat(self, messages: list[dict[str, str]], response_format: dict) -> str:
         payload = {
             "model": self.config.model,
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": request.system_prompt},
-                {"role": "user", "content": request.user_prompt},
-            ],
+            "response_format": response_format,
+            "messages": messages,
         }
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         req = urllib.request.Request(
@@ -74,9 +169,28 @@ class VLLMJudge:
         try:
             with urllib.request.urlopen(req, timeout=600) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            # The response body is where vLLM says WHY (context length,
+            # template restrictions); losing it made 400s undebuggable.
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")[:300]
+            except OSError:
+                pass
+            raise VLLMJudgeError(f"vLLM request failed: {exc}: {detail}") from exc
         except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
             raise VLLMJudgeError(f"vLLM request failed: {exc}") from exc
         try:
-            return body["choices"][0]["message"]["content"]
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise VLLMJudgeError(f"unexpected vLLM response shape: {exc}") from exc
+        if choice.get("finish_reason") == "length":
+            # A structured-output response cut at max_tokens is a valid JSON
+            # PREFIX, which then fails parsing with a misleading error. Name
+            # the real problem so the retry prompt asks for brevity.
+            raise VLLMJudgeError(
+                "the model hit max_tokens before finishing the JSON; "
+                "keep reasoning_he short and quote less"
+            )
+        return content
