@@ -136,8 +136,15 @@
     <tr><th>מדד</th><th>ערך</th></tr>
     <tr><td>יחס דיבור של הבנקאי</td><td>{{ "%.0f" | format(features.talk_ratio * 100) }}%</td></tr>
     <tr><td>המונולוג הארוך ביותר של הבנקאי</td><td>{{ "%.1f" | format(features.longest_banker_monologue_sec) }} שניות</td></tr>
+    {% if features.overlap_metrics_available %}
     <tr><td>קטיעות של הבנקאי את הלקוח</td><td>{{ features.interruptions_by_banker }}</td></tr>
     <tr><td>קטיעות של הלקוח את הבנקאי</td><td>{{ features.interruptions_by_customer }}</td></tr>
+    {% else %}
+    {# On a one-channel recording the diarization is exclusive - overlaps are
+       structurally invisible, and a 0 shown as a measurement would read as
+       "the banker never interrupts". #}
+    <tr><td>קטיעות (בנקאי / לקוח)</td><td>לא ניתן למדוד בהקלטה חד-ערוצית</td></tr>
+    {% endif %}
     <tr><td>חציון זמן המתנה לפני מענה</td>
         <td>{% if features.patience_median_sec is not none %}{{ "%.1f" | format(features.patience_median_sec) }} שניות{% else %}לא נמדד{% endif %}</td></tr>
     <tr><td>שאלות של הבנקאי</td><td>{{ features.banker_question_count }} ({{ "%.2f" | format(features.banker_questions_per_minute) }} לדקה)</td></tr>
@@ -152,6 +159,34 @@
   <h2>המלצת אימון</h2>
   <div>הממד לחיזוק: <strong>{{ weakest_dim_name }}</strong></div>
   <div class="rec">{{ recommendation }}</div>
+</div>
+{% endif %}
+
+{% if transcript_turns %}
+<div class="card">
+  <details>
+    <summary style="cursor:pointer; font-size:1.17em; font-weight:600; margin-bottom:8px;">תמליל השיחה המלא</summary>
+    <div class="muted" style="margin:6px 0 12px;">
+      לאחר הסרת מזהים — הסימונים <code>&lt;████&gt;</code> מציינים פרטים שהוסרו.
+      קטעים מודגשים בצהוב צוטטו כראיה בציונים; ריחוף עליהם מציג את הממד.
+    </div>
+    {% for turn in transcript_turns %}
+    <div style="margin:0 0 8px; padding:6px 10px; background:#f6f7f9; border-radius:6px;
+                border-right:3px solid {{ '#1f6feb' if turn.speaker == 'banker' else '#d0d4da' }};">
+      <div class="muted" style="font-size:0.85em;">
+        {{ speaker_he[turn.speaker] }} <span class="mono" dir="ltr">[{{ turn.ts }}]</span>
+      </div>
+      <div>
+        {%- for segment, dim_he in turn.segments -%}
+          {%- if dim_he -%}
+            <mark style="background:#fff3c2; outline:1px solid #9a6700; border-radius:2px;"
+                  title="צוטט כראיה בממד: {{ dim_he }}">{{ segment }}</mark>
+          {%- else -%}{{ segment }}{%- endif -%}
+        {%- endfor -%}
+      </div>
+    </div>
+    {% endfor %}
+  </details>
 </div>
 {% endif %}
 {% endblock %}
