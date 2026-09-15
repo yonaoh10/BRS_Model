@@ -1,0 +1,3 @@
+/Users/yonatanohayon/Desktop/BRS_Model-main/.venv/lib/python3.12/site-packages/pyannote/audio/models/blocks/pooling.py:104: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/aten/src/ATen/native/ReduceOps.cpp:1760.)
+  std = sequences.std(dim=-1, correction=1)
+par2_diar load 2.78 diarize 381.51 steps {'segmentation': {'span_sec': 11.09, 'calls': 9, 't_first': 0.03}, 'speaker_counting': {'span_sec': 0.0, 'calls': 1, 't_first': 11.14}, 'embeddings': {'span_sec': 370.02, 'calls': 19, 't_first': 11.36}, 'discrete_diarization': {'span_sec': 0.0, 'calls': 1, 't_first': 381.46}} speakers 2 rss_mb 2612.1

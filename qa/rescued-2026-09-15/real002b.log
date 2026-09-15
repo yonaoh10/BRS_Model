@@ -1,0 +1,14 @@
+2026-09-15 01:17:41,440 WARNING callqa.redaction: presidio not installed; using built-in regex redactor
+2026-09-15 01:17:41,440 INFO callqa.engines: engines built: asr=FasterWhisperEngine judge=MockJudge mock=False
+2026-09-15 01:17:41,441 WARNING callqa: Call_001.m4a has no row in metadata.csv; processing with defaults (banker unknown, channel L, banker name not redacted)
+2026-09-15 01:17:46,155 INFO speechbrain.utils.quirks: Applied quirks (see `speechbrain.utils.quirks`): [allow_tf32, disable_jit_profiling]
+2026-09-15 01:17:46,155 INFO speechbrain.utils.quirks: Excluded quirks specified by the `SB_DISABLE_QUIRKS` environment (comma-separated list): []
+2026-09-15 01:17:47,741 INFO callqa.speakers.pyannote_engine: diarization pipeline loaded: model=pyannote/speaker-diarization-3.1 device=cpu
+/Users/yonatanohayon/Desktop/BRS_Model-main/.venv/lib/python3.12/site-packages/pyannote/audio/models/blocks/pooling.py:104: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/aten/src/ATen/native/ReduceOps.cpp:1760.)
+  std = sequences.std(dim=-1, correction=1)
+2026-09-15 01:20:18,158 INFO callqa.speakers.pyannote_engine: diarization done: call_id=REAL002 segments=75 speakers=2
+2026-09-15 01:20:18,162 INFO callqa.speakers.roles: call_id=REAL002: banker=speaker0 confidence=0.65 (opening->0, identity_request->0, identity_supply->1, question_rate->0, service_language->0, closing->0, first_speaker->0)
+2026-09-15 01:20:18,166 INFO callqa.redaction: redaction done: call_id=REAL002 entities=2 turns=51
+2026-09-15 01:20:18,174 INFO callqa.judge.runner: judge done: call_id=REAL002 total=56.2 gate_failed=False retries=0
+2026-09-15 01:20:18,208 INFO callqa.pipeline: call done: call_id=REAL002 status=success
+2026-09-15 01:20:18,208 INFO callqa: report: data/output/reports/calls/REAL002.html

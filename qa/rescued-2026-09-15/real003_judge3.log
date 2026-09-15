@@ -1,0 +1,13 @@
+2026-09-15 02:03:37,130 WARNING callqa.redaction: presidio not installed; using built-in regex redactor
+2026-09-15 02:03:37,676 INFO callqa.judge.vllm_judge: vLLM endpoint reachable at https://85lgsx5f9nktgp-8000.proxy.runpod.net/v1
+2026-09-15 02:03:37,676 INFO callqa.engines: engines built: asr=FasterWhisperEngine judge=VLLMJudge mock=False
+2026-09-15 02:03:37,678 WARNING callqa: Call_001.m4a has no row in metadata.csv; processing with defaults (banker unknown, channel L, banker name not redacted)
+2026-09-15 02:04:19,292 INFO callqa.judge.validation: evidence quote snapped to transcript: 'העברתי אותך למסלול החודשי.' -> 'העברתי אותך למסלול חודשי'
+2026-09-15 02:04:19,292 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=0
+2026-09-15 02:04:49,890 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=1
+2026-09-15 02:05:24,938 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=2
+2026-09-15 02:05:59,412 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=3
+2026-09-15 02:06:34,543 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=4
+2026-09-15 02:07:09,799 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=5
+2026-09-15 02:07:09,799 WARNING callqa.pipeline: call needs human review: call_id=REAL003
+2026-09-15 02:07:09,802 ERROR callqa: call REAL003: status=needs_human_review error=judge output failed after 6 attempts: evidence verification failed: dimension 'identification': evidence quote is too short to verify: 'אה?' | dimension 'empathy': evidence quote is too short to verify: 'אה?' | dimension 'listening': evidence quote is too short to verify: 'אה?'

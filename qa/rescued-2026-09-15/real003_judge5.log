@@ -1,0 +1,15 @@
+2026-09-15 02:11:11,947 WARNING callqa.redaction: presidio not installed; using built-in regex redactor
+2026-09-15 02:11:12,423 INFO callqa.judge.vllm_judge: vLLM endpoint reachable at https://85lgsx5f9nktgp-8000.proxy.runpod.net/v1
+2026-09-15 02:11:12,423 INFO callqa.engines: engines built: asr=FasterWhisperEngine judge=VLLMJudge mock=False
+2026-09-15 02:11:12,424 WARNING callqa: Call_001.m4a has no row in metadata.csv; processing with defaults (banker unknown, channel L, banker name not redacted)
+2026-09-15 02:11:59,518 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=0
+2026-09-15 02:12:00,828 INFO callqa.judge.vllm_judge: max_tokens 4000 does not fit (4360 input / 8192 ctx); retrying with 3816
+2026-09-15 02:12:41,396 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=1
+2026-09-15 02:13:25,924 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=2
+2026-09-15 02:13:27,288 INFO callqa.judge.vllm_judge: max_tokens 4000 does not fit (4194 input / 8192 ctx); retrying with 3982
+2026-09-15 02:14:47,900 WARNING callqa.judge.runner: judge call failed: call_id=REAL003 attempt=3: the model hit max_tokens before finishing the JSON; keep reasoning_he short and quote less
+2026-09-15 02:15:35,157 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=4
+2026-09-15 02:15:36,438 INFO callqa.judge.vllm_judge: max_tokens 4000 does not fit (4360 input / 8192 ctx); retrying with 3816
+2026-09-15 02:16:17,242 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=5
+2026-09-15 02:16:17,243 WARNING callqa.pipeline: call needs human review: call_id=REAL003
+2026-09-15 02:16:17,246 ERROR callqa: call REAL003: status=needs_human_review error=judge output failed after 6 attempts: evidence verification failed: dimension 'identification': quote not found verbatim in transcript: 'בנקאי. בנקאי: אני הבנקאי סער. בנקאי: שלום, הגעת למוקד הבנק. בנקאי: מדבר דני. בנק' | dimension 'compliance': quote not found verbatim in transcript: 'מצאתי זאת עמלת פעולה בסניף על הפקדה שביצעת ב -10 לחודש, 30 שקלים. כמה פעולות כאל' | dimension 'empathy': quote not found verbatim in transcript: 'בגדול אני לא באמת סופר אבל נראה לי 3 -4. בנקאי: אז המסלול החודשי משת...[truncated]

@@ -1,0 +1,22 @@
+2026-09-15 02:17:28,619 WARNING callqa.redaction: presidio not installed; using built-in regex redactor
+2026-09-15 02:17:29,462 INFO callqa.judge.vllm_judge: vLLM endpoint reachable at https://85lgsx5f9nktgp-8000.proxy.runpod.net/v1
+2026-09-15 02:17:29,462 INFO callqa.engines: engines built: asr=FasterWhisperEngine judge=VLLMJudge mock=False
+2026-09-15 02:17:29,464 WARNING callqa: Call_001.m4a has no row in metadata.csv; processing with defaults (banker unknown, channel L, banker name not redacted)
+2026-09-15 02:18:16,875 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי. אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני. לידי' -> 'אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני. לידיעתך השי'
+2026-09-15 02:18:17,118 INFO callqa.judge.validation: evidence quote snapped to transcript: 'תודה שותף יום נעים. תודה רבה שותף.' -> 'תודה שותף יום נעים. תודה רבה.'
+2026-09-15 02:18:17,118 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=0
+2026-09-15 02:18:57,796 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=1
+2026-09-15 02:19:41,310 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=2
+2026-09-15 02:19:42,519 INFO callqa.judge.vllm_judge: max_tokens 4000 does not fit (4205 input / 8192 ctx); retrying with 3971
+2026-09-15 02:20:24,808 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי. אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני. ליד' -> 'אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני.'
+2026-09-15 02:20:24,986 INFO callqa.judge.validation: evidence quote snapped to transcript: 'סליחה הבנתי. אה' -> 'סליחה הבנתי.'
+2026-09-15 02:20:25,069 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי. אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני. ליד' -> 'אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני.'
+2026-09-15 02:20:25,073 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי. אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני. ליד' -> 'אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני.'
+2026-09-15 02:20:25,077 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי. אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני. ליד' -> 'אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני.'
+2026-09-15 02:20:25,303 INFO callqa.judge.validation: evidence quote snapped to transcript: 'תודה שותף יום נעים. תודה רבה שותף' -> 'תודה שותף יום נעים. תודה רבה.'
+2026-09-15 02:20:25,304 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=3
+2026-09-15 02:21:03,128 INFO callqa.judge.validation: evidence quote snapped to transcript: 'תודה שותף יום נעים. תודה רבה שותף' -> 'תודה שותף יום נעים. תודה רבה.'
+2026-09-15 02:21:03,142 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=4
+2026-09-15 02:21:40,272 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=5
+2026-09-15 02:21:40,272 WARNING callqa.pipeline: call needs human review: call_id=REAL003
+2026-09-15 02:21:40,275 ERROR callqa: call REAL003: status=needs_human_review error=judge output failed after 6 attempts: evidence verification failed: dimension 'identification': quote not found verbatim in transcript: 'אה? כן כן, נו, תהיה. בנקאי. אני הבנקאי סער. שלום, הגעת למוקד הבנק. מדבר דני. ליד' | dimension 'compliance': quote not found verbatim in transcript: 'אגב, שאלת קודם על החיסכון. נתקדת לשם 120 ,000 שקל, נכון? בוצע, עברת למסלול החודש' | dimension 'empathy': quote not found verbatim in transcript: 'לפני שנתיים. כן, ארבע חמש שמונה אפס.' | dimension 'listening': quote...[truncated]
