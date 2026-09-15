@@ -40,6 +40,19 @@ class FasterWhisperEngine:
         self.config = config
         self._model_dir = model_dir
         self._model = None
+        # Intel macOS: ctranslate2 and torch each bundle libiomp5. LOAD ORDER
+        # DECIDES SURVIVAL: ct2-then-torch ran a whole night of real calls;
+        # torch-then-ct2 (torch arrives with silero VAD in the audio stage,
+        # before the first transcribe) segfaults inside __kmp_create_worker
+        # during int8 quantization even with KMP_DUPLICATE_LIB_OK set - the
+        # crash report is in qa/rescued-2026-09-15/. So on darwin, if torch
+        # has not been imported yet, claim the OpenMP runtime for ct2 NOW by
+        # loading the model eagerly. Everywhere else the load stays deferred
+        # to the first transcribe() (a resumed run never pays for it).
+        import sys
+
+        if sys.platform == "darwin" and "torch" not in sys.modules:
+            _ = self.model
 
     @property
     def model(self):  # noqa: ANN201 - WhisperModel is a lazy import
