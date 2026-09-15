@@ -635,3 +635,87 @@ class TestASRSpacedHyphenDigitRuns:
         ])
         red = RegexRedactor(RedactionConfig())._redact(dialog, [])
         assert red.turns[0].text == "זה עולה 500 300 שקל בסך הכול."
+
+
+class TestHebrewNumberWordNormaliser:
+    """Numbers dictated digit by digit come out of the ASR as Hebrew WORDS,
+    and no digit regex can see them. On the first real recording the card's
+    last four digits sat in the transcript as 'ארבע חמש שמונה אפס' three times
+    over, unmasked. fold_number_words() folds dictation-word runs to digits
+    between normalisation and detection, with an index map back so the mask
+    lands on the original words."""
+
+    @staticmethod
+    def _redact(text: str) -> str:
+        from callqa.config import RedactionConfig
+        from callqa.models import DialogTranscript, DialogTurn
+        from callqa.redaction import RegexRedactor
+
+        dialog = DialogTranscript(call_id="C1", attribution_mode="stereo", turns=[
+            DialogTurn(speaker="customer", start=0.0, end=4.0, text=text),
+        ])
+        return RegexRedactor(RedactionConfig())._redact(dialog, []).turns[0].text
+
+    def test_fold_maps_every_char_back_to_its_source(self) -> None:
+        from callqa.redaction import fold_number_words
+
+        text = "הקוד הוא שלוש ארבע חמש שש ותודה"
+        folded, spans = fold_number_words(text)
+        assert "3456" in folded
+        assert len(spans) == len(folded)
+        # every non-folded char maps to itself
+        for i, ch in enumerate(folded):
+            s, e = spans[i]
+            if not ch.isdigit():
+                assert text[s:e] == ch
+        # every folded digit maps to the whole word run
+        run = folded.index("3456")
+        s, e = spans[run]
+        assert text[s:e] == "שלוש ארבע חמש שש"
+
+    def test_card_last_four_dictated_as_words_is_masked(self) -> None:
+        red = self._redact("בשביל האימות, מה ארבע הספרות האחרונות של הכרטיס? ארבע חמש שמונה אפס.")
+        assert "ארבע חמש שמונה אפס" not in red
+        assert "█" in red
+        # the question about the digits is speech, not dictation - it stays
+        assert "ארבע הספרות האחרונות" in red
+
+    def test_id_dictated_as_words_with_context_is_masked_as_id(self) -> None:
+        from callqa.redaction import find_pii
+
+        # 123456782 passes the Israeli ID checksum
+        text = 'תעודת זהות: אחת שתיים שלוש ארבע חמש שש שבע שמונה שתיים'
+        matches = find_pii(text)
+        assert [m.entity_type for m in matches] == ["ISRAELI_ID"]
+        start, end = matches[0].start, matches[0].end
+        assert text[start:end] == "אחת שתיים שלוש ארבע חמש שש שבע שמונה שתיים"
+
+    def test_conjunction_prefix_is_part_of_the_run(self) -> None:
+        red = self._redact("מספר הכרטיס הוא שמונה, אפס, ארבע, וחמש")
+        assert "וחמש" not in red
+
+    def test_short_runs_and_quantities_stay_untouched(self) -> None:
+        for text in (
+            "רגע אחד בבקשה",                       # one digit-word
+            "שתי דקות ואני איתך",                   # quantity, not dictation
+            "שלוש ארבע פעמים ניסיתי",               # below the 4-word threshold
+            "זה עולה שלוש מאות שקל",                # quantity words never fold
+        ):
+            assert self._redact(text) == text
+
+    def test_dictation_pause_spacing_with_id_context_is_masked(self) -> None:
+        """A customer reading an identifier in groups gets bare-space gaps
+        ('926 9265') that the structural-separator rule alone rejects; an
+        ID/account context word before the run lifts that requirement."""
+        red = self._redact("מה מספר תעודת הזהות? 415 926 9265")
+        assert "9265" not in red
+
+    def test_repeated_last_four_of_a_masked_number_is_masked(self) -> None:
+        """The banker reads back the tail of a number the customer already
+        dictated; leaving the fragment in the clear undoes the mask."""
+        red = self._redact("מספר הכרטיס 4580-1234-5678 ,כן, המסתיים ב-5678 נכון?")
+        assert "5678" not in red
+
+    def test_plain_amounts_near_digit_words_are_not_swallowed(self) -> None:
+        red = self._redact("החיוב הוא 30 שקלים ועוד 10 שקלים עמלה")
+        assert red == "החיוב הוא 30 שקלים ועוד 10 שקלים עמלה"
