@@ -43,6 +43,70 @@ def weakest_non_gate_dimension(rubric: Rubric, scorecard: ScoreCard) -> str | No
     return min(candidates, key=lambda d: scorecard.scores[d.id].score).id
 
 
+def _evidence_segments(
+    text: str, quotes: list[tuple[str, str]]
+) -> list[tuple[str, str | None]]:
+    """Split one turn's text into (segment, dimension_name|None) pieces.
+
+    Segments whose dimension is set are the exact spans the judge cited as
+    evidence, so the reviewer sees them highlighted in context instead of
+    hunting for them. Overlapping citations keep the first match.
+    """
+    marks: list[tuple[int, int, str]] = []
+    for quote, dim_he in quotes:
+        if not quote:
+            continue
+        idx = text.find(quote)
+        while idx >= 0:
+            end = idx + len(quote)
+            if not any(idx < e and s < end for s, e, _ in marks):
+                marks.append((idx, end, dim_he))
+            idx = text.find(quote, idx + 1)
+    if not marks:
+        return [(text, None)]
+    marks.sort()
+    segments: list[tuple[str, str | None]] = []
+    cursor = 0
+    for start, end, dim_he in marks:
+        if start > cursor:
+            segments.append((text[cursor:start], None))
+        segments.append((text[start:end], dim_he))
+        cursor = end
+    if cursor < len(text):
+        segments.append((text[cursor:], None))
+    return segments
+
+
+def _transcript_turns(
+    rubric: Rubric, scorecard: ScoreCard, redacted: RedactedTranscript
+) -> list[dict]:
+    """The full redacted transcript, evidence-highlighted, for the report.
+
+    Empty when redaction was disabled: that artifact carries RAW text for the
+    pipeline's own consumers, and the report is exactly where it must not go.
+    """
+    if not redacted.enabled:
+        return []
+    by_id = rubric.by_id
+    quotes_by_speaker: dict[str, list[tuple[str, str]]] = {}
+    for dim_id, ds in scorecard.scores.items():
+        dim_he = by_id[dim_id].name_he if dim_id in by_id else dim_id
+        for ev in ds.evidence:
+            quotes_by_speaker.setdefault(ev.speaker, []).append((ev.quote, dim_he))
+    from callqa.judge.prompts import mmss
+
+    return [
+        {
+            "speaker": turn.speaker,
+            "ts": mmss(turn.start),
+            "segments": _evidence_segments(
+                turn.text, quotes_by_speaker.get(turn.speaker, [])
+            ),
+        }
+        for turn in redacted.turns
+    ]
+
+
 def render_call_report(
     rubric: Rubric,
     meta: CallMeta,
@@ -83,6 +147,7 @@ def render_call_report(
         # itself does not stand behind must say so on its face.
         review_reasons=review_reasons or [],
         min_role_confidence=min_role_confidence,
+        transcript_turns=_transcript_turns(rubric, scorecard, redacted),
         role_signals=[
             {
                 "he": SIGNAL_NAMES_HE.get(s.name, s.name),
