@@ -127,6 +127,11 @@ class SpeakersConfig(StrictModel):
     num_speakers: int = 2          # 0 lets the model estimate the count
     device: Literal["auto", "cpu", "cuda"] = "auto"
     exclusive: bool = True         # one speaker per moment, for word alignment
+    # Diarization needs only the audio, so on a mono call it runs in a
+    # separate process while ASR transcribes; on the dev machine that hides
+    # ~170 s of the slower stage behind the other. A separate process because
+    # ctranslate2 and torch each bundle libiomp5 and cannot share one.
+    parallel_diarization: bool = True
     # Below this, who-is-who was a near coin flip and the call is held for a
     # human rather than reported as fact.
     min_role_confidence: float = 0.34

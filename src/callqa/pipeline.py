@@ -15,7 +15,11 @@ Guarantees:
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import TypeVar
 
@@ -117,6 +121,106 @@ class _ArtifactStore:
         return artifact
 
 
+class _EarlyDiarization:
+    """Pyannote diarization racing the ASR stage, in a separate process.
+
+    Diarization reads only the audio, so on a mono recording it can run while
+    ASR is still transcribing; measured on the dev machine, CPU diarization
+    (~2x realtime) fully shadows ASR (~1.1x realtime), so the slower of the
+    two sets the wall time instead of their sum.
+
+    A separate PROCESS, not a thread: ctranslate2 and torch each bundle their
+    own libiomp5, and one process holding both aborts at random on Intel
+    macOS. Everything here is best-effort - any failure of the worker just
+    means the speakers stage diarizes in-process exactly as it did before.
+    """
+
+    def __init__(self, proc: subprocess.Popen, out_path: Path, log_path: Path) -> None:
+        self._proc = proc
+        self._out_path = out_path
+        self._log_path = log_path
+
+    @classmethod
+    def start(cls, engines: Engines, audio_art: AudioArtifact,
+              call_id: str) -> _EarlyDiarization | None:
+        config = engines.config
+        if not config.speakers.parallel_diarization or audio_art.is_stereo:
+            return None
+        if getattr(engines.mono_diarizer, "name", None) != "pyannote":
+            return None                    # mock diarizer is instant; nothing to hide
+        wav = audio_art.mono_wav
+        if not wav or not Path(wav).is_file():
+            return None
+        out_path = Path(f"{wav}.diar.json")
+        log_path = Path(f"{wav}.diar.log")
+        out_path.unlink(missing_ok=True)
+        env = dict(os.environ)
+        # Half the cores each, so the two engines share instead of fighting;
+        # an operator's explicit setting wins.
+        env.setdefault("OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 4) // 2)))
+        try:
+            with open(log_path, "w", encoding="utf-8") as log:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "callqa.speakers.diar_worker",
+                     str(wav), call_id, str(out_path)],
+                    stdin=subprocess.PIPE, stdout=log, stderr=log, env=env,
+                )
+            assert proc.stdin is not None
+            proc.stdin.write(config.speakers.model_dump_json().encode("utf-8"))
+            proc.stdin.close()
+        except OSError as exc:
+            logger.warning("call_id=%s: could not start diarization worker (%s); "
+                           "will diarize in-process", call_id, exc)
+            return None
+        logger.info("call_id=%s: diarization running alongside ASR (pid %d)",
+                    call_id, proc.pid)
+        return cls(proc, out_path, log_path)
+
+    def collect(self, call_id: str, duration_sec: float) -> list | None:
+        """The worker's segments, or None to fall back to in-process work."""
+        from callqa.speakers.diarization import DiarizedSegment
+
+        timeout = max(900.0, duration_sec * 10.0)
+        try:
+            code = self._proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            logger.warning("call_id=%s: diarization worker exceeded %.0fs; killing it",
+                           call_id, timeout)
+            self.cancel()
+            return None
+        try:
+            if code != 0:
+                raise OSError(f"worker exited {code}: {self._worker_log_tail()}")
+            segments = [
+                DiarizedSegment(label=s["label"], start=float(s["start"]),
+                                end=float(s["end"]))
+                for s in json.loads(self._out_path.read_text(encoding="utf-8"))
+            ]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            logger.warning("call_id=%s: diarization worker unusable (%s); "
+                           "diarizing in-process", call_id, exc)
+            return None
+        finally:
+            self._cleanup_files()
+        return segments
+
+    def cancel(self) -> None:
+        if self._proc.poll() is None:
+            self._proc.kill()
+            self._proc.wait(timeout=10)
+        self._cleanup_files()
+
+    def _worker_log_tail(self) -> str:
+        try:
+            return self._log_path.read_text(encoding="utf-8", errors="replace")[-300:]
+        except OSError:
+            return "<no worker log>"
+
+    def _cleanup_files(self) -> None:
+        self._out_path.unlink(missing_ok=True)
+        self._log_path.unlink(missing_ok=True)
+
+
 def _report_is_intact(path: Path) -> bool:
     """A report that was truncated mid-write is not a finished report."""
     try:
@@ -139,6 +243,7 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
 
     stages_completed: list[str] = []
     review_reasons: list[str] = []
+    early_diar: _EarlyDiarization | None = None
     try:
         if config.run.force:
             state.clear_call(call_id)
@@ -185,6 +290,10 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             atomic_write_text(readme, RAW_TRANSCRIPTS_README)
         bundle_path = store.path("transcripts")
         bundle = store.load("asr", bundle_path, TranscriptBundle)
+        if bundle is None and not store.is_done("speakers"):
+            # ASR is about to spend minutes on this recording; a mono call's
+            # diarization needs none of it, so it runs alongside.
+            early_diar = _EarlyDiarization.start(engines, audio_art, call_id)
         if bundle is None:
             if audio_art.is_stereo:
                 banker_t = engines.asr.transcribe(
@@ -217,7 +326,13 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                 assert bundle.mono is not None
                 if engines.mono_diarizer is None:
                     raise RuntimeError("mono recording but no diarizer configured")
-                diarized = engines.mono_diarizer.diarize(Path(audio_art.mono_wav or ""), call_id)
+                diarized = None
+                if early_diar is not None:
+                    diarized = early_diar.collect(call_id, meta.duration_sec)
+                    early_diar = None
+                if diarized is None:
+                    diarized = engines.mono_diarizer.diarize(
+                        Path(audio_art.mono_wav or ""), call_id)
                 dialog = assign_mono_roles(call_id, bundle.mono, diarized)
             atomic_write_model(dialog_path, dialog)
             store.mark_done("speakers", dialog_path)
@@ -328,6 +443,9 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             pass
         return result
     finally:
+        if early_diar is not None:
+            # An ASR failure must not orphan a diarization process.
+            early_diar.cancel()
         state.release_lock(call_id)
 
 
