@@ -719,3 +719,69 @@ class TestHebrewNumberWordNormaliser:
     def test_plain_amounts_near_digit_words_are_not_swallowed(self) -> None:
         red = self._redact("החיוב הוא 30 שקלים ועוד 10 שקלים עמלה")
         assert red == "החיוב הוא 30 שקלים ועוד 10 שקלים עמלה"
+
+
+class TestParallelDiarization:
+    """ASR and diarization are independent on a mono call, and CPU diarization
+    (~2x realtime) fully shadows ASR (~1.1x realtime) when they overlap - the
+    perf QA round measured 394 s combined wall for 279 s + 381 s of work. The
+    overlap runs in a separate PROCESS because ctranslate2 and torch each
+    bundle their own libiomp5 and one process holding both aborts at random
+    on Intel macOS."""
+
+    def test_worker_bad_config_fails_cleanly(self, tmp_path) -> None:
+        import subprocess
+        import sys
+
+        out = tmp_path / "out.json"
+        proc = subprocess.run(
+            [sys.executable, "-m", "callqa.speakers.diar_worker",
+             str(tmp_path / "missing.wav"), "C1", str(out)],
+            input=b"{not json", capture_output=True, timeout=120)
+        assert proc.returncode == 1
+        assert not out.exists()
+        assert b"diarization worker failed" in proc.stderr
+
+    @staticmethod
+    def _early(cmd: str):
+        import subprocess
+        import sys
+
+        from callqa.pipeline import _EarlyDiarization
+        proc = subprocess.Popen([sys.executable, "-c", cmd],
+                                stdin=subprocess.PIPE)
+        proc.stdin.close()
+        return _EarlyDiarization, proc
+
+    def test_collect_falls_back_when_the_worker_dies(self, tmp_path) -> None:
+        cls, proc = self._early("import sys; sys.exit(3)")
+        early = cls(proc, tmp_path / "out.json", tmp_path / "log")
+        assert early.collect("C1", duration_sec=60.0) is None
+
+    def test_collect_returns_the_worker_segments(self, tmp_path) -> None:
+        out = tmp_path / "out.json"
+        cls, proc = self._early(
+            "import json,pathlib; pathlib.Path(%r).write_text(json.dumps("
+            "[{'label':'SPEAKER_00','start':0.0,'end':2.5},"
+            " {'label':'SPEAKER_01','start':2.5,'end':4.0}]))" % str(out))
+        early = cls(proc, out, tmp_path / "log")
+        segments = early.collect("C1", duration_sec=60.0)
+        assert [s.label for s in segments] == ["SPEAKER_00", "SPEAKER_01"]
+        assert segments[1].end == 4.0
+        assert not out.exists(), "the worker artifact is cleaned up after use"
+
+    def test_mock_engines_never_spawn_a_worker(self, tmp_path) -> None:
+        """Mock diarization is instant; a subprocess would only add noise."""
+        from callqa.models import AudioArtifact
+        from callqa.pipeline import _EarlyDiarization
+
+        class FakeEngines:
+            class config:  # noqa: N801
+                class speakers:  # noqa: N801
+                    parallel_diarization = True
+            mono_diarizer = type("D", (), {"name": "mock"})()
+
+        wav = tmp_path / "a.wav"; wav.write_bytes(b"RIFF")
+        art = AudioArtifact(call_id="C1", is_stereo=False, mono_wav=str(wav),
+                            sample_rate=16000, vad_engine="energy")
+        assert _EarlyDiarization.start(FakeEngines(), art, "C1") is None
