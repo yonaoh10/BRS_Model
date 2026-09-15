@@ -50,6 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from callqa.dotenv import load_dotenv  # noqa: E402
+from callqa.ingestion import CALL_ID_RE  # noqa: E402
 
 logger = logging.getLogger("callqa.dashboard")
 
@@ -269,6 +270,47 @@ class Handler(BaseHTTPRequestHandler):
                            "application/json")
                 return
             self._send(200, json.dumps(data, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
+        if route.startswith("/api/transcript/"):
+            # The full REDACTED transcript for one call, on its own endpoint:
+            # /api/state must stay small enough to poll with a hundred calls
+            # on disk, so transcripts are fetched one at a time when the
+            # detail drawer opens. Reads ONLY redacted/ - the raw transcripts
+            # under transcripts/ have no route to the browser, and the
+            # call_id charset check (no separators beyond ._-, first char
+            # alphanumeric) means the id cannot traverse out of the directory.
+            call_id = unquote(route[len("/api/transcript/"):])
+            if not CALL_ID_RE.fullmatch(call_id):
+                self._send(404, b'{"error":"not found"}', "application/json")
+                return
+            redacted = _load_json(type(self).output_dir / "redacted" / f"{call_id}.json")
+            if not isinstance(redacted, dict) or "turns" not in redacted:
+                self._send(404, b'{"error":"not found"}', "application/json")
+                return
+            card = _load_json(type(self).output_dir / "scores" / f"{call_id}.json") or {}
+            evidence = [
+                {"dim": dim, "quote": e.get("quote"),
+                 "speaker": e.get("speaker"), "t": e.get("timestamp")}
+                for dim, v in (card.get("scores") or {}).items()
+                for e in (v.get("evidence") or [])
+                if isinstance(e, dict)
+            ]
+            # A disabled-redaction artifact carries the RAW text (loudly, by
+            # design, for the pipeline's own consumers) - it must not reach a
+            # browser. Serve the fact, never the turns.
+            enabled = bool(redacted.get("enabled", True))
+            body = {
+                "call_id": call_id,
+                "enabled": enabled,
+                "turns": [
+                    {"speaker": t.get("speaker"), "start": t.get("start"),
+                     "end": t.get("end"), "text": t.get("text")}
+                    for t in redacted.get("turns") or [] if isinstance(t, dict)
+                ] if enabled else [],
+                "evidence": evidence if enabled else [],
+            }
+            self._send(200, json.dumps(body, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
         if route.startswith("/reports/"):
