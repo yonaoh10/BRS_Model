@@ -114,6 +114,15 @@ def test_no_raw_pii_reaches_the_dashboard(pipeline_output: Path) -> None:
     assert RAW_PHONE not in blob
 
 
+def test_state_does_not_carry_transcripts(pipeline_output: Path) -> None:
+    """/api/state is polled and must stay small: the full transcript has its
+    own per-call endpoint, fetched only when the detail drawer opens. A
+    hundred calls of transcript text in the state blob would choke the page."""
+    state = collect_state(pipeline_output)
+    for call in state["calls"]:
+        assert "turns" not in call and "transcript" not in call
+
+
 def test_redaction_actually_ran_on_this_sample(pipeline_output: Path) -> None:
     """Guards the test above from passing vacuously: the sample set really does
     contain PII, and the redacted artifacts really do carry the masks. (Which
@@ -186,6 +195,71 @@ def test_sibling_directory_is_not_served(live_server: str, pipeline_output: Path
 
 def test_serves_generated_reports(live_server: str) -> None:
     assert _status(f"{live_server}/reports/index.html?t=test-token-value") == 200
+
+
+# ------------------------------------------------------- transcript endpoint
+
+def _get_json(url: str) -> dict:
+    with urllib.request.urlopen(url, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def test_transcript_endpoint_serves_redacted_turns(live_server: str) -> None:
+    body = _get_json(f"{live_server}/api/transcript/CALL001?t=test-token-value")
+    assert body["call_id"] == "CALL001"
+    assert body["turns"], "the mock run produced a dialog for CALL001"
+    for turn in body["turns"]:
+        assert turn["speaker"] in ("banker", "customer")
+        assert isinstance(turn["start"], (int, float))
+    joined = " ".join(t["text"] for t in body["turns"])
+    # the sample set seeds PII into dialog 0, so the masks must be VISIBLE:
+    # showing the reviewer what was removed is the point of the view
+    assert "████" in joined
+
+
+def test_transcript_endpoint_never_serves_raw_pii(live_server: str, pipeline_output: Path) -> None:
+    """The per-call transcript endpoint is a second door out of the pipeline;
+    the raw-PII rule applies to it exactly as it does to /api/state."""
+    for path in sorted((pipeline_output / "redacted").glob("*.json")):
+        call_id = path.stem
+        blob = json.dumps(
+            _get_json(f"{live_server}/api/transcript/{call_id}?t=test-token-value"),
+            ensure_ascii=False)
+        assert RAW_ID not in blob
+        assert RAW_PHONE not in blob
+
+
+def test_transcript_endpoint_requires_token(live_server: str) -> None:
+    assert _status(f"{live_server}/api/transcript/CALL001") == 403
+    assert _status(f"{live_server}/api/transcript/CALL001?t=wrong") == 403
+
+
+def test_transcript_endpoint_rejects_bad_call_ids(live_server: str) -> None:
+    """The call_id charset check is the traversal guard for this endpoint."""
+    for bad in ("..%2F..%2Fresults%2FCALL001", "a%2Fb", ".hidden", "x" * 80):
+        assert _status(f"{live_server}/api/transcript/{bad}?t=test-token-value") == 404
+    assert _status(f"{live_server}/api/transcript/NOSUCH?t=test-token-value") == 404
+
+
+def test_transcript_endpoint_refuses_disabled_redaction(live_server: str,
+                                                        pipeline_output: Path) -> None:
+    """A disabled-redaction artifact carries RAW text for the pipeline's own
+    consumers (loudly, by design). The browser must get the fact, not the text."""
+    artifact = {
+        "call_id": "RAWLEAK1", "engine": "regex:DISABLED", "enabled": False,
+        "redaction_counts": {},
+        "turns": [{"speaker": "customer", "start": 0.0, "end": 2.0,
+                   "text": f"תעודת הזהות שלי {RAW_ID}"}],
+    }
+    path = pipeline_output / "redacted" / "RAWLEAK1.json"
+    path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+    try:
+        body = _get_json(f"{live_server}/api/transcript/RAWLEAK1?t=test-token-value")
+        assert body["enabled"] is False
+        assert body["turns"] == []
+        assert RAW_ID not in json.dumps(body)
+    finally:
+        path.unlink()
 
 
 def test_page_is_served_with_its_token(live_server: str) -> None:

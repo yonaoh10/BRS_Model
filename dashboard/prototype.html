@@ -284,6 +284,17 @@ tbody tr:focus-visible{background:var(--brand-tint);
   font-size:13.5px; margin-block-end:var(--s3);
 }
 .quote .meta{font-size:11.5px; color:var(--ink-3); margin-block-end:3px}
+.transcript{display:flex; flex-direction:column; gap:var(--s2)}
+.turn{padding:var(--s2) var(--s3); border-radius:var(--r-sm); font-size:13px;
+  background:var(--sunken); border-inline-start:3px solid var(--border)}
+.turn.b{border-inline-start-color:var(--brand-edge)}
+.turn .tmeta{font-size:11px; color:var(--ink-3); margin-block-end:2px;
+  display:flex; gap:var(--s2); align-items:center}
+.turn .who{font-weight:600}
+/* an evidence quote in context: same tint the evidence cards use, plus an
+   outline so the highlight survives forced-colors / poor tint contrast */
+mark.ev{background:var(--warn-tint); color:inherit; padding:0 2px;
+  border-radius:2px; outline:1px solid var(--warn)}
 .dimline{display:flex; align-items:center; gap:var(--s3); padding:var(--s2) 0; border-block-end:1px solid var(--border); font-size:13.5px}
 .dimline:last-child{border:none}
 .dimline .n{flex:1}
@@ -840,7 +851,10 @@ function openCall(id){
       <div class="meta"><span class="ltr">[${esc(e.t)}]</span> ${esc(e.sp)}</div>${esc(e.q)}</div>`).join('')}
     <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">המלצת אימון</h4>
     <div class="quote" style="border-inline-start-color:var(--ok); background:var(--ok-tint)">${esc(d.rec)}</div>
+    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">תמליל השיחה <span style="font-weight:400">(לאחר הסרת מזהים; קטעים מסומנים צוטטו כראיה)</span></h4>
+    <div class="transcript" id="transcriptBox"><div class="empty">טוען תמליל…</div></div>
   `;
+  loadTranscript(c.id);
   const link = document.getElementById('openReport');
   if (link) {
     // Only offer the report when a server is actually there to serve it.
@@ -851,6 +865,53 @@ function openCall(id){
   }
   drawer.hidden=false; scrim.hidden=false;
   document.getElementById('closeDrawer').focus();
+}
+function mmssOf(sec){
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+/* The full redacted transcript, fetched only when the drawer opens: keeping
+   it out of /api/state is what keeps that endpoint pollable at a hundred
+   calls. Only redacted text ever arrives here - the server has no route to
+   the raw transcripts - and the mask tokens (<ת"ז:████>) are shown on
+   purpose: seeing WHAT was removed is the point for a reviewer. */
+async function loadTranscript(id){
+  const box = document.getElementById('transcriptBox');
+  if(!box) return;
+  const token = window.__CALLQA_TOKEN__;
+  if(!token){
+    box.innerHTML = '<div class="empty">התמליל זמין רק כשהקונסולה מחוברת לשרת.</div>';
+    return;
+  }
+  try{
+    const r = await fetch('/api/transcript/' + encodeURIComponent(id)
+                          + '?t=' + encodeURIComponent(token));
+    if(!r.ok){ box.innerHTML = '<div class="empty">אין תמליל שמור לשיחה זו.</div>'; return; }
+    const d = await r.json();
+    const quotes = (d.evidence || []).filter(e => e.quote);
+    const rows = (d.turns || []).map(t => {
+      let html = esc(t.text);
+      for(const e of quotes){
+        if(e.speaker && t.speaker && e.speaker !== t.speaker) continue;
+        const q = esc(e.quote);
+        if(q && html.includes(q)){
+          html = html.split(q).join(
+            '<mark class="ev" title="צוטט כראיה: ' + esc(byId[e.dim] || e.dim) + '">' + q + '</mark>');
+        }
+      }
+      const who = t.speaker === 'banker' ? 'בנקאי' : 'לקוח';
+      return `<div class="turn ${t.speaker === 'banker' ? 'b' : 'c'}">
+        <div class="tmeta"><span class="who">${who}</span><span class="ltr mono">[${mmssOf(t.start)}]</span></div>
+        <div>${html}</div></div>`;
+    });
+    box.innerHTML = rows.join('') || '<div class="empty">התמליל ריק.</div>';
+    if(d.enabled === false){
+      box.innerHTML = '<div class="quote" style="border-inline-start-color:var(--warn); background:var(--warn-tint)">'
+        + 'הסרת המזהים הייתה כבויה בהרצה זו; התמליל אינו מוצג.</div>';
+    }
+  }catch(err){
+    box.innerHTML = '<div class="empty">שגיאה בטעינת התמליל.</div>';
+  }
 }
 function closeDrawer(){ drawer.hidden=true; scrim.hidden=true; }
 document.addEventListener('click',e=>{
