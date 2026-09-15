@@ -128,9 +128,10 @@ class SpeakersConfig(StrictModel):
     device: Literal["auto", "cpu", "cuda"] = "auto"
     exclusive: bool = True         # one speaker per moment, for word alignment
     # Diarization needs only the audio, so on a mono call it runs in a
-    # separate process while ASR transcribes; on the dev machine that hides
-    # ~170 s of the slower stage behind the other. A separate process because
-    # ctranslate2 and torch each bundle libiomp5 and cannot share one.
+    # separate process while ASR transcribes; measured on the 6-core dev
+    # machine this takes the pair from ~401 s sequential to ~347 s. A separate
+    # process because ctranslate2 and torch each bundle libiomp5 and cannot
+    # share one.
     parallel_diarization: bool = True
     # Below this, who-is-who was a near coin flip and the call is held for a
     # human rather than reported as fact.

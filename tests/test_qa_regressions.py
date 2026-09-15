@@ -722,9 +722,9 @@ class TestHebrewNumberWordNormaliser:
 
 
 class TestParallelDiarization:
-    """ASR and diarization are independent on a mono call, and CPU diarization
-    (~2x realtime) fully shadows ASR (~1.1x realtime) when they overlap - the
-    perf QA round measured 394 s combined wall for 279 s + 381 s of work. The
+    """ASR and diarization are independent on a mono call; overlapping them
+    took the perf QA round from ~401 s sequential (172.7 s ASR + 228.5 s
+    diarization) to ~347 s of combined wall on the 6-core dev machine. The
     overlap runs in a separate PROCESS because ctranslate2 and torch each
     bundle their own libiomp5 and one process holding both aborts at random
     on Intel macOS."""
