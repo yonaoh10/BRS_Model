@@ -125,9 +125,10 @@ class _EarlyDiarization:
     """Pyannote diarization racing the ASR stage, in a separate process.
 
     Diarization reads only the audio, so on a mono recording it can run while
-    ASR is still transcribing; measured on the dev machine, CPU diarization
-    (~2x realtime) fully shadows ASR (~1.1x realtime), so the slower of the
-    two sets the wall time instead of their sum.
+    ASR is still transcribing. Measured on the 6-core dev machine: 172.7 s of
+    ASR + 228.5 s of diarization sequentially (~401 s) become ~347 s of
+    combined wall - contention stretches both, so the win is the ~55 s gap,
+    not the full ASR time.
 
     A separate PROCESS, not a thread: ctranslate2 and torch each bundle their
     own libiomp5, and one process holding both aborts at random on Intel
@@ -155,9 +156,10 @@ class _EarlyDiarization:
         log_path = Path(f"{wav}.diar.log")
         out_path.unlink(missing_ok=True)
         env = dict(os.environ)
-        # Half the cores each, so the two engines share instead of fighting;
-        # an operator's explicit setting wins.
-        env.setdefault("OMP_NUM_THREADS", str(max(1, (os.cpu_count() or 4) // 2)))
+        # Deliberately NOT capping threads: the perf QA measured an explicit
+        # 3+3 split at 394 s combined wall vs ~347 s when both engines keep
+        # their defaults and let the scheduler arbitrate. The operator's own
+        # OMP_NUM_THREADS, if set, is inherited like everything else.
         try:
             with open(log_path, "w", encoding="utf-8") as log:
                 proc = subprocess.Popen(

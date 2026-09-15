@@ -2,8 +2,9 @@
 
 Diarization needs nothing from the transcript, so on a mono recording it can
 run while the ASR stage is still transcribing - measured on the dev machine
-that turns ~170 s of ASR wall time into free time, because CPU diarization
-(~2x realtime) fully shadows it.
+that turns a ~401 s sequential pair into ~347 s of combined wall. Contention
+stretches both engines, so the win is the gap between them, not the whole
+ASR time.
 
 A separate process, not a thread, and that is load-bearing: ctranslate2
 (faster-whisper) and torch (pyannote) each bundle their own libiomp5, and one
