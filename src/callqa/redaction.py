@@ -149,6 +149,107 @@ def normalize_for_detection(text: str) -> tuple[str, list[int]]:
     return "".join(chars), index
 
 
+# -- Hebrew number-word folding (Pass B) -------------------------------------
+
+# Customers dictate identifiers digit by digit, and the real ivrit.ai ASR
+# writes those digits as Hebrew WORDS ("ארבע חמש שמונה אפס"): no digit regex
+# can ever see them. This pass folds runs of dictation words to digits between
+# normalisation and detection, carrying an index map back so masking always
+# lands on the original words. Only the words for 0-9 fold - quantity words
+# (עשרים, מאות, אלף) stay text, so amounts in words are untouched.
+DIGIT_WORDS = {
+    "אפס": "0",
+    "אחת": "1", "אחד": "1",
+    "שתיים": "2", "שניים": "2", "שתי": "2", "שני": "2",
+    "שלוש": "3", "שלושה": "3",
+    "ארבע": "4", "ארבעה": "4",
+    "חמש": "5", "חמישה": "5",
+    "שש": "6", "שישה": "6",
+    "שבע": "7", "שבעה": "7",
+    "שמונה": "8",
+    "תשע": "9", "תשעה": "9",
+}
+# Fewer than four consecutive digit-words is ordinary speech ("שתי דקות",
+# "שלוש ארבע פעמים"); four or more is dictation. Card last-four is exactly
+# four, so the threshold sits at the shortest identifier fragment that matters.
+MIN_DIGIT_WORD_RUN = 4
+
+_WORD_TOKEN_RE = re.compile(r"[֐-׿]+|\S+")
+_TRAILING_PUNCT = ".,?!:;"
+# A comma is a dictation pause ("שמונה, אפס, ארבע, וחמש") and stays inside
+# the run; sentence-terminal punctuation ends it, so an unrelated number in
+# the next sentence never glues onto this one.
+_RUN_ENDING_PUNCT = ".?!:;"
+
+
+def _word_digit(token: str) -> str | None:
+    core = token.strip(_TRAILING_PUNCT + "\"'")
+    if core in DIGIT_WORDS:
+        return DIGIT_WORDS[core]
+    # The conjunction prefix ו- ("שמונה, אפס, וחמש") is part of dictation
+    # cadence; the definite article ה- ("הארבע") is not.
+    if len(core) > 1 and core[0] == "ו" and core[1:] in DIGIT_WORDS:
+        return DIGIT_WORDS[core[1:]]
+    return None
+
+
+def fold_number_words(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """Fold runs of >=MIN_DIGIT_WORD_RUN Hebrew digit-words to digit strings.
+
+    Returns (folded_text, spans) where spans[i] is the (start, end) range in
+    `text` that folded character i came from. Every digit produced by a fold
+    maps to the WHOLE word run, so masking any part of the folded number
+    removes all of the words it came from - privacy bias over precision.
+    """
+    tokens = [(m.group(), m.start(), m.end()) for m in _WORD_TOKEN_RE.finditer(text)]
+    folded: list[str] = []
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+
+    def passthrough(upto: int) -> None:
+        nonlocal cursor
+        for k in range(cursor, upto):
+            folded.append(text[k])
+            spans.append((k, k + 1))
+        cursor = upto
+
+    i, n = 0, len(tokens)
+    while i < n:
+        if _word_digit(tokens[i][0]) is None:
+            i += 1
+            continue
+        j = i
+        last_word = i
+        digits: list[str] = []
+        while j < n:
+            d = _word_digit(tokens[j][0])
+            if d is not None:
+                digits.append(d)
+                last_word = j
+                ended = tokens[j][0] != tokens[j][0].rstrip(_RUN_ENDING_PUNCT)
+                j += 1
+                if ended:
+                    break
+                continue
+            # The tokenizer splits "שמונה," into a word and a bare comma;
+            # a comma between two digit words is a dictation pause.
+            if (digits and tokens[j][0] == ","
+                    and j + 1 < n and _word_digit(tokens[j + 1][0]) is not None):
+                j += 1
+                continue
+            break
+        if len(digits) >= MIN_DIGIT_WORD_RUN:
+            run_start, run_end = tokens[i][1], tokens[last_word][2]
+            passthrough(run_start)
+            for d in digits:
+                folded.append(d)
+                spans.append((run_start, run_end))
+            cursor = run_end
+        i = max(j, i + 1)
+    passthrough(len(text))
+    return "".join(folded), spans
+
+
 # -- patterns ----------------------------------------------------------------
 
 # A run of digits that may carry separators: spaces (including a newline,
@@ -252,6 +353,15 @@ def _classify_run(text: str, start: int, end: int) -> str | None:
         return "ACCOUNT_LIKE"
     if 4 <= len(digits) <= 5 and any(word in before for word in ACCOUNT_CONTEXT):
         return "ACCOUNT_LIKE"
+    # Dictation context lifts the structural-separator requirement: a customer
+    # reading out an identifier pauses between groups, which the ASR writes as
+    # bare spaces ("926 9265") or which number-word folding produces directly.
+    # An ID/account word before the run says it is an identifier, not a list
+    # of quantities; the amount check above has already had its turn.
+    if 6 <= len(digits) <= 20 and (
+        id_hint or any(word in before for word in ACCOUNT_CONTEXT)
+    ):
+        return "ISRAELI_ID" if id_hint else "ACCOUNT_LIKE"
     return None
 
 
@@ -287,15 +397,46 @@ def _spans_in_normalized(text: str) -> list[PIIMatch]:
     return found
 
 
+def _repeated_fragments(text: str, spans: list[PIIMatch]) -> list[PIIMatch]:
+    """Short digit runs that repeat a piece of an already-masked identifier.
+
+    A banker reads back "the last four digits, 9265" after the customer
+    dictated the full number: masking the full number while leaving its
+    tail in the clear undoes the mask. A 4-5 digit run whose digits appear
+    inside any masked >=6 digit identifier is masked with it.
+    """
+    masked_digits = [re.sub(r"\D", "", text[s.start:s.end])
+                     for s in spans if s.end - s.start > 0]
+    long_masked = [d for d in masked_digits if len(d) >= 6]
+    if not long_masked:
+        return []
+    extra: list[PIIMatch] = []
+    for m in DIGIT_RUN_RE.finditer(text):
+        if any(m.start() < s.end and s.start < m.end() for s in spans):
+            continue
+        digits = re.sub(r"\D", "", m.group())
+        if 4 <= len(digits) <= 5 and any(digits in d for d in long_masked):
+            extra.append(PIIMatch("ACCOUNT_LIKE", m.start(), m.end()))
+    return extra
+
+
 def find_pii(text: str) -> list[PIIMatch]:
     """Find PII spans in `text`, in the coordinates of `text` itself."""
     normalized, index = normalize_for_detection(text)
-    spans = _spans_in_normalized(normalized)
+    folded, fold_spans = fold_number_words(normalized)
+    spans = _spans_in_normalized(folded)
+    spans.extend(_repeated_fragments(folded, spans))
+    spans.sort(key=lambda s: s.start)
     out: list[PIIMatch] = []
     for span in spans:
-        if span.start >= len(index) or span.end - 1 >= len(index):
+        if span.start >= len(fold_spans) or span.end - 1 >= len(fold_spans):
             continue                                  # pragma: no cover
-        out.append(PIIMatch(span.entity_type, index[span.start], index[span.end - 1] + 1))
+        # folded coords -> normalized coords -> original coords
+        n_start = fold_spans[span.start][0]
+        n_end = fold_spans[span.end - 1][1]
+        if n_start >= len(index) or n_end - 1 >= len(index):
+            continue                                  # pragma: no cover
+        out.append(PIIMatch(span.entity_type, index[n_start], index[n_end - 1] + 1))
     return out
 
 
