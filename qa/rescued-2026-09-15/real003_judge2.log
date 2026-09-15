@@ -1,0 +1,16 @@
+2026-09-15 01:59:39,118 WARNING callqa.redaction: presidio not installed; using built-in regex redactor
+2026-09-15 01:59:39,683 INFO callqa.judge.vllm_judge: vLLM endpoint reachable at https://85lgsx5f9nktgp-8000.proxy.runpod.net/v1
+2026-09-15 01:59:39,683 INFO callqa.engines: engines built: asr=FasterWhisperEngine judge=VLLMJudge mock=False
+2026-09-15 01:59:39,685 WARNING callqa: Call_001.m4a has no row in metadata.csv; processing with defaults (banker unknown, channel L, banker name not redacted)
+2026-09-15 02:00:21,637 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי: מצאתי זאת עמלת פעולה בסניף על הפקדה שביצעת ב -10 לחוד' -> 'מצאתי זאת עמלת פעולה בסניף על הפקדה שביצעת ב -10 לחודש,'
+2026-09-15 02:00:21,648 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי: חשוב שאציין שהעמדה נכבד גם בחודש שבו לא תבצע פעולות,' -> 'חשוב שאציין שהעמדה נכבד גם בחודש שבו לא תבצע פעולות,'
+2026-09-15 02:00:21,726 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי: לסיכום, העמלה שראית היא עמלה פעולה בסניף.' -> 'לסיכום, העמלה שראית היא עמלה פעולה בסניף.'
+2026-09-15 02:00:21,835 INFO callqa.judge.validation: evidence quote snapped to transcript: 'בנקאי: לסיכום, העמלה שראית היא עמלה פעולה בסניף.' -> 'לסיכום, העמלה שראית היא עמלה פעולה בסניף.'
+2026-09-15 02:00:21,875 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=0
+2026-09-15 02:00:43,775 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=1
+2026-09-15 02:01:16,715 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=2
+2026-09-15 02:01:49,574 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=3
+2026-09-15 02:02:22,215 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=4
+2026-09-15 02:02:54,864 INFO callqa.judge.runner: judge validation failed: call_id=REAL003 attempt=5
+2026-09-15 02:02:54,864 WARNING callqa.pipeline: call needs human review: call_id=REAL003
+2026-09-15 02:02:54,867 ERROR callqa: call REAL003: status=needs_human_review error=judge output failed after 6 attempts: evidence verification failed: dimension 'identification': evidence quote is too short to verify: 'בנקאי: אה?' | dimension 'compliance': quote not found verbatim in transcript: 'בנקאי: לפני כן אני חייב לזהות אותך.' | dimension 'empathy': quote not found verbatim in transcript: 'לקוח: אני לא באמת סופר.' | dimension 'listening': evidence quote is too short to verify: 'בנקאי: אה?' | dimension 'clarity': quote not found verbatim in transcript: 'בנקאי: העמלה שראית...[truncated]

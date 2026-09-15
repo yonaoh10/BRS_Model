@@ -1,0 +1,12 @@
+2026-09-15 05:38:33,562 WARNING callqa.redaction: presidio not installed; using built-in regex redactor
+2026-09-15 05:38:34,022 INFO callqa.judge.vllm_judge: vLLM endpoint reachable at https://glvssw76jglgta-8000.proxy.runpod.net/v1
+2026-09-15 05:38:34,022 INFO callqa.engines: engines built: asr=FasterWhisperEngine judge=VLLMJudge mock=False
+2026-09-15 05:38:34,025 WARNING callqa: Call_001.m4a has no row in metadata.csv; processing with defaults (banker unknown, channel L, banker name not redacted)
+2026-09-15 05:40:39,401 WARNING callqa.judge.runner: judge call failed: call_id=REAL002 attempt=0: vLLM request failed: HTTP Error 524: <none>: error code: 524
+
+2026-09-15 05:42:45,051 WARNING callqa.judge.runner: judge call failed: call_id=REAL002 attempt=1: vLLM request failed: HTTP Error 524: <none>: error code: 524
+
+2026-09-15 05:44:50,490 WARNING callqa.judge.runner: judge call failed: call_id=REAL002 attempt=2: vLLM request failed: HTTP Error 524: <none>: error code: 524
+
+2026-09-15 05:46:56,183 WARNING callqa.judge.runner: judge call failed: call_id=REAL002 attempt=3: vLLM request failed: HTTP Error 524: <none>: error code: 524
+

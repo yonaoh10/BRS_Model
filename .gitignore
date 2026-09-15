@@ -28,3 +28,6 @@ refs/
 logs/
 .env
 wheels/
+
+# rescued QA material: audio is derivable from Calls/, keep out of git
+qa/rescued-2026-09-15/qa_perf/*.wav
