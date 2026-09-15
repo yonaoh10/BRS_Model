@@ -52,6 +52,17 @@ class FasterWhisperEngine:
         setup that aborts or segfaults.
         """
         if self._model is None:
+            import os
+            import sys
+
+            if sys.platform == "darwin":
+                # Intel macOS: ctranslate2 and torch each bundle libiomp5, and
+                # once torch is resident (silero VAD runs before ASR on every
+                # fresh call) importing faster_whisper aborts the interpreter
+                # with OMP Error #15. This is Intel's own documented workaround;
+                # the bank's Linux target never takes this branch. An operator
+                # who has set the variable keeps their value.
+                os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
             from faster_whisper import WhisperModel  # lazy import
 
             # local_files_only guards against any accidental network access.
