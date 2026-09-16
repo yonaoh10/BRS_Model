@@ -184,7 +184,9 @@ class VLLMJudge:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=600) as resp:
+            with urllib.request.urlopen(
+                req, timeout=self.config.request_timeout_sec
+            ) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             # The response body is where vLLM says WHY (context length,

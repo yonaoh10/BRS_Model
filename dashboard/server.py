@@ -56,6 +56,10 @@ logger = logging.getLogger("callqa.dashboard")
 
 PAGE = Path(__file__).parent / "prototype.html"
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+# Bounds on one /api/transcript response - a real call is far under these; the
+# caps stop a corrupt or pathological artifact from serving an unbounded body.
+MAX_TRANSCRIPT_TURNS = 5000
+MAX_TURN_CHARS = 4000
 
 
 # ---------------------------------------------------------------- data layer
@@ -300,13 +304,21 @@ class Handler(BaseHTTPRequestHandler):
             # design, for the pipeline's own consumers) - it must not reach a
             # browser. Serve the fact, never the turns.
             enabled = bool(redacted.get("enabled", True))
+            all_turns = [t for t in (redacted.get("turns") or []) if isinstance(t, dict)]
+            # Bound the response: a real call is a few hundred short turns; an
+            # artifact with tens of thousands (corrupt, or a very long call)
+            # would otherwise be read and serialised whole into one body. The
+            # cap keeps a single request cheap; a truncation flag tells the UI.
+            truncated = len(all_turns) > MAX_TRANSCRIPT_TURNS
             body = {
                 "call_id": call_id,
                 "enabled": enabled,
+                "truncated": truncated,
                 "turns": [
                     {"speaker": t.get("speaker"), "start": t.get("start"),
-                     "end": t.get("end"), "text": t.get("text")}
-                    for t in redacted.get("turns") or [] if isinstance(t, dict)
+                     "end": t.get("end"),
+                     "text": str(t.get("text") or "")[:MAX_TURN_CHARS]}
+                    for t in all_turns[:MAX_TRANSCRIPT_TURNS]
                 ] if enabled else [],
                 "evidence": evidence if enabled else [],
             }

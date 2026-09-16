@@ -191,6 +191,19 @@ def _delete_volume(vol_id: str) -> None:
         print(f"  warning: could not delete volume {vol_id}: {exc}")
 
 
+def _is_not_found(exc: RunPodError) -> bool:
+    return "http 404" in str(exc).lower()
+
+
+def _forget_pod(state: dict) -> None:
+    """The pod no longer exists on RunPod (terminated in the console, expired).
+    Clear only the pod fields so the CLI is not deadlocked GET-404ing a ghost;
+    the network volume and keys are kept."""
+    for key in ("pod_id", "gpu", "last_started_at", "last_stopped_at"):
+        state.pop(key, None)
+    save_state(state)
+
+
 def _is_capacity_error(exc: RunPodError) -> bool:
     # RunPod phrases "this DC has no free GPU of this type right now" several
     # ways; all of them mean "try another DC", not "abort".
@@ -210,13 +223,23 @@ def cmd_up(args: argparse.Namespace) -> int:
     pod_id = state.get("pod_id")
 
     if pod_id:
-        pod = _request("GET", f"/pods/{pod_id}")
-        status = pod.get("desiredStatus") or pod.get("status")
-        if status == "RUNNING":
-            print(f"Pod {pod_id} is already running.")
-            return _print_urls(state)
-        print(f"Pod {pod_id} exists (status {status}); starting it...")
-        _request("POST", f"/pods/{pod_id}/start")
+        try:
+            pod = _request("GET", f"/pods/{pod_id}")
+            status = pod.get("desiredStatus") or pod.get("status")
+            if status == "RUNNING":
+                print(f"Pod {pod_id} is already running.")
+                return _print_urls(state)
+            print(f"Pod {pod_id} exists (status {status}); starting it...")
+            _request("POST", f"/pods/{pod_id}/start")
+        except RunPodError as exc:
+            if not _is_not_found(exc):
+                raise
+            # The recorded pod is gone (console-terminated / expired). Don't
+            # deadlock GET-404ing it: forget it and create a fresh one on the
+            # kept network volume.
+            print(f"Recorded pod {pod_id} no longer exists; creating a new one.")
+            _forget_pod(state)
+            pod_id = _create_pod_on_volume(state, args)
     else:
         # Secrets are generated once and reused; both services check them.
         state.setdefault("asr_api_key", secrets.token_urlsafe(32))
@@ -387,8 +410,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     pod_id = state.get("pod_id")
     if not pod_id:
         print("No pod recorded. Nothing is running, nothing is billing.")
-        return 0
-    pod = _request("GET", f"/pods/{pod_id}")
+        return _volume_status_line(state)
+    try:
+        pod = _request("GET", f"/pods/{pod_id}")
+    except RunPodError as exc:
+        if not _is_not_found(exc):
+            raise
+        print(f"Recorded pod {pod_id} no longer exists; clearing the record.")
+        _forget_pod(state)
+        return _volume_status_line(state)
     status = pod.get("desiredStatus") or pod.get("status") or "UNKNOWN"
     cost = pod.get("costPerHr")
     print(f"pod {pod_id}: {status}" + (f"  (${cost}/hr while running)" if cost else ""))
@@ -402,12 +432,16 @@ def cmd_status(args: argparse.Namespace) -> int:
                 print("Stop it with: python cloud/runpod_cli.py down")
     else:
         print("GPU billing is stopped.")
+    return _volume_status_line(state)
+
+
+def _volume_status_line(state: dict) -> int:
+    """Print the standing network-volume storage cost, so it is never a
+    surprise the way the runaway pod was. Returns 0."""
     vol_id = state.get("network_volume_id")
     if vol_id:
         vol = _volume_exists(vol_id)
         size = vol.get("size") if vol else None
-        # $0.07/GB-month under 1TB. Printed so the standing storage cost is
-        # never a surprise the way the runaway pod was.
         note = (f"  (~${size * 0.07:.2f}/mo at $0.07/GB)" if isinstance(size, (int, float))
                 else "")
         print(f"network volume {vol_id} in {state.get('data_center_id')}: "
@@ -421,11 +455,30 @@ def cmd_down(args: argparse.Namespace) -> int:
     if not pod_id:
         print("No pod recorded; nothing to stop.")
         return 0
-    _request("POST", f"/pods/{pod_id}/stop")
+    try:
+        _request("POST", f"/pods/{pod_id}/stop")
+    except RunPodError as exc:
+        if not _is_not_found(exc):
+            raise
+        print(f"Pod {pod_id} no longer exists; nothing to stop. Clearing record.")
+        _forget_pod(state)
+        return 0
     state["last_stopped_at"] = time.time()
     save_state(state)
-    print(f"Pod {pod_id} stopped. GPU billing has ended; the network volume persists")
-    print("(and still bills for storage) so the next `up` skips the model download.")
+    # Confirm the stop actually took effect rather than trusting the 200: a
+    # queued-but-incomplete stop would otherwise print "billing ended" while
+    # the pod keeps running.
+    status = "UNKNOWN"
+    try:
+        status = (_request("GET", f"/pods/{pod_id}").get("desiredStatus") or "UNKNOWN")
+    except RunPodError:
+        pass
+    if status == "RUNNING":
+        print(f"WARNING: asked pod {pod_id} to stop but it still reports RUNNING.")
+        print("Re-run `python cloud/runpod_cli.py status` and `down` to confirm.")
+        return 1
+    print(f"Pod {pod_id} stopped ({status}). GPU billing has ended; the network volume")
+    print("persists (and still bills for storage) so the next `up` skips the download.")
     return 0
 
 
@@ -446,13 +499,16 @@ def cmd_destroy(args: argparse.Namespace) -> int:
         print("Re-run with --yes to confirm.")
         return 1
     if pod_id:
-        _request("DELETE", f"/pods/{pod_id}")
+        try:
+            _request("DELETE", f"/pods/{pod_id}")
+            print(f"Pod {pod_id} destroyed. GPU billing stopped.")
+        except RunPodError as exc:
+            if not _is_not_found(exc):
+                raise
+            print(f"Pod {pod_id} was already gone; clearing the record.")
         # Keep the volume and the shared keys; only the pod is disposable. The
         # next `up` attaches the SAME volume on whatever host has a free GPU.
-        for key in ("pod_id", "gpu", "last_started_at", "last_stopped_at"):
-            state.pop(key, None)
-        save_state(state)
-        print(f"Pod {pod_id} destroyed. GPU billing stopped.")
+        _forget_pod(state)
     if args.volume and vol_id:
         _request("DELETE", f"/networkvolumes/{vol_id}")
         STATE_FILE.unlink(missing_ok=True)

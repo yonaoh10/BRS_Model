@@ -151,6 +151,10 @@ class JudgeConfig(StrictModel):
     max_tokens: int = Field(default=2500, gt=0)
     n_samples: int = Field(default=1, ge=1, le=9)
     max_retries: int = Field(default=3, ge=0, le=10)
+    # Per-request wall-clock timeout, seconds. A hung/slow endpoint otherwise
+    # ties up a worker for (max_retries+1) x this; make it an operator knob
+    # rather than a hardcoded 600 so a stuck local vLLM can be given up on fast.
+    request_timeout_sec: float = Field(default=600.0, gt=0)
     # Transcript token budget (approx.) before the long-call chunking rule kicks in.
     max_transcript_chars: int = Field(default=24000, gt=0)
     # Optional bearer token sent as `Authorization: Bearer ...` (vLLM --api-key,

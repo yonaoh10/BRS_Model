@@ -79,6 +79,15 @@ def load_dotenv(explicit: Path | None = None) -> list[str]:
         if applied:
             logger.debug("loaded %d value(s) from %s: %s", len(applied), path,
                          ", ".join(applied))
+            # A .env in an attacker-controlled cwd can point the judge/ASR at a
+            # host of its choosing (validate_endpoint permits any https host),
+            # and redacted transcripts then egress there. Egress endpoints set
+            # from a .env are logged loudly - which file, which endpoint - so a
+            # redirected destination is visible rather than silent.
+            for key in applied:
+                if key.endswith("__BASE_URL"):
+                    logger.warning("egress endpoint %s set from %s -> %s",
+                                   key, path, os.environ[key])
         return applied
     return []
 
