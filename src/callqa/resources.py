@@ -29,6 +29,12 @@ def config_dirs() -> list[Path]:
         if candidate.is_dir():
             candidates.append(candidate)
             break
+    # Last resort: the defaults shipped INSIDE the package. In an installed
+    # (non-editable) wheel there is no repo-root config/ above site-packages, so
+    # without this every command fails on the first load; with it the wheel is
+    # self-contained and an operator can still override via a cwd config/ or
+    # CALLQA_CONFIG_DIR (both take precedence above).
+    candidates.append(here.parent / "config_defaults")
     seen: set[Path] = set()
     return [c for c in candidates if not (c in seen or seen.add(c))]
 

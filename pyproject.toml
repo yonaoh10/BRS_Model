@@ -28,12 +28,14 @@ callqa = "callqa.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# The report templates are code, not documentation: without them an installed
-# (non-editable) wheel fails every call with TemplateNotFound, which only ever
-# showed up on the target machine because a `pip install -e .` finds them on
-# disk regardless.
+# The report templates AND the config yamls are code, not documentation:
+# without them an installed (non-editable) wheel fails every call - templates
+# with TemplateNotFound, the yamls with "could not find rubric.yaml". Both only
+# ever showed up on the target machine because `pip install -e .` finds them on
+# disk regardless. config_defaults/ ships the shipped defaults; find_config
+# still prefers a repo-root or CALLQA_CONFIG_DIR copy so the bank can edit them.
 [tool.setuptools.package-data]
-callqa = ["reporting/templates/*.j2", "reporting/*.yaml"]
+callqa = ["reporting/templates/*.j2", "reporting/*.yaml", "config_defaults/*.yaml"]
 
 [tool.ruff]
 line-length = 100

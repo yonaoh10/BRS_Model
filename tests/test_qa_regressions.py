@@ -840,7 +840,7 @@ class TestRound3JudgeSnap:
     fuzzy threshold. The snap now must also preserve numbers and negations."""
 
     @staticmethod
-    def _transcript() -> "RedactedTranscript":
+    def _transcript():
         from callqa.models import RedactedTranscript, RedactedTurn
         return RedactedTranscript(
             call_id="C1", engine="regex", enabled=True,
@@ -915,3 +915,81 @@ class TestRound3JudgeProse:
         with mock.patch.object(vj.urllib.request, "urlopen", fake_urlopen), \
              pytest.raises(vj.VLLMJudgeError, match="no text content"):
             judge._chat([{"role": "user", "content": "x"}], None)
+
+
+class TestRound3PipelineInfra:
+    """QA round 3 (2026-09-16) pipeline/infra findings."""
+
+    def test_release_lock_only_removes_our_own_lock(self, tmp_path) -> None:
+        """F1 (HIGH): release_lock deleted ANY owner's lock. After this
+        process's lock is stolen, its release must NOT clear the new owner's
+        lock (which would let a third process double-process the call)."""
+        import os
+
+        from callqa.state import StateDB
+        db = StateDB(tmp_path / "s.db")
+        db.acquire_lock("X")                          # we own X
+        # Simulate the lock being stolen: overwrite the row with a foreign owner.
+        import sqlite3
+        with sqlite3.connect(tmp_path / "s.db") as conn:
+            conn.execute("UPDATE locks SET pid=?, hostname=? WHERE call_id='X'",
+                         (os.getpid() + 99999, "other-host"))
+        db.release_lock("X")                          # our finally-block release
+        with sqlite3.connect(tmp_path / "s.db") as conn:
+            row = conn.execute("SELECT pid, hostname FROM locks WHERE call_id='X'").fetchone()
+        assert row is not None, "release_lock must not delete a lock we no longer own"
+        assert row[1] == "other-host"
+
+    def test_packaged_config_defaults_match_repo_config(self) -> None:
+        """F15 (HIGH): the wheel now ships config_defaults/*.yaml so an installed
+        wheel is self-contained. Guard against the two copies drifting."""
+        from pathlib import Path
+
+        import callqa
+        pkg = Path(callqa.__file__).parent / "config_defaults"
+        repo = Path(__file__).resolve().parent.parent / "config"
+        for name in ("config.yaml", "rubric.yaml", "recommendations_he.yaml"):
+            assert (pkg / name).read_text(encoding="utf-8") == \
+                   (repo / name).read_text(encoding="utf-8"), \
+                   f"{name}: packaged default drifted from repo config/"
+
+
+class TestRound3ConfigAndWorker:
+    def test_a_typoed_section_is_rejected_not_ignored(self, tmp_path) -> None:
+        """F12: Config was a plain BaseModel, so a misspelled SECTION
+        (CALLQA_JUGDE__... or a mistyped top-level key) was silently dropped and
+        the operator's override never applied. Config is now strict."""
+        from callqa.config import load_config
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("judge: {model: real}\nnosuchsection: {x: 1}\n", encoding="utf-8")
+        with pytest.raises(Exception, match="nosuchsection|extra"):
+            load_config(cfg)
+
+    def test_non_config_env_vars_do_not_break_loading(self, tmp_path) -> None:
+        """The env parser used to turn CALLQA_DASHBOARD_TOKEN (a dashboard var,
+        no '__' section) into a bogus top-level key; strict Config then rejected
+        it. Vars without a section delimiter are now ignored by the parser."""
+        from callqa.config import load_config
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("judge: {model: real}\n", encoding="utf-8")
+        env = {"CALLQA_DASHBOARD_TOKEN": "abc", "CALLQA_ASR_API_KEY": "k",
+               "CALLQA_JUDGE__MODEL": "override"}
+        import unittest.mock as mock
+        with mock.patch.dict("os.environ", env, clear=False):
+            config = load_config(cfg)
+        assert config.judge.model == "override"       # valid section override still applies
+
+    def test_empty_worker_output_falls_back_to_in_process(self, tmp_path) -> None:
+        """F9: a diarization worker that exits 0 with an empty result is a
+        silent degradation, not a real 'no speakers' answer; collect() must
+        return None so the pipeline diarizes in-process."""
+        import subprocess
+        import sys
+
+        from callqa.pipeline import _EarlyDiarization
+        out = tmp_path / "out.json"
+        out.write_text("[]", encoding="utf-8")
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        proc.wait()
+        early = _EarlyDiarization(proc, out, tmp_path / "log")
+        assert early.collect("C1", duration_sec=60.0) is None

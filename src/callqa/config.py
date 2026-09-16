@@ -169,7 +169,12 @@ class ReportingConfig(StrictModel):
     language: str = "he"
 
 
-class Config(BaseModel):
+class Config(StrictModel):
+    # StrictModel (not BaseModel): a MISSPELLED SECTION must fail loudly, not be
+    # silently dropped. A plain BaseModel ignored e.g. CALLQA_JUGDE__BASE_URL
+    # (typo'd "judge") and a mistyped top-level key in config.yaml, so the
+    # operator believed they had redirected the judge endpoint and nothing
+    # applied - defeating the whole point of the per-section StrictModels.
     paths: PathsConfig = PathsConfig()
     run: RunConfig = RunConfig()
     watch: WatchConfig = WatchConfig()
@@ -208,6 +213,13 @@ def _env_overrides(environ: dict[str, str] | None = None) -> dict[str, Any]:
         if not raw_key.startswith(ENV_PREFIX):
             continue
         path = raw_key[len(ENV_PREFIX):].lower().split(ENV_NESTED_DELIMITER)
+        # A config override is CALLQA_<section>__<field>; without the section
+        # delimiter it is not one. CALLQA_DASHBOARD_TOKEN, CALLQA_ASR_API_KEY
+        # (single underscore) and CALLQA_CONFIG_DIR belong to the dashboard, the
+        # ASR server and the resource loader, not to Config - now that Config is
+        # strict they would each be rejected as an unknown top-level key.
+        if len(path) < 2:
+            continue
         node = overrides
         for part in path[:-1]:
             node = node.setdefault(part, {})

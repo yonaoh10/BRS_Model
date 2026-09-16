@@ -25,11 +25,26 @@ and the parent falls back to in-process diarization.
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 
+def _watch_parent(original_ppid: int) -> None:
+    """Exit if the parent dies. macOS has no PR_SET_PDEATHSIG, so a SIGKILL of
+    the pipeline would otherwise orphan this worker - it would run pyannote to
+    completion holding the GPU for minutes after the operator thinks the job is
+    gone. Reparenting to pid 1 (or a changed ppid) is the portable signal."""
+    while True:
+        if os.getppid() != original_ppid:
+            os._exit(0)
+        time.sleep(2.0)
+
+
 def main(argv: list[str]) -> int:
+    threading.Thread(target=_watch_parent, args=(os.getppid(),), daemon=True).start()
     if len(argv) != 3:
         print("usage: diar_worker <wav> <call_id> <out_json> (config on stdin)",
               file=sys.stderr)
