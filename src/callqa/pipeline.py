@@ -85,12 +85,31 @@ class _ArtifactStore:
         self.state = state
         self.call_id = call_id
         self.force = force
+        # Once a stage is (re)computed, every LATER stage must recompute too,
+        # even if it is still marked done from an earlier run - otherwise
+        # deleting one stage's artifact leaves the stages after it serving a
+        # dialog/scorecard built from the OLD upstream data (F7).
+        self._recompute_from: int | None = None
+
+    @staticmethod
+    def _stage_index(stage: str) -> int:
+        return STAGES.index(stage) if stage in STAGES else len(STAGES)
+
+    def _note_recompute(self, stage: str) -> None:
+        idx = self._stage_index(stage)
+        self._recompute_from = idx if self._recompute_from is None \
+            else min(self._recompute_from, idx)
 
     def path(self, stage_dir: str, suffix: str = ".json") -> Path:
         return self.output_dir / stage_dir / f"{self.call_id}{suffix}"
 
     def is_done(self, stage: str) -> bool:
-        return not self.force and self.state.is_stage_done(self.call_id, stage)
+        if self.force:
+            return False
+        if self._recompute_from is not None \
+                and self._stage_index(stage) >= self._recompute_from:
+            return False
+        return self.state.is_stage_done(self.call_id, stage)
 
     def mark_done(self, stage: str, artifact_path: Path) -> None:
         self.state.mark_stage_done(self.call_id, stage, artifact_path)
@@ -105,18 +124,21 @@ class _ArtifactStore:
         call's score under this call's id.
         """
         if not self.is_done(stage):
+            self._note_recompute(stage)
             return None
         try:
             artifact = model.model_validate_json(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             logger.warning("call_id=%s stage=%s: artifact unusable (%s); recomputing",
                            self.call_id, stage, type(exc).__name__)
+            self._note_recompute(stage)
             return None
         if getattr(artifact, "call_id", self.call_id) != self.call_id:
             logger.error(
                 "call_id=%s stage=%s: artifact belongs to call %r; recomputing",
                 self.call_id, stage, getattr(artifact, "call_id", None),
             )
+            self._note_recompute(stage)
             return None
         return artifact
 
@@ -204,6 +226,14 @@ class _EarlyDiarization:
             return None
         finally:
             self._cleanup_files()
+        if not segments:
+            # A worker that exits 0 having produced no segments is a silent
+            # degradation, not a real "this audio has no speech" result -
+            # indistinguishable here from a partial failure. Fall back to
+            # in-process diarization rather than attribute a call to nobody.
+            logger.warning("call_id=%s: diarization worker returned no segments; "
+                           "diarizing in-process", call_id)
+            return None
         return segments
 
     def cancel(self) -> None:

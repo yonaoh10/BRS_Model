@@ -32,11 +32,6 @@ logger = logging.getLogger("callqa")
 WATCHED_EXTENSIONS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".mp4", ".ogg",
                                 ".opus", ".flac", ".wma", ".amr"})
 
-# Everything probe_audio can read. Watching only .wav/.mp3 left an .m4a sitting
-# in the drop directory forever, unprocessed and unmentioned.
-WATCHED_EXTENSIONS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".mp4", ".ogg",
-                                ".opus", ".flac", ".wma", ".amr"})
-
 
 def _setup_logging(verbose: bool = False) -> None:
     logging.basicConfig(

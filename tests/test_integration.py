@@ -112,7 +112,13 @@ def test_needs_human_review_exit_path(workspace, engines) -> None:  # noqa: ANN0
 
 # -- resume ------------------------------------------------------------------
 
-def test_resume_reruns_only_missing_stage(workspace, engines) -> None:  # noqa: ANN001
+def test_resume_recomputes_the_lost_stage_and_everything_after_it(workspace, engines) -> None:  # noqa: ANN001
+    """Losing one stage's artifact recomputes that stage AND every stage after
+    it, but nothing before it. Recomputing only the lost stage (the old
+    behaviour) left the downstream scorecard built from the stale upstream it
+    no longer matched - QA round 3 F7. On a normal resume-after-crash the later
+    stages are not done anyway, so this only re-pays for downstream when an
+    artifact was actively lost, which is exactly when staleness would bite."""
     call = sample_call(workspace, "CALL004")
     result = process_call(call, engines)
     assert result.status == "success"
@@ -125,9 +131,9 @@ def test_resume_reruns_only_missing_stage(workspace, engines) -> None:  # noqa: 
     features_path.unlink()
     result = process_call(call, engines)
     assert result.status == "success"
-    assert features_path.exists()  # recomputed
-    # Other stages were skipped: artifacts untouched.
-    assert scores_path.stat().st_mtime_ns == scores_mtime
+    assert features_path.exists()                                  # the lost stage recomputed
+    assert scores_path.stat().st_mtime_ns != scores_mtime          # downstream recomputed (fresh)
+    # Upstream of the lost stage is untouched: no wasted ASR.
     assert (out / "transcripts" / "CALL004.json").stat().st_mtime_ns == transcript_mtime
 
 

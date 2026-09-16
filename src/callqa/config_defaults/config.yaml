@@ -1,0 +1,59 @@
+# Main configuration for the Call-QA pipeline.
+# Every field can be overridden with environment variables prefixed CALLQA_,
+# nested keys separated by double underscores, e.g. CALLQA_JUDGE__BASE_URL=...
+paths:
+  input_dir: data/input
+  output_dir: data/output
+  models_dir: models
+  state_db: data/callqa_state.db
+
+run:
+  mock: false
+  force: false
+  max_workers: 1          # applies to the `run` driver only
+
+watch:
+  poll_seconds: 30
+  stable_seconds: 10
+  move_processed: true
+
+audio:
+  target_sample_rate: 16000
+  vad: silero             # silero | energy (energy = dependency-free fallback, used in mock)
+  min_speech_ms: 250
+
+asr:
+  engine: faster_whisper  # faster_whisper | mock
+  model_dir: "{models_dir}/ivrit-whisper-large-v3-turbo-ct2"  # PLACEHOLDER - populated by scripts/download_models.py
+  language: he            # MUST be forced; never autodetect
+  compute_type: float16   # use int8 on CPU
+  word_timestamps: true
+  vad_filter: true
+
+speakers:
+  mode: auto              # auto: stereo -> channel split; single channel -> diarization
+  banker_channel: from_metadata   # L | R | from_metadata
+  # Accept the conditions once on huggingface.co and set HF_TOKEN to fetch it;
+  # afterwards it runs offline. A filesystem path here loads a local pipeline.
+  diarization_model: "pyannote/speaker-diarization-community-1"
+  num_speakers: 2         # a banker call has exactly two parties; 0 = estimate
+  device: auto            # auto | cpu | cuda
+  exclusive: true         # one speaker per moment, for word-level alignment
+  min_role_confidence: 0.34   # below this the call is held for human review
+
+redaction:
+  enabled: true
+  ner: false              # true requires DictaBERT-NER download (optional)
+
+judge:
+  engine: vllm            # vllm | mock
+  base_url: "http://localhost:8000/v1"
+  model: "<LLM_MODEL_ID_PLACEHOLDER>"   # decided on server per available VRAM; see scripts/download_models.py
+  temperature: 0.0
+  max_tokens: 2500
+  n_samples: 1            # optional self-consistency: 3 -> median per dimension
+  max_retries: 3
+
+reporting:
+  group_comparison: median
+  language: he

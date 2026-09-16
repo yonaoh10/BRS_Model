@@ -214,5 +214,14 @@ class StateDB:
         )
 
     def release_lock(self, call_id: str) -> None:
+        # ONLY our own lock. An unconditional delete would remove a lock that a
+        # DIFFERENT process now owns: if this process's lock was stolen (by age
+        # or a recycled pid) while it was still alive, its finally-block release
+        # must not clear the new owner's fresh lock and let a third process
+        # acquire the same call concurrently. Matching pid+hostname makes a
+        # release a no-op once the lock is no longer ours.
         with self._connect() as conn:
-            conn.execute("DELETE FROM locks WHERE call_id=?", (call_id,))
+            conn.execute(
+                "DELETE FROM locks WHERE call_id=? AND pid=? AND hostname=?",
+                (call_id, os.getpid(), os.uname().nodename),
+            )
