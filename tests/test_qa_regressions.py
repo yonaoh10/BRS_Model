@@ -760,10 +760,11 @@ class TestParallelDiarization:
 
     def test_collect_returns_the_worker_segments(self, tmp_path) -> None:
         out = tmp_path / "out.json"
+        segs = [{"label": "SPEAKER_00", "start": 0.0, "end": 2.5},
+                {"label": "SPEAKER_01", "start": 2.5, "end": 4.0}]
         cls, proc = self._early(
-            "import json,pathlib; pathlib.Path(%r).write_text(json.dumps("
-            "[{'label':'SPEAKER_00','start':0.0,'end':2.5},"
-            " {'label':'SPEAKER_01','start':2.5,'end':4.0}]))" % str(out))
+            f"import json,pathlib; pathlib.Path({str(out)!r})."
+            f"write_text({json.dumps(json.dumps(segs))})")
         early = cls(proc, out, tmp_path / "log")
         segments = early.collect("C1", duration_sec=60.0)
         assert [s.label for s in segments] == ["SPEAKER_00", "SPEAKER_01"]
@@ -781,7 +782,8 @@ class TestParallelDiarization:
                     parallel_diarization = True
             mono_diarizer = type("D", (), {"name": "mock"})()
 
-        wav = tmp_path / "a.wav"; wav.write_bytes(b"RIFF")
+        wav = tmp_path / "a.wav"
+        wav.write_bytes(b"RIFF")
         art = AudioArtifact(call_id="C1", is_stereo=False, mono_wav=str(wav),
                             sample_rate=16000, vad_engine="energy")
         assert _EarlyDiarization.start(FakeEngines(), art, "C1") is None
