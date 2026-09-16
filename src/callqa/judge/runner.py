@@ -4,6 +4,7 @@ chunking, and scorecard assembly."""
 from __future__ import annotations
 
 import logging
+import re
 import statistics
 import time
 from datetime import UTC, datetime
@@ -95,16 +96,25 @@ def _judge_once_with_retries(
     )
 
 
+# Any "<...>" tag-like run in model prose: stripped so an unescaping downstream
+# consumer of the stored JSON cannot be driven by it. Hebrew prose never
+# legitimately contains HTML tags.
+_TAG_RE = re.compile(r"<[^>]{0,200}>")
+
+
 def _scrub(response: JudgeResponse) -> JudgeResponse:
     """Re-redact everything the model wrote in free text.
 
     Evidence quotes are verified against the redacted transcript, but the
     model's own prose is not: a judge that repeats an identifier it inferred,
     or that is steered into doing so, would otherwise put it straight into the
-    report and the dashboard.
+    report and the dashboard. The prose is also un-schema'd free text, so a
+    model can emit HTML/markup into it; the report autoescapes, but the stored
+    JSON feeds other consumers (exports, a summariser) that may not, so any
+    angle-bracket tag-like run is stripped here at the source.
     """
     def clean(text: str) -> str:
-        return redact_text(text or "")[0]
+        return _TAG_RE.sub("", redact_text(text or "")[0])
 
     for dim in response.scores.values():
         dim.reasoning_he = clean(dim.reasoning_he)

@@ -214,6 +214,11 @@ class VLLMJudge:
             content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise VLLMJudgeError(f"unexpected vLLM response shape: {exc}") from exc
+        if not isinstance(content, str):
+            # Some servers send content:null (e.g. a pure tool-call turn). The
+            # method's contract is -> str; returning None here would violate it
+            # and only be caught two layers down. Fail loudly and retry.
+            raise VLLMJudgeError("vLLM response had no text content")
         if choice.get("finish_reason") == "length":
             # A structured-output response cut at max_tokens is a valid JSON
             # PREFIX, which then fails parsing with a misleading error. Name

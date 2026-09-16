@@ -137,12 +137,22 @@ def _fold_digit(ch: str) -> str:
     return ch
 
 
+# Unicode categories dropped before detection: format controls (Cf, e.g.
+# bidi/zero-width), non-spacing marks (Mn, e.g. Hebrew niqqud), enclosing marks
+# (Me). A single such codepoint inside a digit run - realistic from an ASR or a
+# keyboard emitting niqqud - would otherwise split the run into two fragments
+# below the masking threshold and leak the whole identifier. Detection runs on
+# the stripped text; masks map back through `index` to the original, so the
+# stripped char is still covered by (masked within) the surrounding span.
+_STRIP_CATEGORIES = frozenset({"Cf", "Mn", "Me"})
+
+
 def normalize_for_detection(text: str) -> tuple[str, list[int]]:
     """Return (normalised text, index map back into the original string)."""
     chars: list[str] = []
     index: list[int] = []
     for i, ch in enumerate(text):
-        if ch in INVISIBLE:
+        if ch in INVISIBLE or unicodedata.category(ch) in _STRIP_CATEGORIES:
             continue
         chars.append(_fold_digit(ch))
         index.append(i)
@@ -294,6 +304,18 @@ BIRTH_CONTEXT = ("לידה", "נולד", "נולדת", "נולדתי")
 # compliance and clarity dimensions, which are scored on what was quoted.
 AMOUNT_AFTER = ("שקל", "שקלים", 'ש"ח', "ש״ח", "₪", "אגורות", "דולר", "יורו", "אלף", "מיליון")
 AMOUNT_WINDOW = 14
+# Phrases that explicitly announce "the number that follows is an IDENTIFIER,
+# not a price". When one of these precedes the run, the amount exception below
+# is overridden: "מספר החשבון 761534892 שקל" is an account number spoken next
+# to a currency word, not a 761-million-shekel amount. Bare "חשבון" is NOT in
+# this list - "יש בחשבון 120000 שקל" is a balance, a real amount - so only the
+# unambiguous "number of ..." / "ends in ..." phrasings force masking.
+STRONG_ID_PHRASES = (
+    "מספר החשבון", "מספר חשבון", "חשבון מספר", "מספר הלקוח", "מספר לקוח",
+    "מספר כרטיס", "מספר הכרטיס", "מספר תעודת", "תעודת זהות", "תעודת הזהות",
+    "מספר זהות", "מספר הזהות", "מספר סניף", 'ת"ז', "ת.ז",
+    "מסתיים ב", "שמסתיים ב", "המסתיים ב", "הספרות האחרונות",
+)
 
 
 @dataclass
@@ -310,6 +332,10 @@ def _context_before(text: str, start: int) -> str:
 def _looks_like_amount(text: str, end: int) -> bool:
     window = text[end:end + AMOUNT_WINDOW]
     return any(word in window for word in AMOUNT_AFTER)
+
+
+def _has_strong_id_phrase(before: str) -> bool:
+    return any(phrase in before for phrase in STRONG_ID_PHRASES)
 
 
 def _classify_run(text: str, start: int, end: int) -> str | None:
@@ -347,7 +373,15 @@ def _classify_run(text: str, start: int, end: int) -> str | None:
     if phone_hint and 7 <= len(digits) <= 12:
         return "PHONE"
 
-    if _looks_like_amount(text, end):
+    # The amount exception (a currency word right after the run -> a price, not
+    # an identifier). Two escapes restore masking for identifiers spoken near
+    # money: a 9+ digit run is never a retail amount (it is an ID/account/card),
+    # and an explicit identifier phrase ("מספר החשבון", "מסתיים ב", ...) before
+    # it overrides the currency word. Without either, a <=8-digit run before a
+    # currency word is treated as an amount so balances/fees stay scoreable.
+    if (_looks_like_amount(text, end)
+            and len(digits) < 9
+            and not _has_strong_id_phrase(before)):
         return None
     if len(digits) >= 6 and structural_only:
         return "ACCOUNT_LIKE"
@@ -398,12 +432,15 @@ def _spans_in_normalized(text: str) -> list[PIIMatch]:
 
 
 def _repeated_fragments(text: str, spans: list[PIIMatch]) -> list[PIIMatch]:
-    """Short digit runs that repeat a piece of an already-masked identifier.
+    """Short digit runs that read back the TAIL of an already-masked identifier.
 
     A banker reads back "the last four digits, 9265" after the customer
-    dictated the full number: masking the full number while leaving its
-    tail in the clear undoes the mask. A 4-5 digit run whose digits appear
-    inside any masked >=6 digit identifier is masked with it.
+    dictated the full number: masking the full number while leaving its tail in
+    the clear undoes the mask. The match is a SUFFIX, not any substring - "ends
+    in 9265" means the last digits - and a run that looks like an amount
+    ("...1534 שקל") is never swallowed, so a price that merely shares a few
+    digits with a masked identifier stays scoreable. Substring matching (the
+    earlier version) over-masked amounts and incidental years/dates.
     """
     masked_digits = [re.sub(r"\D", "", text[s.start:s.end])
                      for s in spans if s.end - s.start > 0]
@@ -414,8 +451,10 @@ def _repeated_fragments(text: str, spans: list[PIIMatch]) -> list[PIIMatch]:
     for m in DIGIT_RUN_RE.finditer(text):
         if any(m.start() < s.end and s.start < m.end() for s in spans):
             continue
+        if _looks_like_amount(text, m.end()):
+            continue
         digits = re.sub(r"\D", "", m.group())
-        if 4 <= len(digits) <= 5 and any(digits in d for d in long_masked):
+        if 4 <= len(digits) <= 5 and any(d.endswith(digits) for d in long_masked):
             extra.append(PIIMatch("ACCOUNT_LIKE", m.start(), m.end()))
     return extra
 
