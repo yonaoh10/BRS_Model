@@ -309,3 +309,25 @@ def test_page_applies_live_data_without_js_errors(live_server: str) -> None:
         href = page.evaluate("() => document.getElementById('openReport').getAttribute('href')")
         assert page.request.get(live_server + href).status == 200
         browser.close()
+
+
+def test_transcript_endpoint_bounds_a_pathological_artifact(live_server: str,
+                                                            pipeline_output: Path) -> None:
+    """A corrupt/huge redacted artifact must not serve an unbounded body:
+    the endpoint caps turn count and per-turn length and flags truncation."""
+    from server import MAX_TRANSCRIPT_TURNS
+    artifact = {
+        "call_id": "HUGE1", "engine": "regex", "enabled": True,
+        "redaction_counts": {},
+        "turns": [{"speaker": "banker", "start": float(i), "end": float(i) + 1,
+                   "text": "x" * 9000} for i in range(MAX_TRANSCRIPT_TURNS + 500)],
+    }
+    path = pipeline_output / "redacted" / "HUGE1.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    try:
+        body = _get_json(f"{live_server}/api/transcript/HUGE1?t=test-token-value")
+        assert body["truncated"] is True
+        assert len(body["turns"]) == MAX_TRANSCRIPT_TURNS
+        assert all(len(t["text"]) <= 4000 for t in body["turns"])
+    finally:
+        path.unlink()
