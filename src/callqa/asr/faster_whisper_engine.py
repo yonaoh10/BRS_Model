@@ -51,8 +51,19 @@ class FasterWhisperEngine:
         # to the first transcribe() (a resumed run never pays for it).
         import sys
 
-        if sys.platform == "darwin" and "torch" not in sys.modules:
-            _ = self.model
+        if sys.platform == "darwin":
+            if "torch" not in sys.modules:
+                _ = self.model
+            else:
+                # torch is ALREADY resident, so ct2 will load second on the
+                # first transcribe - the order that segfaulted. We only survive
+                # here on KMP_DUPLICATE_LIB_OK. Make the fragility visible
+                # instead of silent-until-crash: if a future import pulls torch
+                # in before this engine is built, this log is the warning that
+                # the load order was inverted (QA round 3 F11).
+                logger.warning("faster-whisper engine built with torch already "
+                               "imported on darwin; relying on KMP_DUPLICATE_LIB_OK "
+                               "to survive the ct2/torch OpenMP clash")
 
     @property
     def model(self):  # noqa: ANN201 - WhisperModel is a lazy import
