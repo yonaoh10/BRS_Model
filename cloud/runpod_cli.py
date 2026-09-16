@@ -6,15 +6,23 @@ API key - no SSH, no browser. Delete the `cloud/` directory when the project
 moves to the bank's own servers and nothing else changes.
 
     export RUNPOD_API_KEY=...
-    python cloud/runpod_cli.py up          # create/start the pod, print URLs
+    python cloud/runpod_cli.py up          # create the network volume (once) + pod, print URLs
     python cloud/runpod_cli.py status      # is it running? what does it cost?
     python cloud/runpod_cli.py urls        # print the two endpoint URLs
-    python cloud/runpod_cli.py down        # STOP it (billing for GPU ends)
-    python cloud/runpod_cli.py destroy     # terminate + delete the volume
+    python cloud/runpod_cli.py down        # STOP the pod (billing for GPU ends; volume kept)
+    python cloud/runpod_cli.py destroy     # terminate the pod, KEEP the volume
+    python cloud/runpod_cli.py destroy --volume   # also delete the volume (loses the models)
+
+Storage lives on a DATA-CENTRE network volume, not on the pod's host, so a
+destroyed pod can be recreated on any host in that DC with a free GPU - the
+"not enough free GPUs on the host machine" wall a pod-local volume hits does
+not apply. The volume persists across pod destroy and bills for storage until
+`destroy --volume`.
 
 COST SAFETY: a running pod bills every second, whether or not you use it.
 `down` is the command that stops the meter. `status` warns when a pod has
-been running for longer than --warn-hours.
+been running for longer than --warn-hours and always prints the standing
+volume-storage cost.
 """
 
 from __future__ import annotations
@@ -36,6 +44,24 @@ from callqa.dotenv import load_dotenv, write_env_values  # noqa: E402
 
 API_BASE = "https://rest.runpod.io/v1"
 STATE_FILE = Path(__file__).parent / ".runpod_state.json"
+
+# A NETWORK volume, not a pod-local one. A pod-local volume lives on the pod's
+# physical host, so a stopped pod can only restart where there is a free GPU ON
+# THAT HOST - and when the host is saturated the pod is stranded (exactly the
+# HTTP 500 "not enough free GPUs on the host machine" wall we hit). A network
+# volume lives in the data centre, not on a host, so a fresh pod attaches it on
+# ANY host in that DC that has a free GPU. Volume storage bills whether or not a
+# pod is attached (see `status`), so `destroy` keeps it and only `destroy
+# --volume` removes it.
+DEFAULT_VOLUME_SIZE_GB = 80          # gemma-27b (~17GB) + ASR + diarization + headroom
+# Data centres in the INTERSECTION of two RunPod enums: those that support
+# network volumes (POST /networkvolumes) AND those that accept pod placement
+# (pods.dataCenterIds). A DC in only the first enum creates a volume fine but
+# then 400s on pod create, so it must not be walked. `up` tries each until one
+# has a free GPU, so a single DC being full is no longer a dead end. Re-derive
+# each enum by sending an invalid dataCenterId to the respective endpoint.
+CANDIDATE_DATA_CENTERS = ["US-IL-1", "US-GA-2", "US-TX-3", "EU-RO-1",
+                          "US-CA-2", "CA-MTL-3", "EUR-IS-1"]
 
 # Image with CUDA + PyTorch preinstalled; the bootstrap script layers our code on top.
 DEFAULT_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
@@ -139,6 +165,44 @@ def proxy_url(pod_id: str, port: int) -> str:
     return f"https://{pod_id}-{port}.proxy.runpod.net"
 
 
+# -- network volume ----------------------------------------------------------
+
+def _volume_exists(vol_id: str) -> dict | None:
+    try:
+        vol = _request("GET", f"/networkvolumes/{vol_id}")
+        return vol if vol.get("id") else None
+    except RunPodError:
+        return None
+
+
+def _create_volume(name: str, size: int, dc: str) -> str:
+    vol = _request("POST", "/networkvolumes",
+                   {"name": name, "size": size, "dataCenterId": dc})
+    vol_id = vol.get("id")
+    if not vol_id:
+        raise RunPodError(f"volume created but no id in response: {vol}")
+    return vol_id
+
+
+def _delete_volume(vol_id: str) -> None:
+    try:
+        _request("DELETE", f"/networkvolumes/{vol_id}")
+    except RunPodError as exc:                       # best effort
+        print(f"  warning: could not delete volume {vol_id}: {exc}")
+
+
+def _is_capacity_error(exc: RunPodError) -> bool:
+    # RunPod phrases "this DC has no free GPU of this type right now" several
+    # ways; all of them mean "try another DC", not "abort".
+    msg = str(exc).lower()
+    return any(s in msg for s in (
+        "no instances currently available",
+        "not enough free gpus",
+        "could not find any pods with required specifications",
+        "no longer any instances available",
+    ))
+
+
 # -- commands ---------------------------------------------------------------
 
 def cmd_up(args: argparse.Namespace) -> int:
@@ -157,34 +221,124 @@ def cmd_up(args: argparse.Namespace) -> int:
         # Secrets are generated once and reused; both services check them.
         state.setdefault("asr_api_key", secrets.token_urlsafe(32))
         state.setdefault("judge_api_key", secrets.token_urlsafe(32))
-        payload = {
-            "name": args.name,
-            "imageName": args.image,
-            "gpuTypeIds": [args.gpu],
-            "gpuCount": 1,
-            "containerDiskInGb": args.disk,
-            "volumeInGb": args.volume,
-            "volumeMountPath": "/workspace",
-            "ports": [f"{ASR_PORT}/http", f"{JUDGE_PORT}/http", "22/tcp"],
-            "dockerStartCmd": ["bash", "-c", POD_START_CMD],
-            "env": {
-                "CALLQA_ASR_API_KEY": state["asr_api_key"],
-                "VLLM_API_KEY": state["judge_api_key"],
-                "CALLQA_REPO_URL": args.repo_url,
-                "CALLQA_LLM_MODEL": args.llm_model,
-                **({"PUBLIC_KEY": args.ssh_public_key} if args.ssh_public_key else {}),
-                **({"HF_TOKEN": os.environ["HF_TOKEN"]}
-                   if os.environ.get("HF_TOKEN") else {}),
-            },
-        }
-        print(f"Creating pod ({args.gpu})...")
-        pod = _request("POST", "/pods", payload)
+        pod_id = _create_pod_on_volume(state, args)
+
+    state["last_started_at"] = time.time()
+    save_state(state)
+    print(f"Pod {pod_id} starting. It bootstraps itself (clone + deps + models + serve);")
+    print("first boot downloads the models, expect 10-20 minutes. Progress is written to")
+    print("/workspace/logs/bootstrap.log on the pod. Poll readiness with:")
+    print("  python cloud/runpod_cli.py status")
+    return _print_urls(state)
+
+
+def _gpu_ids(gpu: str) -> list[str]:
+    # A comma-separated --gpu becomes a list of ACCEPTABLE GPU types; RunPod
+    # places the pod on whichever is free. This is what lets a fresh pod land
+    # when the preferred card (the cheap 4090) is momentarily sold out across
+    # every DC - any listed card that runs the judge is fine, and the network
+    # volume attaches to it identically.
+    return [g.strip() for g in gpu.split(",") if g.strip()]
+
+
+def _pod_payload(state: dict, args: argparse.Namespace, vol_id: str, dc: str) -> dict:
+    return {
+        "name": args.name,
+        "imageName": args.image,
+        "gpuTypeIds": _gpu_ids(args.gpu),
+        "gpuCount": 1,
+        "containerDiskInGb": args.disk,
+        # NETWORK volume, mounted where the pod-local volume used to be, so the
+        # bootstrap (/workspace clone + models) is unchanged. The pod is pinned
+        # to the volume's DC but free to land on any host in it.
+        "networkVolumeId": vol_id,
+        "dataCenterIds": [dc],
+        "volumeMountPath": "/workspace",
+        "ports": [f"{ASR_PORT}/http", f"{JUDGE_PORT}/http", "22/tcp"],
+        "dockerStartCmd": ["bash", "-c", POD_START_CMD],
+        "env": {
+            "CALLQA_ASR_API_KEY": state["asr_api_key"],
+            "VLLM_API_KEY": state["judge_api_key"],
+            "CALLQA_REPO_URL": args.repo_url,
+            "CALLQA_LLM_MODEL": args.llm_model,
+            **({"PUBLIC_KEY": args.ssh_public_key} if args.ssh_public_key else {}),
+            **({"HF_TOKEN": os.environ["HF_TOKEN"]} if os.environ.get("HF_TOKEN") else {}),
+        },
+    }
+
+def _create_pod_on_volume(state: dict, args: argparse.Namespace) -> str:
+    """Create a pod attached to the network volume, and return its id.
+
+    A network volume is DC-scoped: any DC accepts a volume, but only some have
+    a free GPU right now. So volume creation and pod placement must be tried as
+    a UNIT - if the pod cannot be placed in a DC, the volume there is useless
+    and is deleted before trying the next. An already-existing volume (in
+    state) pins its DC, so we only retry placement there.
+    """
+    existing = state.get("network_volume_id")
+    if existing and _volume_exists(existing):
+        dc = state["data_center_id"]
+        print(f"Reusing network volume {existing} in {dc}; placing a pod...")
+        pod = _request("POST", "/pods", _pod_payload(state, args, existing, dc))
         pod_id = pod.get("id") or pod.get("podId")
         if not pod_id:
             raise RunPodError(f"pod created but no id in response: {pod}")
-        state["pod_id"] = pod_id
-        state["gpu"] = args.gpu
-        state["llm_model"] = args.llm_model
+        _record_pod(state, args, pod_id)
+        return pod_id
+
+    dcs = [args.data_center] if args.data_center else list(CANDIDATE_DATA_CENTERS)
+
+    def _drop_volume(vid: str) -> None:
+        _delete_volume(vid)
+        state.pop("network_volume_id", None)
+        state.pop("data_center_id", None)
+        save_state(state)
+
+    last_error = ""
+    for dc in dcs:
+        try:
+            vol_id = _create_volume(f"{args.name}-vol", args.volume_size, dc)
+        except RunPodError as exc:
+            last_error = f"{dc}: volume create failed: {exc}"
+            print(f"  {last_error}; next DC")
+            continue
+        # Track the volume the instant it exists, so a crash before the pod is
+        # created leaves a RECORDED volume (status/destroy can find it), never a
+        # silent storage charge.
+        state["network_volume_id"] = vol_id
+        state["data_center_id"] = dc
+        save_state(state)
+        try:
+            pod = _request("POST", "/pods", _pod_payload(state, args, vol_id, dc))
+        except RunPodError as exc:
+            if _is_capacity_error(exc):
+                print(f"  {dc}: no free {args.gpu} right now; deleting volume, next DC")
+                _drop_volume(vol_id)
+                last_error = f"{dc}: {exc}"
+                continue
+            _drop_volume(vol_id)                 # unknown error: don't strand the volume
+            raise
+        pod_id = pod.get("id") or pod.get("podId")
+        if not pod_id:
+            _drop_volume(vol_id)
+            raise RunPodError(f"pod created but no id in response: {pod}")
+        print(f"Created {args.volume_size} GB network volume {vol_id} and a pod in {dc}.")
+        _record_pod(state, args, pod_id)         # persists pod_id immediately
+        return pod_id
+    raise RunPodError(f"no candidate data centre had a free {args.gpu}. "
+                      f"Last error: {last_error}")
+
+
+def _record_pod(state: dict, args: argparse.Namespace, pod_id: str) -> None:
+    # Persist IMMEDIATELY: the pod is billing the instant POST /pods returns, so
+    # if anything crashes between here and the caller's save_state the pod would
+    # be a live, billing machine with no local record - and `down`/`destroy`
+    # would then say "nothing to stop". Saving here shrinks that window to a
+    # single statement. The network_volume_id was already saved before this.
+    state["pod_id"] = pod_id
+    state["gpu"] = args.gpu
+    state["llm_model"] = args.llm_model
+    save_state(state)
 
     state["last_started_at"] = time.time()
     save_state(state)
@@ -247,7 +401,17 @@ def cmd_status(args: argparse.Namespace) -> int:
                 print(f"WARNING: running longer than {args.warn_hours}h and still billing.")
                 print("Stop it with: python cloud/runpod_cli.py down")
     else:
-        print("GPU billing is stopped. Storage for the volume may still be charged.")
+        print("GPU billing is stopped.")
+    vol_id = state.get("network_volume_id")
+    if vol_id:
+        vol = _volume_exists(vol_id)
+        size = vol.get("size") if vol else None
+        # $0.07/GB-month under 1TB. Printed so the standing storage cost is
+        # never a surprise the way the runaway pod was.
+        note = (f"  (~${size * 0.07:.2f}/mo at $0.07/GB)" if isinstance(size, (int, float))
+                else "")
+        print(f"network volume {vol_id} in {state.get('data_center_id')}: "
+              f"{size} GB{note} - bills whether or not a pod is attached")
     return 0
 
 
@@ -260,24 +424,42 @@ def cmd_down(args: argparse.Namespace) -> int:
     _request("POST", f"/pods/{pod_id}/stop")
     state["last_stopped_at"] = time.time()
     save_state(state)
-    print(f"Pod {pod_id} stopped. GPU billing has ended; the volume is kept so the")
-    print("next `up` skips the model download. Use `destroy` to remove it entirely.")
+    print(f"Pod {pod_id} stopped. GPU billing has ended; the network volume persists")
+    print("(and still bills for storage) so the next `up` skips the model download.")
     return 0
 
 
 def cmd_destroy(args: argparse.Namespace) -> int:
     state = load_state()
     pod_id = state.get("pod_id")
-    if not pod_id:
+    vol_id = state.get("network_volume_id")
+    if not pod_id and not (args.volume and vol_id):
         print("No pod recorded; nothing to destroy.")
         return 0
     if not args.yes:
-        print(f"This permanently deletes pod {pod_id} and its volume (models included).")
+        print(f"This permanently deletes pod {pod_id}.")
+        if args.volume and vol_id:
+            print(f"AND network volume {vol_id} - the gemma weights and all models "
+                  "go with it (a fresh pod re-downloads ~17 GB).")
+        else:
+            print("The network volume is KEPT (models preserved); add --volume to remove it.")
         print("Re-run with --yes to confirm.")
         return 1
-    _request("DELETE", f"/pods/{pod_id}")
-    STATE_FILE.unlink(missing_ok=True)
-    print(f"Pod {pod_id} destroyed and local state cleared. Nothing is billing.")
+    if pod_id:
+        _request("DELETE", f"/pods/{pod_id}")
+        # Keep the volume and the shared keys; only the pod is disposable. The
+        # next `up` attaches the SAME volume on whatever host has a free GPU.
+        for key in ("pod_id", "gpu", "last_started_at", "last_stopped_at"):
+            state.pop(key, None)
+        save_state(state)
+        print(f"Pod {pod_id} destroyed. GPU billing stopped.")
+    if args.volume and vol_id:
+        _request("DELETE", f"/networkvolumes/{vol_id}")
+        STATE_FILE.unlink(missing_ok=True)
+        print(f"Network volume {vol_id} deleted and local state cleared. Nothing is billing.")
+    elif vol_id:
+        print(f"Network volume {vol_id} kept (still bills for storage). "
+              "`up` reuses it; `destroy --volume` removes it.")
     return 0
 
 
@@ -293,7 +475,10 @@ def main() -> int:
     p.add_argument("--image", default=DEFAULT_IMAGE)
     p.add_argument("--name", default="callqa-dev")
     p.add_argument("--disk", type=int, default=40, help="container disk GB")
-    p.add_argument("--volume", type=int, default=60, help="persistent volume GB (holds models)")
+    p.add_argument("--volume-size", type=int, default=DEFAULT_VOLUME_SIZE_GB,
+                   help="network volume GB, created once and reused (holds models)")
+    p.add_argument("--data-center", default=None,
+                   help="force a data centre id; default walks CANDIDATE_DATA_CENTERS")
     p.add_argument("--llm-model", default="dicta-il/dictalm2.0-instruct")
     p.add_argument("--repo-url", default="https://github.com/yonaoh10/BRS_Model.git")
     p.add_argument("--ssh-public-key", default=None,
@@ -310,8 +495,11 @@ def main() -> int:
     p = sub.add_parser("down", help="STOP the pod (ends GPU billing)")
     p.set_defaults(func=cmd_down)
 
-    p = sub.add_parser("destroy", help="terminate the pod and delete its volume")
+    p = sub.add_parser("destroy",
+                       help="terminate the pod; KEEPS the network volume unless --volume")
     p.add_argument("--yes", action="store_true")
+    p.add_argument("--volume", action="store_true",
+                   help="also delete the network volume (loses the models; ~17 GB re-download)")
     p.set_defaults(func=cmd_destroy)
 
     args = parser.parse_args()
