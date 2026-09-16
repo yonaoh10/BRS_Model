@@ -25,7 +25,9 @@ _NORMALIZE_RE = re.compile(r"[\s\.,;:!\?\-–—\'\"״׳\(\)\[\]<>]+")
 # Niqqud and the bidi marks Hebrew text carries: present in one copy of a
 # string and absent from the other, they make an identical quote look invented.
 _INVISIBLE_RE = re.compile(r"[\u0591-\u05C7\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
-_TIMESTAMP_RE = re.compile(r"^\d{1,3}:[0-5]\d$")
+# 1-4 minute digits to match the server-side schema pattern; the real bound on
+# a fabricated timestamp is the call_end+60 check in verify_evidence.
+_TIMESTAMP_RE = re.compile(r"^\d{1,4}:[0-5]\d$")
 MIN_QUOTE_CHARS = 8
 
 
@@ -67,6 +69,28 @@ def parse_judge_response(raw: str) -> JudgeResponse:
 
 SNAP_MIN_SIMILARITY = 0.90
 
+_DIGIT_SEQ_RE = re.compile(r"\d+")
+_HEBREW_WORD_RE = re.compile(r"[֐-׿]+")
+# Negation/polarity words: dropping or adding one of these inverts the meaning
+# of a sentence, and a ~10% edit (all the 0.90 threshold requires) is enough to
+# drop a short word like "לא". These must be identical on both sides of a snap.
+_POLARITY_WORDS = frozenset({"לא", "אין", "אל", "ללא", "בלי", "אף", "שום", "לעולם"})
+
+
+def _meaning_tokens(text: str) -> tuple[list[str], list[str]]:
+    """(ordered digit sequences, sorted polarity words) - the parts of a quote
+    a snap must not silently change."""
+    digits = _DIGIT_SEQ_RE.findall(text)
+    polarity = sorted(w for w in _HEBREW_WORD_RE.findall(text) if w in _POLARITY_WORDS)
+    return digits, polarity
+
+
+def _snap_preserves_meaning(quote: str, span: str) -> bool:
+    """A snap may fix wording (a dropped conjunction, a reorder) but must never
+    change a NUMBER or flip a NEGATION - those invert what the banker was
+    quoted as saying while still clearing the fuzzy similarity threshold."""
+    return _meaning_tokens(quote) == _meaning_tokens(span)
+
 
 def _snap_quote_to_turn(quote: str, raw_turn: str) -> str | None:
     """Return the verbatim span of raw_turn best matching the quote, or None.
@@ -80,6 +104,13 @@ def _snap_quote_to_turn(quote: str, raw_turn: str) -> str | None:
     the evidence quote is REPLACED with that real window - the scorecard
     only ever contains text that was actually said. Cross-turn splices stay
     rejected because the window never leaves one turn.
+
+    The similarity threshold alone cannot tell a harmless wording fix from a
+    meaning INVERSION (a flipped fee "90"->"10", a dropped "לא") - both are
+    small edits. So a candidate span is accepted only if it also preserves the
+    quote's numbers and negations verbatim; otherwise the near-miss is treated
+    as unverifiable and the call goes to human review, which is the safe
+    outcome for a judge that misread the transcript.
     """
     from difflib import SequenceMatcher
 
@@ -95,7 +126,11 @@ def _snap_quote_to_turn(quote: str, raw_turn: str) -> str | None:
             ratio = SequenceMatcher(None, target, normalize_for_match(span)).ratio()
             if ratio > best_ratio:
                 best_ratio, best_span = ratio, span
-    return best_span if best_ratio >= SNAP_MIN_SIMILARITY else None
+    if best_span is None or best_ratio < SNAP_MIN_SIMILARITY:
+        return None
+    if not _snap_preserves_meaning(quote, best_span):
+        return None
+    return best_span
 
 
 _SPEAKER_LABEL_RE = re.compile(r"\s*(?:בנקאי|לקוח)\s*:\s*")

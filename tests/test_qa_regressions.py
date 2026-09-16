@@ -787,3 +787,131 @@ class TestParallelDiarization:
         art = AudioArtifact(call_id="C1", is_stereo=False, mono_wav=str(wav),
                             sample_rate=16000, vad_engine="energy")
         assert _EarlyDiarization.start(FakeEngines(), art, "C1") is None
+
+
+class TestRound3RedactionLeaks:
+    """QA round 3 (2026-09-16) adversarial findings against the number-word
+    normaliser and classifier. Each defends against a reproduced leak or
+    over-mask."""
+
+    @staticmethod
+    def _masked(text: str) -> list[str]:
+        from callqa.redaction import find_pii
+        return [text[m.start:m.end] for m in find_pii(text)]
+
+    def test_account_number_before_currency_word_is_masked(self) -> None:
+        """F1 (HIGH): the amount exception suppressed any non-checksum number
+        followed by a currency word, so an account/ID number spoken next to
+        money leaked. A 9+ digit run, or a run after an explicit identifier
+        phrase, is an identifier regardless of a trailing 'שקל'."""
+        assert self._masked("מספר החשבון 761534892 שקל") == ["761534892"]
+        assert self._masked("תעודת זהות 481902123 שקל") == ["481902123"]
+        assert self._masked("החשבון שמסתיים ב-481902 שקלים") == ["481902"]
+
+    def test_real_amounts_near_account_words_stay_unmasked(self) -> None:
+        """The other side of F1: a balance/fee is a real amount and must stay
+        scoreable even though an account word is nearby."""
+        assert self._masked("יש בחשבון 120000 שקל") == []
+        assert self._masked("העברת 250000 שקל לחיסכון") == []
+        assert self._masked("זה עולה 500 שקל") == []
+
+    def test_combining_mark_inside_digit_run_does_not_leak(self) -> None:
+        """F3 (HIGH): a combining mark (Hebrew niqqud, category Mn) inside a
+        digit run split it below the threshold and leaked the identifier.
+        normalize_for_detection now drops Cf/Mn/Me before detection."""
+        assert self._masked("תעודת זהות 12345́6782") == ["12345́6782"]
+        assert self._masked("החשבון 926ֱ9265 בסניף") != []
+
+    def test_readback_tail_masks_but_shared_amount_does_not(self) -> None:
+        """F2 (MEDIUM): _repeated_fragments matched any substring of a masked
+        identifier and had no amount check, so a price sharing a few digits was
+        over-masked. It now matches a SUFFIX (the read-back tail) and skips
+        amounts."""
+        masked = self._masked("מספר הכרטיס 4580-1234-5678, המסתיים ב-5678 נכון?")
+        assert "5678" in masked                       # the read-back tail is masked
+        # a price that merely shares digits with a masked id stays unmasked
+        masked2 = self._masked("חשבון 761534 ומחיר 1534 שקל")
+        assert not any(seg.strip() == "1534" for seg in masked2)
+
+
+class TestRound3JudgeSnap:
+    """QA round 3 (2026-09-16): the 0.90 quote-snap accepted meaning-inverted
+    quotes (a flipped fee, a dropped negation) because a ~10% edit clears the
+    fuzzy threshold. The snap now must also preserve numbers and negations."""
+
+    @staticmethod
+    def _transcript() -> "RedactedTranscript":
+        from callqa.models import RedactedTranscript, RedactedTurn
+        return RedactedTranscript(
+            call_id="C1", engine="regex", enabled=True,
+            turns=[
+                RedactedTurn(speaker="banker", start=0.0, end=5.0,
+                             text="הוא עולה 10 שקלים בחודש וכולל את פעולות הערוץ הישיר."),
+                RedactedTurn(speaker="customer", start=5.0, end=8.0,
+                             text="אני לא באמת סופר כמה פעולות."),
+                RedactedTurn(speaker="banker", start=8.0, end=12.0,
+                             text="ומזמין לך כרטיס חדש עם מספר חדש ליתר ביטחון."),
+            ],
+        )
+
+    def _verify(self, quote: str, speaker: str):
+        from callqa.judge.validation import verify_evidence
+        from callqa.models import DimensionScore, Evidence, JudgeResponse
+        resp = JudgeResponse(scores={"clarity": DimensionScore(
+            score=4, reasoning_he="ok",
+            evidence=[Evidence(quote=quote, timestamp="00:03", speaker=speaker)])})
+        problems = verify_evidence(resp, self._transcript())
+        return problems, resp.scores["clarity"].evidence[0].quote
+
+    def test_flipped_amount_is_rejected_not_snapped(self) -> None:
+        problems, stored = self._verify("הוא עולה 90 שקלים בחודש", "banker")
+        assert problems, "a fee flipped 10->90 must not snap to the real quote"
+        assert stored == "הוא עולה 90 שקלים בחודש", "the model's quote must not be rewritten"
+
+    def test_dropped_negation_is_rejected_not_snapped(self) -> None:
+        problems, _ = self._verify("אני באמת סופר כמה פעולות.", "customer")
+        assert problems, "dropping 'לא' inverts meaning and must not snap"
+
+    def test_legitimate_dropped_conjunction_still_snaps(self) -> None:
+        problems, stored = self._verify(
+            "אני מזמין לך כרטיס חדש עם מספר חדש ליתר ביטחון.", "banker")
+        assert not problems, "a dropped conjunction (no number/negation change) must snap"
+        assert stored.startswith("ומזמין"), "stored quote is the real transcript span"
+
+
+class TestRound3JudgeProse:
+    def test_scrub_strips_html_tags_from_model_prose(self) -> None:
+        """MED-2: prose fields are un-schema'd; a model can emit markup that an
+        unescaping downstream consumer would render. _scrub strips tags."""
+        from callqa.judge.runner import _scrub
+        from callqa.models import DimensionScore, JudgeResponse
+        resp = JudgeResponse(
+            scores={"clarity": DimensionScore(
+                score=4, reasoning_he="בהיר <script>alert(1)</script> מאוד")},
+            summary_he="<img src=x onerror=alert(1)> טוב",
+            strengths_he=["<b>חזק</b>"], development_area_he="תקין")
+        scrubbed = _scrub(resp)
+        assert "<script>" not in scrubbed.scores["clarity"].reasoning_he
+        assert "<img" not in scrubbed.summary_he
+        assert "<b>" not in scrubbed.strengths_he[0]
+
+    def test_chat_rejects_null_content(self) -> None:
+        """LOW-6: content:null must raise, not return None (contract is -> str)."""
+        import contextlib
+        import io
+        import json as _json
+        import unittest.mock as mock
+
+        from callqa.config import JudgeConfig
+        from callqa.judge import vllm_judge as vj
+
+        judge = vj.VLLMJudge(JudgeConfig(base_url="http://127.0.0.1:9/v1", model="m"))
+        body = {"choices": [{"message": {"content": None}, "finish_reason": "stop"}]}
+
+        @contextlib.contextmanager
+        def fake_urlopen(req, timeout=0):
+            yield io.BytesIO(_json.dumps(body).encode("utf-8"))
+
+        with mock.patch.object(vj.urllib.request, "urlopen", fake_urlopen), \
+             pytest.raises(vj.VLLMJudgeError, match="no text content"):
+            judge._chat([{"role": "user", "content": "x"}], None)
