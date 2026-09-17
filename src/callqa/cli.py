@@ -158,10 +158,10 @@ def cmd_process(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
-def _process_one(call: CallInput, engines) -> CallResult:  # noqa: ANN001
+def _process_one(call: CallInput, engines, state) -> CallResult:  # noqa: ANN001
     from callqa.pipeline import process_call
 
-    return process_call(call, engines)
+    return process_call(call, engines, state)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -182,13 +182,19 @@ def cmd_run(args: argparse.Namespace) -> int:
     engines = _build_engines(config)
     calls = [_call_input(calls_dir / row["file_name"], config) for row in validation.rows.values()]
 
+    # One StateDB shared across the pool: it is thread-safe (a connection per
+    # operation), and building one per worker made every worker re-assert the
+    # WAL pragma at once, which raced into "database is locked".
+    from callqa.state import StateDB
+    state = StateDB(config.paths.state_db)
+
     results: list[CallResult] = []
     max_workers = config.run.max_workers
     if max_workers > 1:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(pool.map(lambda c: _process_one(c, engines), calls))
+            results = list(pool.map(lambda c: _process_one(c, engines, state), calls))
     else:
-        results = [_process_one(c, engines) for c in calls]
+        results = [_process_one(c, engines, state) for c in calls]
 
     ok = sum(1 for r in results if r.status == "success")
     review = sum(1 for r in results if r.status == "needs_human_review")
@@ -221,10 +227,13 @@ def watch_loop(
 ) -> list[CallResult]:
     """Production ingestion driver: poll input dir, process stable files
     sequentially, move them to processed/ or failed/."""
+    from callqa.state import StateDB
+
     calls_dir = config.paths.input_dir / "calls"
     processed_dir = config.paths.input_dir / "processed"
     failed_dir = config.paths.input_dir / "failed"
     calls_dir.mkdir(parents=True, exist_ok=True)
+    state = StateDB(config.paths.state_db)
 
     sizes: dict[Path, tuple[int, float]] = {}  # path -> (size, unchanged_since)
     results: list[CallResult] = []
@@ -273,7 +282,7 @@ def watch_loop(
                 continue
             # Stable: process it (sequential, one call at a time).
             call = _call_input(path, config)
-            result = _process_one(call, engines)
+            result = _process_one(call, engines, state)
             results.append(result)
             sizes.pop(path, None)
             if result.error and result.error.startswith("locked:"):

@@ -91,8 +91,18 @@ class StateDB:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
+        # WAL is a PERSISTENT property of the database file, so set it once here.
+        # Re-issuing PRAGMA journal_mode=WAL on every connection needs an
+        # exclusive header lock that the busy-timeout does not cover, so under a
+        # thread pool the connections raced and raised "database is locked",
+        # aborting the whole run.
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            conn.commit()
+        finally:
+            conn.close()
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -103,7 +113,6 @@ class StateDB:
         """
         conn = sqlite3.connect(self.db_path, timeout=30)
         try:
-            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=30000")
             with conn:
                 yield conn
