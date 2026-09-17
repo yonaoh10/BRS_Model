@@ -1046,3 +1046,26 @@ class TestCallIdSafety:
         out = engines.config.paths.output_dir
         assert not (out.parent / "PWNED.dialog.json").exists()   # nothing escaped
         assert not (out / "transcripts" / "PWNED.dialog.json").exists()
+
+
+class TestEgressLogHygiene:
+    def test_egress_log_shows_host_not_full_url(self, tmp_path, caplog, monkeypatch) -> None:  # noqa: ANN001
+        """The egress-endpoint warning surfaces a redirected destination, but it
+        must not dump the full URL (path/query) into the terminal scrollback on
+        every command - the host is enough to spot a redirect."""
+        import logging
+
+        from callqa.dotenv import load_dotenv
+
+        monkeypatch.delenv("CALLQA_JUDGE__BASE_URL", raising=False)
+        env = tmp_path / ".env"
+        env.write_text("CALLQA_JUDGE__BASE_URL=https://secret-pod.proxy.example.net/v1/private\n",
+                       encoding="utf-8")
+        try:
+            with caplog.at_level(logging.WARNING, logger="callqa.dotenv"):
+                load_dotenv(env)
+            msgs = " ".join(r.getMessage() for r in caplog.records)
+            assert "secret-pod.proxy.example.net" in msgs      # host visible (the mitigation)
+            assert "/v1/private" not in msgs                    # full path not disclosed
+        finally:
+            monkeypatch.delenv("CALLQA_JUDGE__BASE_URL", raising=False)

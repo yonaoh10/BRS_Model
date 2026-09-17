@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +82,15 @@ def load_dotenv(explicit: Path | None = None) -> list[str]:
                          ", ".join(applied))
             # A .env in an attacker-controlled cwd can point the judge/ASR at a
             # host of its choosing (validate_endpoint permits any https host),
-            # and redacted transcripts then egress there. Egress endpoints set
-            # from a .env are logged loudly - which file, which endpoint - so a
-            # redirected destination is visible rather than silent.
+            # and redacted transcripts then egress there. Surface which endpoint
+            # was set and to which HOST so a redirected destination is visible -
+            # but log only the host, not the full URL, which would otherwise be
+            # dumped into the terminal scrollback on every command.
             for key in applied:
                 if key.endswith("__BASE_URL"):
+                    host = urlparse(os.environ[key]).netloc or "(unparseable)"
                     logger.warning("egress endpoint %s set from %s -> %s",
-                                   key, path, os.environ[key])
+                                   key, path, host)
         return applied
     return []
 
