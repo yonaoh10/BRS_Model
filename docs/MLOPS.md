@@ -132,6 +132,14 @@ regression beyond tolerance. This is what turns "did the rubric/model/threshold
 change help or hurt?" from a guess into a measurement, and it is wired as a CI
 gate so a regression cannot land silently.
 
+> The harness earned its keep immediately: building the golden set surfaced a
+> **real redaction gap** — a mother's name given as a *standalone* answer ("what
+> is your mother's name?" → "רות") is not masked, because `find_pii` only catches
+> it inline ("שם האם הוא X"). It is a genuine leak path for the mono/turn-split
+> case. It is tracked here rather than fixed under this MLOps work (redaction is
+> core); it is not folded into the recall baseline so the baseline stays clean,
+> but it is a candidate fix for the redaction module.
+
 ---
 
 ## 4. Drift — catching slow decay before anyone complains

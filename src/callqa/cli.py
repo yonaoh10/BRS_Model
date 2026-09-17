@@ -433,6 +433,45 @@ def cmd_validate_inputs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    """Evaluate the whole system against the golden set; optionally gate on a baseline."""
+    from callqa.eval.harness import DEFAULT_GOLDEN, EvalReport, compare, evaluate
+    from callqa.state import atomic_write_model
+
+    config = _load_config(args)
+    golden = Path(args.golden_dir) if args.golden_dir else None
+    report = evaluate(config, golden)
+
+    stamp = report.created_at.replace(":", "").replace("-", "")
+    report_path = config.paths.output_dir / "eval" / f"{stamp}.json"
+    atomic_write_model(report_path, report)
+    print(f"eval over {report.n_calls} calls ({report.seconds_total}s):")
+    print(f"  WER {report.wer_mean}  CER {report.cer_mean}  "
+          f"role-acc {report.role_accuracy_mean}")
+    print(f"  redaction recall {report.redaction_recall_mean}  "
+          f"precision {report.redaction_precision_mean}  F1 {report.redaction_f1_mean}")
+    print(f"  judge QWK {report.judge_qwk}")
+    print(f"  report: {report_path}")
+
+    if args.set_baseline:
+        baseline_path = DEFAULT_GOLDEN.parent / "baseline.json"
+        atomic_write_model(baseline_path, report)
+        print(f"baseline updated: {baseline_path}")
+        return EXIT_SUCCESS
+    if args.baseline:
+        baseline = EvalReport.model_validate_json(
+            Path(args.baseline).read_text(encoding="utf-8"))
+        regressions = compare(report, baseline)
+        if regressions:
+            print("REGRESSION vs baseline:", file=sys.stderr)
+            for r in regressions:
+                print(f"  - {r['metric']}: {r['was']} -> {r['now']} ({r['delta']:+})",
+                      file=sys.stderr)
+            return EXIT_FAILED
+        print("no regressions vs baseline")
+    return EXIT_SUCCESS
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
     """Verify models, endpoints, disk and inputs before a batch starts."""
     from callqa.ops.preflight import run_preflight
@@ -515,6 +554,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--deep", action="store_true", help="re-hash local model weights (slow)")
     _add_common_args(p)
     p.set_defaults(func=cmd_preflight)
+
+    p = sub.add_parser("eval", help="evaluate the whole system against the golden set")
+    p.add_argument("--golden-dir", default=None,
+                   help="a real golden set (calls/ + metadata.csv + references.json); "
+                        "default is the synthetic in-repo set")
+    p.add_argument("--baseline", default=None, help="fail on a regression vs this eval report")
+    p.add_argument("--set-baseline", action="store_true", help="save this run as eval/baseline.json")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_eval)
 
     return parser
 
