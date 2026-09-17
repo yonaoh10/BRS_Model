@@ -43,7 +43,31 @@ def load_scorecards(output_dir: Path, include_unpublished: bool = False) -> list
     if skipped:
         logger.info("excluded %d call(s) from the aggregates: %s",
                     len(skipped), ", ".join(sorted(skipped)))
-    return cards
+    return single_rubric_cohort(cards)
+
+
+def single_rubric_cohort(cards: list[ScoreCard]) -> list[ScoreCard]:
+    """Keep only scorecards comparable to the newest one.
+
+    A score is only meaningful within one rubric AND one judge-prompt version:
+    5/5 under an old rubric is not 5/5 under a new one, so averaging across a
+    rubric or prompt change - into a banker's report or a calibration verdict -
+    presents a number that means nothing (ScoreCard.rubric_sha256 exists for
+    exactly this reason but was never checked). Keep the cohort of the newest
+    scorecard and drop older, incomparable ones with a loud warning.
+    """
+    if not cards:
+        return cards
+    newest = max(cards, key=lambda c: c.timestamp)
+    key = (newest.rubric_sha256, newest.prompt_version)
+    dropped = [c for c in cards if (c.rubric_sha256, c.prompt_version) != key]
+    if dropped:
+        logger.warning(
+            "excluded %d scorecard(s) from a different rubric/prompt version "
+            "(kept rubric=%s prompt=%s): %s", len(dropped),
+            (key[0] or "?")[:8], key[1] or "?",
+            ", ".join(sorted(c.call_id for c in dropped)))
+    return [c for c in cards if (c.rubric_sha256, c.prompt_version) == key]
 
 
 def _call_statuses(output_dir: Path) -> dict[str, str]:
@@ -108,6 +132,9 @@ def aggregate_bankers(
     cards: list[ScoreCard], rubric: Rubric, group_comparison: str = "median"
 ) -> tuple[dict[str, BankerAggregate], dict[str, float], float]:
     """Returns (per-banker aggregates, per-dimension group stat, group total stat)."""
+    # Never pool across a rubric/prompt change, even when called with a
+    # hand-built list that did not come through load_scorecards.
+    cards = single_rubric_cohort(cards)
     stat_fn = statistics.median if group_comparison == "median" else statistics.mean
 
     group_dim: dict[str, float] = {}

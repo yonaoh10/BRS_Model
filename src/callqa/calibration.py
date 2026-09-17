@@ -148,6 +148,12 @@ def calibrate(
     human_ratings: dict[str, list[dict[str, int]]],
     rubric: Rubric,
 ) -> CalibrationResult:
+    # Calibration must judge one rubric/prompt version at a time: pooling scores
+    # from different rubrics into one QWK verdict is meaningless (and would let a
+    # bad rubric hide behind a good one).
+    from callqa.aggregation import single_rubric_cohort
+
+    scorecards = single_rubric_cohort(scorecards)
     dim_ids = [d.id for d in rubric.dimensions]
     system_by_call = {c.call_id: c for c in scorecards}
     common_calls = sorted(set(system_by_call) & set(human_ratings))
