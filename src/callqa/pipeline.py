@@ -383,6 +383,7 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
         # -- stage 5: redaction ------------------------------------------
         redacted_path = store.path("redacted")
         redacted = store.load("redaction", redacted_path, RedactedTranscript)
+        redaction_recomputed = redacted is None
         if redacted is None:
             extra_names = [call.banker_name] if call.banker_name else []
             redacted = engines.redactor.redact_dialog(dialog, extra_names)
@@ -394,6 +395,31 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                 "prompt and this report contain raw customer identifiers"
             )
         stages_completed.append("redaction")
+
+        # Redacted audio for the dashboard's player. The raw recording must
+        # never be reachable from the browser, so a copy silenced wherever the
+        # transcript was masked is written alongside the redacted transcript.
+        # Not a pipeline stage (it must not fail a call and must stay outside
+        # the fixed stage list); best-effort, so a call without playable audio
+        # simply has none. No audio is produced when redaction is disabled -
+        # the same rule the transcript endpoint follows.
+        if redacted.enabled:
+            audio_out = config.paths.output_dir / "redacted_audio" / f"{call_id}.wav"
+            audio_sidecar = audio_out.with_suffix(".json")
+            # Regenerate when the mask was recomputed (else a --force / cascade
+            # rewrite of the transcript would leave stale audio that silences the
+            # OLD mask - a leak), or when either artifact is missing (a first run
+            # on this feature, or a crash between the WAV and its sidecar).
+            if redaction_recomputed or not audio_out.exists() or not audio_sidecar.exists():
+                try:
+                    from callqa.audio_redaction import produce_redacted_audio
+
+                    names = [call.banker_name] if call.banker_name else []
+                    produce_redacted_audio(dialog=dialog, audio_art=audio_art,
+                                           extra_names=names, out_wav=audio_out)
+                except Exception as exc:  # noqa: BLE001 - never fail a call on audio
+                    logger.warning("redacted audio not produced for %s: %s",
+                                   call_id, sanitize_error(exc))
 
         # -- stage 6: features -------------------------------------------
         features_path = store.path("features")

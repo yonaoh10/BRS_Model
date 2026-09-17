@@ -243,11 +243,66 @@ class Handler(BaseHTTPRequestHandler):
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            # media-src 'self': the page plays its own redacted audio, served
+            # same-origin from /api/audio. It would fall back to default-src
+            # 'self' anyway; naming it is the explicit statement of intent.
+            "media-src 'self'; "
             "connect-src 'self'; form-action 'none'; frame-ancestors 'none'; "
             "base-uri 'none'",
         )
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_audio(self, path: Path) -> None:
+        """Serve a WAV, honouring a single HTTP Range request.
+
+        A browser's <audio> element issues Range requests to seek; without a
+        206 the whole file is re-fetched on every scrub. Only the simple
+        ``bytes=start-end`` / ``bytes=start-`` / ``bytes=-suffix`` forms are
+        supported - enough for playback, and anything else falls back to the
+        full body.
+        """
+        size = path.stat().st_size
+        start, end, partial = 0, size - 1, False
+        raw = self.headers.get("Range")
+        if raw:
+            m = re.fullmatch(r"\s*bytes=(\d*)-(\d*)\s*", raw)
+            if m and (m.group(1) or m.group(2)):
+                if m.group(1):
+                    start = int(m.group(1))
+                    end = int(m.group(2)) if m.group(2) else size - 1
+                else:  # suffix range: the last N bytes
+                    start = max(0, size - int(m.group(2)))
+                    end = size - 1
+                if start >= size or start > end:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.end_headers()
+                    return
+                end = min(end, size - 1)
+                partial = True
+        with path.open("rb") as fh:
+            fh.seek(start)
+            body = fh.read(end - start + 1)
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # A browser aborts the audio request on every seek and on close;
+            # a dropped client is normal here, not an error to log.
+            pass
 
     def log_message(self, fmt: str, *a) -> None:
         # The session token rides in the query string, so the raw request line
@@ -321,6 +376,22 @@ class Handler(BaseHTTPRequestHandler):
             # would otherwise be read and serialised whole into one body. The
             # cap keeps a single request cheap; a truncation flag tells the UI.
             truncated = len(all_turns) > MAX_TRANSCRIPT_TURNS
+            # Redacted-audio metadata for the drawer player. Present only when
+            # redaction is enabled AND both the silenced WAV and its sidecar
+            # exist - so a call with no playable audio (or a disabled-redaction
+            # call, which must never expose audio) reports available:false and
+            # the page shows the transcript alone.
+            audio = {"available": False}
+            audio_meta = _load_json(
+                type(self).output_dir / "redacted_audio" / f"{call_id}.json")
+            wav_present = (type(self).output_dir / "redacted_audio"
+                           / f"{call_id}.wav").is_file()
+            if enabled and wav_present and isinstance(audio_meta, dict):
+                audio = {
+                    "available": True,
+                    "duration": audio_meta.get("duration"),
+                    "silences": audio_meta.get("silences") or [],
+                }
             body = {
                 "call_id": call_id,
                 "enabled": enabled,
@@ -332,9 +403,35 @@ class Handler(BaseHTTPRequestHandler):
                     for t in all_turns[:MAX_TRANSCRIPT_TURNS]
                 ] if enabled else [],
                 "evidence": evidence if enabled else [],
+                "audio": audio,
             }
             self._send(200, json.dumps(body, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
+            return
+        if route.startswith("/api/audio/"):
+            # The REDACTED audio for one call - silenced wherever the transcript
+            # was masked (see callqa.audio_redaction). Serves ONLY from
+            # redacted_audio/; the raw recordings under audio/wav/ have no route
+            # to the browser. The call_id charset check plus the containment
+            # check below are the traversal guards, exactly as for transcripts.
+            call_id = unquote(route[len("/api/audio/"):])
+            if not CALL_ID_RE.fullmatch(call_id):
+                self._send(404, b'{"error":"not found"}', "application/json")
+                return
+            audio_root = (type(self).output_dir / "redacted_audio").resolve()
+            target = (audio_root / f"{call_id}.wav").resolve()
+            if not target.is_relative_to(audio_root) or not target.is_file():
+                self._send(404, b'{"error":"not found"}', "application/json")
+                return
+            # Defence in depth: the pipeline never writes audio for a
+            # disabled-redaction call, but if a stale silenced WAV from an
+            # earlier enabled run is still on disk, do not serve it once
+            # redaction has been turned off - mirror the transcript route.
+            redacted = _load_json(type(self).output_dir / "redacted" / f"{call_id}.json")
+            if isinstance(redacted, dict) and redacted.get("enabled") is False:
+                self._send(404, b'{"error":"not found"}', "application/json")
+                return
+            self._send_audio(target)
             return
         if route.startswith("/reports/"):
             # Serve the generated per-call and per-banker reports.
