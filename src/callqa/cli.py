@@ -141,8 +141,6 @@ def _call_input(
 
 def cmd_process(args: argparse.Namespace) -> int:
     """One call through the full pipeline; exit code 0/1/2."""
-    from callqa.pipeline import process_call
-
     config = _load_config(args)
     audio_path = Path(args.audio)
     if not audio_path.exists():
@@ -150,7 +148,12 @@ def cmd_process(args: argparse.Namespace) -> int:
         return EXIT_FAILED
     engines = _build_engines(config)
     call = _call_input(audio_path, config, args)
-    result = process_call(call, engines)
+    from callqa.state import StateDB
+    state = StateDB(config.paths.state_db)
+    recorder = _run_recorder(config, "process")
+    result = _record_call(recorder, call, engines, state)
+    if recorder is not None:
+        recorder.write(config.paths.output_dir)
     if result.status == "success":
         logger.info("report: %s", result.report_path)
     else:
@@ -158,10 +161,27 @@ def cmd_process(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
-def _process_one(call: CallInput, engines, state) -> CallResult:  # noqa: ANN001
+def _run_recorder(config: Config, command: str):  # noqa: ANN202
+    """A best-effort run recorder. Never let provenance capture break a batch."""
+    try:
+        from callqa.ops.runrecord import RunRecorder
+        from callqa.rubric import load_rubric
+
+        return RunRecorder(config, load_rubric().sha256, command)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("run-record disabled: %s", exc)
+        return None
+
+
+def _record_call(recorder, call: CallInput, engines, state) -> CallResult:  # noqa: ANN001
+    """process_call, timed, with the outcome recorded on the run manifest."""
     from callqa.pipeline import process_call
 
-    return process_call(call, engines, state)
+    t0 = time.time()
+    result = process_call(call, engines, state)
+    if recorder is not None:
+        recorder.record(result, time.time() - t0, t0, state)
+    return result
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -188,13 +208,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     from callqa.state import StateDB
     state = StateDB(config.paths.state_db)
 
+    recorder = _run_recorder(config, "run")
     results: list[CallResult] = []
     max_workers = config.run.max_workers
     if max_workers > 1:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(pool.map(lambda c: _process_one(c, engines, state), calls))
+            results = list(pool.map(lambda c: _record_call(recorder, c, engines, state), calls))
     else:
-        results = [_process_one(c, engines, state) for c in calls]
+        results = [_record_call(recorder, c, engines, state) for c in calls]
+    if recorder is not None:
+        path = recorder.write(config.paths.output_dir)
+        if path:
+            logger.info("run record: %s", path)
 
     ok = sum(1 for r in results if r.status == "success")
     review = sum(1 for r in results if r.status == "needs_human_review")
@@ -234,6 +259,7 @@ def watch_loop(
     failed_dir = config.paths.input_dir / "failed"
     calls_dir.mkdir(parents=True, exist_ok=True)
     state = StateDB(config.paths.state_db)
+    recorder = _run_recorder(config, "watch")
 
     sizes: dict[Path, tuple[int, float]] = {}  # path -> (size, unchanged_since)
     results: list[CallResult] = []
@@ -282,7 +308,11 @@ def watch_loop(
                 continue
             # Stable: process it (sequential, one call at a time).
             call = _call_input(path, config)
-            result = _process_one(call, engines, state)
+            result = _record_call(recorder, call, engines, state)
+            if recorder is not None:
+                # Rewrite the manifest after each call so a long-running watch
+                # that is killed still leaves an accurate record on disk.
+                recorder.write(config.paths.output_dir)
             results.append(result)
             sizes.pop(path, None)
             if result.error and result.error.startswith("locked:"):
@@ -403,6 +433,26 @@ def cmd_validate_inputs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Is a stored result still reproducible, and if not, what changed?"""
+    from callqa.ops.verify import verify_call
+    from callqa.rubric import load_rubric
+
+    config = _load_config(args)
+    res = verify_call(config.paths.output_dir, args.call_id, config, load_rubric().sha256)
+    if res.run_id is None:
+        print(f"{args.call_id}: {res.reason}", file=sys.stderr)
+        return EXIT_FAILED
+    if res.reproducible:
+        print(f"{args.call_id}: reproducible (produced by run {res.run_id})")
+        return EXIT_SUCCESS
+    print(f"{args.call_id}: NOT reproducible (produced by run {res.run_id}) — "
+          f"inputs changed since:", file=sys.stderr)
+    for change in res.changed:
+        print(f"  - {change['field']}: {change['was']} -> {change['now']}", file=sys.stderr)
+    return EXIT_FAILED
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="callqa", description="Hebrew Call-QA pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -436,6 +486,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate-inputs", help="validate metadata.csv and human_ratings.csv")
     _add_common_args(p)
     p.set_defaults(func=cmd_validate_inputs)
+
+    p = sub.add_parser("verify", help="is a stored call's score still reproducible?")
+    p.add_argument("call_id", help="the call to check")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_verify)
 
     return parser
 

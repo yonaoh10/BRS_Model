@@ -173,6 +173,22 @@ class ReportingConfig(StrictModel):
     language: str = "he"
 
 
+class MonitoringConfig(StrictModel):
+    """Knobs for the ops layer (run records, drift). Additive; the pipeline core
+    never reads these."""
+
+    # On-prem cost is machine time, so a run's cost is estimated as GPU-hours ×
+    # this rate. 0 (the default) means "report GPU-hours, no currency figure".
+    gpu_cost_per_hour: float = Field(default=0.0, ge=0.0)
+
+
+class RetentionConfig(StrictModel):
+    """Lifecycle of RAW, PII-bearing artifacts (raw transcripts + raw audio).
+    Derived non-PII (redacted transcripts, scores, reports) is always kept."""
+
+    raw_days: int = Field(default=90, ge=1)
+
+
 class Config(StrictModel):
     # StrictModel (not BaseModel): a MISSPELLED SECTION must fail loudly, not be
     # silently dropped. A plain BaseModel ignored e.g. CALLQA_JUGDE__BASE_URL
@@ -188,6 +204,8 @@ class Config(StrictModel):
     redaction: RedactionConfig = RedactionConfig()
     judge: JudgeConfig = JudgeConfig()
     reporting: ReportingConfig = ReportingConfig()
+    monitoring: MonitoringConfig = MonitoringConfig()
+    retention: RetentionConfig = RetentionConfig()
 
     @model_validator(mode="after")
     def _interpolate_model_dir(self) -> Config:
