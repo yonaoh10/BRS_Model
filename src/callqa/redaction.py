@@ -264,14 +264,17 @@ def fold_number_words(text: str) -> tuple[str, list[tuple[int, int]]]:
 
 # A run of digits that may carry separators: spaces (including a newline,
 # which is how a number split across two transcript turns appears once the
-# dialog is joined), hyphens, dots and the various dashes an ASR may emit.
-SEPARATORS = " \t\n -.‐‑‒–—/"
-# Up to TWO separator chars between digit groups: the real ivrit.ai ASR
-# writes dictated numbers as "314 -15992 -6265" (space before the hyphen),
-# and with only one separator allowed the run split into fragments below the
-# masking threshold - a full national ID left redaction unmasked on the
-# first real recording.
-DIGIT_RUN_RE = re.compile(rf"\d(?:[{re.escape(SEPARATORS)}]{{0,2}}\d)*")
+# dialog is joined), commas (a common grouping / dictation-pause mark),
+# hyphens, dots and the various dashes an ASR may emit.
+SEPARATORS = " \t\n ,-.‐‑‒–—/"
+# Up to THREE separator chars between digit groups: the real ivrit.ai ASR
+# writes dictated numbers as "314 -15992 -6265" (space before the hyphen), and
+# a customer reading an ID aloud is transcribed as "123 - 456 - 782" (a hyphen
+# with a space on both sides = 3 chars). A tighter cap split the run into
+# fragments below the masking threshold and a full national ID left redaction
+# unmasked. Amounts stay safe: a plain-space gap ("500 300 שקל") is
+# non-structural and the amount exception in _classify_run still exempts it.
+DIGIT_RUN_RE = re.compile(rf"\d(?:[{re.escape(SEPARATORS)}]{{0,3}}\d)*")
 # Separators that a real account or card number can contain. Spaces and
 # newlines are excluded here so that "500 300 שקל" is not read as one number,
 # while a checksum-backed identifier is still allowed to contain them.

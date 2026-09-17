@@ -636,6 +636,37 @@ class TestASRSpacedHyphenDigitRuns:
         red = RegexRedactor(RedactionConfig())._redact(dialog, [])
         assert red.turns[0].text == "זה עולה 500 300 שקל בסך הכול."
 
+    def test_comma_grouped_identifier_is_masked(self) -> None:
+        """Comma is the most common way a number is grouped or dictated, yet it
+        was not a recognized separator, so a comma-grouped ID/card split into
+        sub-threshold fragments and leaked, checksum and all."""
+        from callqa.redaction import redact_text
+
+        for leak in ("תעודת הזהות שלי 123,456,782 בבקשה",
+                     "תעודת הזהות שלי 123, 456, 782 בבקשה",
+                     "חייבו לי על 4580,4580,4580,4580 אתמול"):
+            red, _ = redact_text(leak)
+            assert "█" in red, f"comma-grouped identifier leaked: {red}"
+            assert "456782" not in red.replace(",", "") and "123456782" not in red
+
+    def test_space_hyphen_space_identifier_is_masked(self) -> None:
+        """A hyphen with a space on BOTH sides ('123 - 456 - 782') is 3 separator
+        chars; the run split and a valid national ID left the stage unmasked."""
+        from callqa.redaction import redact_text
+
+        for leak in ("תעודת הזהות שלי היא 123 - 456 - 782 תודה",
+                     "תעודת הזהות שלי 123 / 456 / 782"):
+            red, _ = redact_text(leak)
+            assert "█" in red and "456" not in red, f"spaced-hyphen ID leaked: {red}"
+
+    def test_thousands_grouped_amount_is_not_over_masked(self) -> None:
+        """Adding comma as a separator must not swallow comma-grouped prices."""
+        from callqa.redaction import redact_text
+
+        for amount in ("עד 3,000 שקל", "המסלול עולה 1,500 שקל בחודש"):
+            red, _ = redact_text(amount)
+            assert red == amount, f"amount over-masked: {red}"
+
 
 class TestHebrewNumberWordNormaliser:
     """Numbers dictated digit by digit come out of the ASR as Hebrew WORDS,
