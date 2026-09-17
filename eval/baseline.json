@@ -1,0 +1,101 @@
+{
+  "created_at": "2026-09-17T13:41:15+00:00",
+  "n_calls": 6,
+  "seconds_total": 2.438,
+  "wer_mean": 0.0,
+  "cer_mean": 0.0,
+  "role_accuracy_mean": 1.0,
+  "redaction_recall_mean": 1.0,
+  "redaction_precision_mean": 1.0,
+  "redaction_f1_mean": 1.0,
+  "judge_qwk": 1.0,
+  "calls": [
+    {
+      "call_id": "CALL001",
+      "wer": 0.0,
+      "cer": 0.0,
+      "role_accuracy": 1.0,
+      "redaction": {
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "gold": 2,
+        "detected": 2
+      }
+    },
+    {
+      "call_id": "CALL002",
+      "wer": 0.0,
+      "cer": 0.0,
+      "role_accuracy": 1.0,
+      "redaction": {
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "gold": 1,
+        "detected": 1
+      }
+    },
+    {
+      "call_id": "CALL003",
+      "wer": 0.0,
+      "cer": 0.0,
+      "role_accuracy": 1.0,
+      "redaction": {
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "gold": 1,
+        "detected": 1
+      }
+    },
+    {
+      "call_id": "CALL004",
+      "wer": 0.0,
+      "cer": 0.0,
+      "role_accuracy": 1.0,
+      "redaction": {
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "gold": 2,
+        "detected": 2
+      }
+    },
+    {
+      "call_id": "CALL005",
+      "wer": 0.0,
+      "cer": 0.0,
+      "role_accuracy": 1.0,
+      "redaction": {
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "gold": 1,
+        "detected": 1
+      }
+    },
+    {
+      "call_id": "CALL006",
+      "wer": 0.0,
+      "cer": 0.0,
+      "role_accuracy": 1.0,
+      "redaction": {
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "gold": 1,
+        "detected": 1
+      }
+    }
+  ],
+  "fingerprint": {
+    "code_version": "0.1.0",
+    "git_sha": "3b78c91c848734311d2591ed3d23ee57452a93e0-dirty",
+    "python": "3.12.3",
+    "config_sha256": "5202fb7f60565e1b1aea49efcb1d765fa6282fae9ff1fdf732ccc22c12fcbd6f",
+    "rubric_sha256": "a309b15ec8a8790e",
+    "prompt_version": "1.0.0",
+    "models": []
+  }
+}
