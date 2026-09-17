@@ -433,6 +433,54 @@ def cmd_validate_inputs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review_queue(args: argparse.Namespace) -> int:
+    """List calls held for human review that have no recorded verdict yet."""
+    from callqa.ops.review import pending_reviews
+
+    config = _load_config(args)
+    ratings = config.paths.input_dir / "human_ratings.csv"
+    pending = pending_reviews(config.paths.output_dir, ratings, getattr(args, "rater", None))
+    if not pending:
+        print("no calls awaiting review")
+        return EXIT_SUCCESS
+    print(f"{len(pending)} call(s) awaiting review:")
+    for cid in pending:
+        print(f"  {cid}")
+    return EXIT_SUCCESS
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    """Record a reviewer's per-dimension verdict into the calibration set."""
+    from callqa.ops.review import ReviewError, record_review
+    from callqa.rubric import load_rubric
+
+    config = _load_config(args)
+    dim_ids = [d.id for d in load_rubric().dimensions]
+    scores: dict[str, int] = {}
+    for pair in (args.scores or "").split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            print(f"bad --scores entry '{pair}' (want dim=value)", file=sys.stderr)
+            return EXIT_FAILED
+        dim, _, value = pair.partition("=")
+        try:
+            scores[dim.strip()] = int(value)
+        except ValueError:
+            print(f"bad score for {dim}: {value!r}", file=sys.stderr)
+            return EXIT_FAILED
+    ratings = config.paths.input_dir / "human_ratings.csv"
+    try:
+        record_review(ratings, args.call_id, args.rater, scores, dim_ids)
+    except ReviewError as exc:
+        print(f"review rejected: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    print(f"recorded {args.rater}'s review of {args.call_id} -> {ratings}")
+    print("run `callqa calibrate` to fold it into the agreement measurement")
+    return EXIT_SUCCESS
+
+
 def cmd_drift(args: argparse.Namespace) -> int:
     """Compare the current output window to a known-good baseline and flag drift."""
     import json
@@ -591,6 +639,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--deep", action="store_true", help="re-hash local model weights (slow)")
     _add_common_args(p)
     p.set_defaults(func=cmd_preflight)
+
+    p = sub.add_parser("review-queue", help="list calls held for human review with no verdict")
+    p.add_argument("--rater", default=None, help="only calls this rater hasn't reviewed")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_review_queue)
+
+    p = sub.add_parser("review", help="record a reviewer's verdict into the calibration set")
+    p.add_argument("call_id")
+    p.add_argument("--rater", required=True, help="reviewer id")
+    p.add_argument("--scores", required=True,
+                   help="comma-separated dim=score, e.g. "
+                        "identification=3,compliance=4,empathy=5,...")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("drift", help="flag drift in scores/review-rate/quality vs a baseline")
     p.add_argument("--set-baseline", action="store_true",
