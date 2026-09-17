@@ -433,6 +433,25 @@ def cmd_validate_inputs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_preflight(args: argparse.Namespace) -> int:
+    """Verify models, endpoints, disk and inputs before a batch starts."""
+    from callqa.ops.preflight import run_preflight
+
+    config = _load_config(args)
+    checks = run_preflight(config, deep=getattr(args, "deep", False))
+    failed_critical = False
+    for c in checks:
+        mark = "OK  " if c.ok else ("FAIL" if c.critical else "WARN")
+        print(f"[{mark}] {c.name}: {c.detail}")
+        if not c.ok and c.critical:
+            failed_critical = True
+    if failed_critical:
+        print("preflight FAILED — do not start the batch", file=sys.stderr)
+        return EXIT_FAILED
+    print("preflight OK")
+    return EXIT_SUCCESS
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
     """Is a stored result still reproducible, and if not, what changed?"""
     from callqa.ops.verify import verify_call
@@ -491,6 +510,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("call_id", help="the call to check")
     _add_common_args(p)
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("preflight", help="verify models, endpoints, disk and inputs before a batch")
+    p.add_argument("--deep", action="store_true", help="re-hash local model weights (slow)")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_preflight)
 
     return parser
 
