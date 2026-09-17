@@ -188,7 +188,17 @@ def calibrate(
                 qwk=qwk,
                 mae=mae,
                 confusion=confusion,
-                flagged=qwk is not None and qwk < QWK_DIMENSION_FLAG_THRESHOLD,
+                # A dimension is flagged when its kappa is below threshold, OR
+                # when kappa is UNDEFINED yet there is real disagreement over
+                # enough calls. The undefined case is the dangerous one: a judge
+                # that always outputs the same score (even on a gate dimension)
+                # has zero discriminative power, kappa is undefined, and without
+                # this it slipped through as "fine" and let calibration PASS.
+                flagged=(
+                    (qwk is not None and qwk < QWK_DIMENSION_FLAG_THRESHOLD)
+                    or (qwk is None and len(human) >= MIN_CALLS_FOR_PASS
+                        and (mae or 0) > 0)
+                ),
             )
         )
         pooled_human.extend(human)

@@ -162,3 +162,25 @@ def test_scorecards_from_different_rubrics_are_not_pooled(rubric) -> None:
     # leaves nothing in common → it must refuse rather than certify on stale data
     with pytest.raises(CalibrationError):
         calibrate([old, new], {"OLD": [dict.fromkeys(dim_ids, 5)]}, rubric)
+
+
+def test_a_constant_gate_dimension_blocks_pass(rubric) -> None:
+    """A judge that always outputs the same score for a gate dimension has zero
+    discriminative power: its per-dimension kappa is undefined. It must be
+    flagged (and block PASS), not silently treated as agreement."""
+    dim_ids = [d.id for d in rubric.dimensions]
+    cards, ratings = [], {}
+    # 25 calls; humans span 1..5 on every dim. The judge is perfect on all dims
+    # EXCEPT the gate dim 'identification', where it always answers 3.
+    for i in range(25):
+        h = (i % 5) + 1
+        cards.append(make_card(rubric, f"C{i}",
+                               {d: (3 if d == "identification" else h) for d in dim_ids}))
+        ratings[f"C{i}"] = [dict.fromkeys(dim_ids, h)]
+
+    result = calibrate(cards, ratings, rubric)
+    ident = next(d for d in result.dimensions if d.dimension_id == "identification")
+    assert ident.qwk is None and (ident.mae or 0) > 0
+    assert ident.flagged, "a constant, discriminative-power-zero gate dim must be flagged"
+    assert "identification" in result.flagged_dimensions
+    assert result.overall_pass is False
