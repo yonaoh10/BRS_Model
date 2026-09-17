@@ -1024,3 +1024,25 @@ class TestRound3ConfigAndWorker:
         proc.wait()
         early = _EarlyDiarization(proc, out, tmp_path / "log")
         assert early.collect("C1", duration_sec=60.0) is None
+
+
+class TestCallIdSafety:
+    """--call-id (and any model_copy caller) must not smuggle a path-traversal
+    id past CallInput's validator into a filesystem path."""
+
+    def test_process_call_refuses_an_unsafe_call_id(self, engines, tmp_path) -> None:  # noqa: ANN001
+        from callqa.models import CallInput
+        from callqa.pipeline import process_call
+
+        # model_copy(update=...) bypasses the field validator, exactly as the
+        # CLI did before the fix.
+        hostile = CallInput(call_id="SAFE1", audio_path=tmp_path / "x.wav").model_copy(
+            update={"call_id": "../../PWNED"})
+        result = process_call(hostile, engines)
+
+        assert result.status == "failed"
+        assert "unsafe" in (result.error or "")
+        assert result.call_id == "PWNED"          # sanitized, not the traversal string
+        out = engines.config.paths.output_dir
+        assert not (out.parent / "PWNED.dialog.json").exists()   # nothing escaped
+        assert not (out / "transcripts" / "PWNED.dialog.json").exists()

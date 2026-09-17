@@ -102,7 +102,12 @@ def _call_input(
     from callqa.ingestion import call_input_from_metadata, sanitize_call_id
 
     rows = _metadata_lookup(config)
+    # Sanitize the operator-supplied id: it becomes artifact filenames, and a
+    # value like "../../x" would otherwise escape output_dir (model_copy below
+    # bypasses CallInput's field validator, so the model guard does not catch it).
     explicit_id = getattr(args, "call_id", None)
+    if explicit_id:
+        explicit_id = sanitize_call_id(explicit_id)
     row = None
     if explicit_id:
         row = rows.get(explicit_id)

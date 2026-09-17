@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from callqa.audio import prepare_audio
 from callqa.engines import Engines
 from callqa.features import compute_features
-from callqa.ingestion import probe_audio
+from callqa.ingestion import CALL_ID_RE, probe_audio, sanitize_call_id
 from callqa.judge.runner import NeedsHumanReviewError, run_judge
 from callqa.models import (
     AudioArtifact,
@@ -264,8 +264,15 @@ def _report_is_intact(path: Path) -> bool:
 def process_call(call: CallInput, engines: Engines, state: StateDB | None = None) -> CallResult:
     """The canonical single-call entrypoint. Never raises; returns a status envelope."""
     config = engines.config
-    state = state or StateDB(config.paths.state_db)
     call_id = call.call_id
+    # Defence in depth: CallInput validates call_id, but model_copy(update=...)
+    # (used by the CLI and drivers) bypasses field validators, so an unsafe id
+    # can reach here and every id becomes a filesystem path. Refuse it before
+    # any lock or write, with a sanitized id in the envelope so nothing escapes.
+    if not CALL_ID_RE.match(call_id):
+        return CallResult(call_id=sanitize_call_id(call_id), status="failed",
+                          error="unsafe call_id refused")
+    state = state or StateDB(config.paths.state_db)
     try:
         state.acquire_lock(call_id)
     except CallLockedError as exc:
