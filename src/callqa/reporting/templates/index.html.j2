@@ -15,7 +15,7 @@
       <td>{{ agg.banker_id }}</td>
       <td>{{ agg.n_calls }}</td>
       <td>{{ agg.mean_total }}</td>
-      <td><a href="bankers/{{ agg.banker_id }}.html">פתח דוח</a></td>
+      <td><a href="bankers/{{ banker_slugs[agg.banker_id] }}.html">פתח דוח</a></td>
     </tr>
     {% endfor %}
   </table>
