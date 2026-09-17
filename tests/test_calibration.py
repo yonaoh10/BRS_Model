@@ -139,3 +139,26 @@ def test_calibrate_no_overlap_raises(rubric) -> None:
     cards = [make_card(rubric, "C1", {})]
     with pytest.raises(CalibrationError, match="no calls present in both"):
         calibrate(cards, {"OTHER": [{}]}, rubric)
+
+
+def test_scorecards_from_different_rubrics_are_not_pooled(rubric) -> None:
+    """A score under an old rubric is not comparable to one under a new rubric.
+    aggregation and calibration must keep only the newest cohort, never average
+    or QWK across a rubric/prompt change."""
+    from callqa.aggregation import aggregate_bankers, single_rubric_cohort
+
+    dim_ids = [d.id for d in rubric.dimensions]
+    old = make_card(rubric, "OLD", dict.fromkeys(dim_ids, 5)).model_copy(
+        update={"rubric_sha256": "OLDSHA", "timestamp": "2020-01-01T00:00:00+00:00"})
+    new = make_card(rubric, "NEW", dict.fromkeys(dim_ids, 1)).model_copy(
+        update={"rubric_sha256": "NEWSHA", "timestamp": "2026-01-01T00:00:00+00:00"})
+
+    assert [c.call_id for c in single_rubric_cohort([old, new])] == ["NEW"]
+
+    aggs, _, _ = aggregate_bankers([old, new], rubric)
+    assert aggs["B1"].n_calls == 1, "the old-rubric card must not be pooled in"
+
+    # calibrate drops the old cohort, so a rating that only covers the old call
+    # leaves nothing in common → it must refuse rather than certify on stale data
+    with pytest.raises(CalibrationError):
+        calibrate([old, new], {"OLD": [dict.fromkeys(dim_ids, 5)]}, rubric)
