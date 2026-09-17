@@ -148,12 +148,18 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
             done_ids = {c["id"] for c in calls}
             import sqlite3
             with sqlite3.connect(db_path) as conn:
-                rows = conn.execute(
+                # "in flight" = currently holds a processing lock. Stage-count
+                # rows persist after a call finishes, so counting done stages
+                # showed every completed call as still running; a live lock is
+                # the honest "being processed right now" signal.
+                locked = [r[0] for r in conn.execute("SELECT call_id FROM locks").fetchall()]
+                done = dict(conn.execute(
                     "SELECT call_id, COUNT(*) FROM stages WHERE status='done' GROUP BY call_id"
-                ).fetchall()
-            for call_id, n_done in rows:
-                if call_id in done_ids and n_done >= len(STAGES):
-                    continue
+                ).fetchall())
+            for call_id in locked:
+                if call_id in done_ids:
+                    continue                      # already has a scorecard: finished
+                n_done = done.get(call_id, 0)
                 running.append({"id": call_id, "done": n_done,
                                 "stage": STAGES[min(n_done, len(STAGES) - 1)]})
             _ = state
@@ -180,6 +186,11 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
             "nCalls": calibration.get("n_calls"),
             "nDouble": (calibration.get("human_vs_human") or {}).get("n_doubly_rated_calls"),
             "flagged": calibration.get("flagged_dimensions", []),
+            # The dashboard verdict distinguishes "QWK passes but too few calls"
+            # from "QWK below threshold"; both need the real thresholds rather
+            # than a 0.70/20 baseline guessed in the page.
+            "threshold": calibration.get("qwk_pass_threshold"),
+            "minCalls": calibration.get("min_calls_for_pass"),
         },
         "audit": {
             "promptVersion": cards[0].get("prompt_version") if cards else None,

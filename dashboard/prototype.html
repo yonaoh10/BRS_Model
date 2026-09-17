@@ -1,999 +1,600 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>מרכז בקרת איכות שיחות</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-/* ============================================================
-   Design tokens. Every contrast ratio below was computed, not
-   eyeballed. Orange is BRAND CHROME ONLY - never a status colour:
-   brand #ea580c vs warning #ca8a04 is ΔE 2.9 under deuteranopia.
-   Every status therefore carries an icon + label.
-   ============================================================ */
+/* ================================================================= tokens
+   Restrained instrument aesthetic. Near-monochrome cool-neutral canvas; data
+   bars are a muted slate (not colour), so magnitude is legible without noise.
+   The indigo accent is reserved for interaction only — active nav, links,
+   focus, the primary action. Status colour (green/amber/red) appears only in
+   small badges. System fonts only (CSP blocks web fonts). */
 :root{
-  color-scheme: light;
-  --brand-700:#c2410c;  /* fill w/ white text 5.18:1 */
-  --brand-800:#9a3412;  /* ink on white 7.31:1 */
-  --brand-600:#ea580c;  /* accent/borders 3.56:1 */
-  --brand-300:#fdba74;
-  --brand-50:#fff7ed;
+  color-scheme: light dark;
+  --font:"Segoe UI","Arial Hebrew","Noto Sans Hebrew",system-ui,-apple-system,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 
-  --brand-ink:var(--brand-800);
-  --brand-primary:var(--brand-700);
-  --brand-accent:var(--brand-600);
-  --brand-tint:var(--brand-50);
-  --brand-edge:var(--brand-300);
+  --page:#f5f6f8; --card:#ffffff; --sunken:#f0f1f4; --rail:#fbfbfc;
+  --border:#e7e9ee; --border-2:#dcdfe6;
+  --ink:#1a1c22; --ink-2:#565c67; --ink-3:#5f6672;   /* muted, still AA on the rail */
+  --bar:#454b57; --bar-soft:#e4e6ec;               /* data bars: muted slate */
+  --accent:#4f46e5; --accent-2:#4338ca; --accent-soft:#eef0fe; --accent-ink:#4338ca;
+  --ring:#4f46e5;
+  --ok:#0e7a5f; --ok-soft:#e7f6f0; --ok-ink:#0b5f4a;
+  --warn:#b45309; --warn-soft:#fdf1e3; --warn-ink:#8a4308;
+  --bad:#be2a2a; --bad-soft:#fdeceb; --bad-ink:#a11f1f;
 
-  /* warm stone neutrals, biased toward the accent - chosen, not default grey */
-  --page:#faf9f7; --card:#ffffff; --sunken:#f5f4f1;
-  --border:#e7e5e4; --border-strong:#d6d3d1;
-  --ink:#1c1917;      /* 17.5:1 */
-  --ink-2:#57534e;    /*  7.6:1 */
-  --ink-3:#6f6862;    /* 4.98:1 on the SUNKEN fill - the tightest surface,
-                         not just 5.48:1 on the card. Checked against all three. */
-
-  --ok:#047857;   --ok-ink:#ffffff;   --ok-tint:#ecfdf5;
-  --warn:#ca8a04; --warn-ink:#451a03; --warn-tint:#fefce8;  /* dark ink: white fails 2.94:1 */
-  --bad:#dc2626;  --bad-ink:#ffffff;  --bad-tint:#fef2f2;
-  --info:#1d4ed8; --info-tint:#eff6ff;
-
-  --font:"Heebo","Segoe UI","Arial Hebrew",system-ui,sans-serif;
-  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
-
-  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
-  --r-sm:6px; --r:10px; --r-lg:14px;
-  --shadow:0 1px 3px rgb(28 25 23/.07), 0 1px 2px rgb(28 25 23/.04);
-  --shadow-lg:0 8px 28px rgb(28 25 23/.12);
-  /* Opaque. The old translucent ring composited to 1.55:1 on the card
-     and 1.60:1 on the dark card - both fail WCAG 1.4.11 (needs 3:1). */
-  --ring-color:#c2410c;   /* 5.18:1 on the card */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:28px; --s7:40px;
+  --r:8px; --r-lg:12px;
+  --shadow:0 1px 2px rgb(20 22 28/.05);
+  --shadow-pop:0 12px 40px rgb(20 22 28/.16);
+  --dur:.13s;
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    color-scheme: dark;
-    --page:#1c1917; --card:#292524; --sunken:#221f1d;
-    --border:#44403c; --border-strong:#57534e;
-    --ink:#fafaf9; --ink-2:#d6d3d1; --ink-3:#a8a29e;
-    --brand-ink:#fdba74; --brand-accent:#fb923c; --brand-tint:#2d1b10; --brand-edge:#7c2d12;
-    --ok:#34d399; --ok-ink:#1c1917; --ok-tint:#052e21;
-    --warn:#fbbf24; --warn-ink:#1c1917; --warn-tint:#2e2206;
-    --bad:#f87171; --bad-ink:#1c1917; --bad-tint:#2e1212;
-    --info:#60a5fa; --info-tint:#10213d;
-    --ring-color:#fb923c;  /* 6.70:1 on the dark card */
-    --shadow:0 1px 3px rgb(0 0 0/.4);
-    --shadow-lg:0 8px 28px rgb(0 0 0/.55);
-  }
-}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --page:#0e0f13; --card:#16181d; --sunken:#1b1e24; --rail:#131519;
+  --border:#262a32; --border-2:#333843;
+  --ink:#eef0f4; --ink-2:#b6bcc7; --ink-3:#7b828f;
+  --bar:#aeb5c2; --bar-soft:#262a32;
+  --accent:#8b93f8; --accent-2:#a5abfb; --accent-soft:#1c1f2e; --accent-ink:#a5abfb;
+  --ring:#8b93f8;
+  --ok:#34caa0; --ok-soft:#0f2a22; --ok-ink:#6fe0bf;
+  --warn:#e0972f; --warn-soft:#2a1f0d; --warn-ink:#f0b661;
+  --bad:#e46060; --bad-soft:#2a1414; --bad-ink:#f0a0a0;
+  --shadow:0 1px 2px rgb(0 0 0/.3); --shadow-pop:0 12px 40px rgb(0 0 0/.55);
+}}
 :root[data-theme="dark"]{
-  color-scheme: dark;
-  --page:#1c1917; --card:#292524; --sunken:#221f1d;
-  --border:#44403c; --border-strong:#57534e;
-  --ink:#fafaf9; --ink-2:#d6d3d1; --ink-3:#a8a29e;
-  --brand-ink:#fdba74; --brand-accent:#fb923c; --brand-tint:#2d1b10; --brand-edge:#7c2d12;
-  --ok:#34d399; --ok-ink:#1c1917; --ok-tint:#052e21;
-  --warn:#fbbf24; --warn-ink:#1c1917; --warn-tint:#2e2206;
-  --bad:#f87171; --bad-ink:#1c1917; --bad-tint:#2e1212;
-  --info:#60a5fa; --info-tint:#10213d;
-  --ring-color:#fb923c;  /* 6.70:1 on the dark card */
-  --shadow:0 1px 3px rgb(0 0 0/.4);
-  --shadow-lg:0 8px 28px rgb(0 0 0/.55);
+  --page:#0e0f13; --card:#16181d; --sunken:#1b1e24; --rail:#131519;
+  --border:#262a32; --border-2:#333843;
+  --ink:#eef0f4; --ink-2:#b6bcc7; --ink-3:#7b828f;
+  --bar:#aeb5c2; --bar-soft:#262a32;
+  --accent:#8b93f8; --accent-2:#a5abfb; --accent-soft:#1c1f2e; --accent-ink:#a5abfb;
+  --ring:#8b93f8;
+  --ok:#34caa0; --ok-soft:#0f2a22; --ok-ink:#6fe0bf;
+  --warn:#e0972f; --warn-soft:#2a1f0d; --warn-ink:#f0b661;
+  --bad:#e46060; --bad-soft:#2a1414; --bad-ink:#f0a0a0;
+  --shadow:0 1px 2px rgb(0 0 0/.3); --shadow-pop:0 12px 40px rgb(0 0 0/.55);
 }
 
 *{box-sizing:border-box}
 html{direction:rtl}
-body{
-  margin:0; background:var(--page); color:var(--ink);
-  font-family:var(--font); font-size:15px; line-height:1.65;
-  -webkit-font-smoothing:antialiased;
-}
-/* Latin ids, numbers, hashes must stay LTR inside Hebrew or bidi reverses them */
-.ltr{direction:ltr; unicode-bidi:isolate; font-variant-numeric:tabular-nums}
-.mono{font-family:var(--mono); direction:ltr; unicode-bidi:isolate; font-size:.86em}
-.num{font-variant-numeric:tabular-nums}
-:focus-visible{outline:2px solid var(--ring-color); outline-offset:2px;
-               border-radius:var(--r-sm)}
-@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+body{margin:0; background:var(--page); color:var(--ink); font-family:var(--font);
+  font-size:13.5px; line-height:1.55; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility}
+.num,.fig,.mono,.ltr{font-variant-numeric:tabular-nums lining-nums; unicode-bidi:isolate}
+.mono{font-family:var(--mono)}
+.ltr{direction:ltr; unicode-bidi:isolate; display:inline-block}
+h1,h2,h3,h4{margin:0; font-weight:650; line-height:1.25; letter-spacing:-.01em}
+button,a{font-family:inherit}
+[hidden]{display:none !important}
+@media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} }
+:focus-visible{outline:2px solid var(--ring); outline-offset:2px; border-radius:4px}
 
-/* ---------- app frame ---------- */
-.masthead{
-  background:var(--card); border-block-end:1px solid var(--border);
-  padding:var(--s3) var(--s5); display:flex; align-items:center; gap:var(--s4);
-  position:sticky; top:0; z-index:20;
-}
-.brandmark{display:flex; align-items:center; gap:var(--s3); min-width:0}
-.brandmark .glyph{
-  width:30px; height:30px; border-radius:8px; flex:none;
-  background:var(--brand-primary); color:#fff;
-  display:grid; place-items:center; font-weight:700; font-size:15px;
-}
-.brandmark h1{margin:0; font-size:17px; font-weight:700; letter-spacing:-.01em; white-space:nowrap}
-.masthead .spacer{flex:1}
-.iconbtn{
-  border:1px solid var(--border); background:var(--card); color:var(--ink-2);
-  width:34px; height:34px; border-radius:var(--r-sm); cursor:pointer; font-size:15px;
-  display:grid; place-items:center;
-}
-.iconbtn:hover{background:var(--sunken); color:var(--ink)}
-
-/* ---------- the state strip: what costs money lives here, always visible ---------- */
-.statestrip{
-  display:grid; grid-template-columns:1.6fr 1fr 1fr; gap:1px;
-  background:var(--border); border-block-end:1px solid var(--border);
-  position:sticky; top:57px; z-index:19;   /* sits under the masthead */
-}
-.statecell{background:var(--card); padding:var(--s3) var(--s5); display:flex; align-items:center; gap:var(--s3)}
-.statecell .lab{font-size:12px; color:var(--ink-3); margin-block-end:2px}
-.statecell .val{font-weight:500; font-size:14px; display:flex; align-items:center; gap:6px}
-.statecell .grow{flex:1; min-width:0}
-.meter{
-  margin-inline-start:auto; text-align:start; padding-inline-start:var(--s4);
-  border-inline-start:1px solid var(--border);
-}
-.meter .amt{font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.2}
-.meter .sub{font-size:11px; color:var(--ink-3)}
-
-/* ---------- status: colour ALWAYS paired with an icon + word ---------- */
-.pip{width:9px; height:9px; border-radius:50%; flex:none; box-shadow:0 0 0 3px var(--pip-halo,transparent)}
-.pip.ok{background:var(--ok); --pip-halo:color-mix(in srgb,var(--ok) 18%,transparent)}
-.pip.warn{background:var(--warn); --pip-halo:color-mix(in srgb,var(--warn) 18%,transparent)}
-.pip.bad{background:var(--bad); --pip-halo:color-mix(in srgb,var(--bad) 18%,transparent)}
-.pip.off{background:var(--ink-3)}
-.pip.live{animation:breathe 2.4s ease-in-out infinite}
-@keyframes breathe{0%,100%{opacity:1}50%{opacity:.45}}
-
-.badge{
-  display:inline-flex; align-items:center; gap:5px; padding:2px 9px;
-  border-radius:999px; font-size:12px; font-weight:500; white-space:nowrap;
-}
-.badge.ok{background:var(--ok); color:var(--ok-ink)}
-.badge.warn{background:var(--warn); color:var(--warn-ink)}
-.badge.bad{background:var(--bad); color:var(--bad-ink)}
-.badge.quiet{background:var(--sunken); color:var(--ink-2); border:1px solid var(--border)}
-
-/* ---------- buttons ---------- */
-.btn{
-  font-family:inherit; font-size:14px; font-weight:500; cursor:pointer;
-  border-radius:var(--r-sm); padding:9px var(--s4); border:1px solid transparent;
-  display:inline-flex; align-items:center; gap:7px; line-height:1;
-}
-.btn-primary{background:var(--brand-primary); color:#fff}       /* 5.18:1 */
-.btn-primary:hover{background:var(--brand-800)}
-.btn-ghost{background:var(--card); border-color:var(--border-strong); color:var(--ink)}
-.btn-ghost:hover{background:var(--sunken)}
-.btn-danger{background:var(--bad); color:var(--bad-ink)}
-.btn-sm{padding:6px 11px; font-size:13px}
-
-/* ---------- body: nav rail (right, RTL) + content ---------- */
-.shell{display:grid; grid-template-columns:210px 1fr; gap:0; align-items:start}
-/* Grid items must be allowed to shrink or their content sets the page width. */
-.shell > *{min-width:0}
-.rail{
-  position:sticky; top:130px; padding:var(--s4) var(--s3);
-  border-inline-start:1px solid var(--border); min-height:calc(100vh - 130px);
-}
-.rail nav{display:flex; flex-direction:column; gap:2px}
-.navlink{
-  display:flex; align-items:center; gap:var(--s3); padding:9px var(--s3);
-  border-radius:var(--r-sm); color:var(--ink-2); text-decoration:none;
-  font-size:14px; font-weight:500; cursor:pointer; border:none; background:none;
-  font-family:inherit; text-align:start; width:100%;
-}
+/* ---------------------------------------------------------------- shell */
+.app{display:flex; min-height:100vh}
+.sidebar{width:236px; flex:none; background:var(--rail); border-inline-end:1px solid var(--border);
+  position:sticky; top:0; height:100vh; display:flex; flex-direction:column; padding:var(--s5) var(--s4)}
+.brand{display:flex; align-items:center; gap:10px; font-weight:650; font-size:14.5px; padding:0 var(--s2) var(--s2)}
+.brand .mark{width:26px; height:26px; border-radius:7px; background:var(--accent); color:#fff;
+  display:grid; place-items:center; font-size:13px; flex:none; font-weight:700}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .brand .mark{color:#0e0f13} }
+:root[data-theme="dark"] .brand .mark{color:#0e0f13}
+.sidebar nav{margin-top:var(--s5); display:flex; flex-direction:column; gap:2px}
+.navlink{appearance:none; border:0; background:none; cursor:pointer; width:100%; text-align:start;
+  display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--ink-2); font-weight:500;
+  padding:9px var(--s3); border-radius:var(--r); min-height:38px; transition:background var(--dur),color var(--dur)}
 .navlink:hover{background:var(--sunken); color:var(--ink)}
-.navlink[aria-current="page"]{background:var(--brand-tint); color:var(--brand-ink); font-weight:700}
-.navlink .ico{width:17px; text-align:center; flex:none}
-.navlink .count{
-  margin-inline-start:auto; font-size:11px; padding:1px 7px; border-radius:999px;
-  background:var(--sunken); color:var(--ink-3); font-variant-numeric:tabular-nums;
-}
-.navlink[aria-current="page"] .count{background:var(--card); color:var(--brand-ink)}
-.railnote{
-  margin-block-start:var(--s5); padding:var(--s3); border-radius:var(--r-sm);
-  background:var(--sunken); font-size:11.5px; color:var(--ink-3); line-height:1.5;
-}
+.navlink[aria-current="page"]{background:var(--accent-soft); color:var(--accent-ink); font-weight:600}
+.navlink .ico{width:16px; text-align:center; flex:none; opacity:.85}
+.navlink .count{margin-inline-start:auto; font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+.navlink[aria-current="page"] .count{color:var(--accent-ink)}
+.sidebar .grow{flex:1}
+.provenance{border-top:1px solid var(--border); padding-top:var(--s4); margin-top:var(--s4); display:flex; flex-direction:column; gap:6px}
+.provenance .row{display:flex; justify-content:space-between; gap:var(--s3); font-size:11.5px}
+.provenance .row b{color:var(--ink-3); font-weight:500}
+.provenance .row span{color:var(--ink-2)}
+.sidebar .foot{display:flex; align-items:center; gap:var(--s2); margin-top:var(--s4)}
+.iconbtn{width:32px; height:32px; border:1px solid var(--border-2); background:var(--card); border-radius:var(--r);
+  color:var(--ink-2); cursor:pointer; font-size:14px; display:grid; place-items:center; transition:background var(--dur)}
+.iconbtn:hover{background:var(--sunken)}
 
-.main{padding:var(--s5); max-width:1080px}
-.view[hidden]{display:none}
-.viewhead{margin-block-end:var(--s5)}
-.viewhead h2{margin:0 0 3px; font-size:21px; font-weight:700; letter-spacing:-.015em}
-.viewhead p{margin:0; color:var(--ink-3); font-size:14px}
+.content{flex:1; min-width:0}
+.inner{max-width:1160px; padding:var(--s7) var(--s7)}
+.pagehead{margin-bottom:var(--s6); display:flex; align-items:flex-end; gap:var(--s4)}
+.pagehead h1{font-size:22px; font-weight:650}
+.pagehead p{margin:5px 0 0; color:var(--ink-3); font-size:13px; max-width:62ch}
+.pagehead .act{margin-inline-start:auto}
+.view{animation:fade var(--dur) ease}
+@keyframes fade{from{opacity:.4}to{opacity:1}}
 
-/* ---------- next-action: the single guided element ---------- */
-.nextstep{
-  display:flex; align-items:center; gap:var(--s4); padding:var(--s4) var(--s5);
-  background:var(--brand-tint); border:1px solid var(--brand-edge);
-  border-radius:var(--r); margin-block-end:var(--s5);
-}
-.nextstep .step-n{
-  width:34px; height:34px; border-radius:50%; flex:none; display:grid; place-items:center;
-  background:var(--warn); color:var(--warn-ink); font-weight:700; font-size:16px;
-}
-.nextstep .txt{flex:1; min-width:0}
-.nextstep .txt strong{display:block; font-size:15px; color:var(--brand-ink)}
-.nextstep .txt span{font-size:13px; color:var(--ink-2)}
+/* ---------------------------------------------------------------- cards */
+.card{background:var(--card); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow)}
+.card .ch{display:flex; align-items:baseline; gap:var(--s3); padding:var(--s4) var(--s5) 0}
+.card .ch h3{font-size:14px; font-weight:600}
+.card .ch .sub{font-size:12px; color:var(--ink-3)}
+.card .ch .right{margin-inline-start:auto}
+.card .cb{padding:var(--s5)}
+.grid{display:grid; gap:var(--s4)}
+.mb{margin-bottom:var(--s4)}
 
-/* ---------- tiles: only three, and only because these three drive decisions ---------- */
-.tiles{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--s4); margin-block-end:var(--s5)}
-.tile{
-  background:var(--card); border:1px solid var(--border); border-radius:var(--r);
-  padding:var(--s4) var(--s5); box-shadow:var(--shadow);
-}
-.tile .lab{font-size:12.5px; color:var(--ink-3); margin-block-end:var(--s2)}
-.tile .fig{font-size:31px; font-weight:700; line-height:1.05; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
-.tile .fig small{font-size:15px; font-weight:500; color:var(--ink-3)}
-.tile .foot{margin-block-start:var(--s2); font-size:12.5px; color:var(--ink-2); display:flex; align-items:center; gap:5px}
+/* ---------------------------------------------------------------- KPI stats */
+.stats{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--s4); margin-bottom:var(--s4)}
+.stat{background:var(--card); border:1px solid var(--border); border-radius:var(--r-lg); padding:var(--s5); box-shadow:var(--shadow)}
+.stat .lab{font-size:11.5px; color:var(--ink-3); font-weight:500}
+.stat .fig{font-size:28px; font-weight:650; letter-spacing:-.02em; margin:7px 0 5px; line-height:1}
+.stat .fig small{font-size:14px; color:var(--ink-3); font-weight:500}
+.stat .foot{font-size:12px; color:var(--ink-3); display:flex; align-items:center; gap:7px}
 
-/* ---------- panels ---------- */
-.panel{
-  background:var(--card); border:1px solid var(--border); border-radius:var(--r);
-  box-shadow:var(--shadow); margin-block-end:var(--s5); overflow:hidden;
-}
-.panel > header{
-  padding:var(--s4) var(--s5); border-block-end:1px solid var(--border);
-  display:flex; align-items:center; gap:var(--s3);
-}
-.panel > header h3{margin:0; font-size:15px; font-weight:700}
-.panel > header .sub{font-size:12.5px; color:var(--ink-3)}
-.panel > header .right{margin-inline-start:auto; display:flex; gap:var(--s2); align-items:center}
-.panel .body{padding:var(--s5)}
+/* ---------------------------------------------------------------- badges */
+.badge{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:500; padding:2px 8px; border-radius:6px; white-space:nowrap; line-height:1.5}
+.badge.ok{background:var(--ok-soft); color:var(--ok-ink)}
+.badge.warn{background:var(--warn-soft); color:var(--warn-ink)}
+.badge.bad{background:var(--bad-soft); color:var(--bad-ink)}
+.badge.mut{background:var(--sunken); color:var(--ink-2)}
+.badge .dot{width:6px; height:6px; border-radius:50%; background:currentColor}
 
-/* ---------- dimension bars: one chart, single series, brand accent ---------- */
-.dims{display:flex; flex-direction:column; gap:var(--s3)}
-.dimrow{display:grid; grid-template-columns:150px 1fr 58px; align-items:center; gap:var(--s3)}
-.dimrow .name{font-size:13.5px; color:var(--ink-2); display:flex; align-items:center; gap:5px}
-.dimrow .gatemark{font-size:10px; padding:0 5px; border-radius:3px; background:var(--sunken); color:var(--ink-3); border:1px solid var(--border)}
-.track{height:12px; background:var(--sunken); border-radius:4px; position:relative; overflow:hidden}
-.fill{height:100%; background:var(--brand-accent); border-radius:0 4px 4px 0}
-.fill.low{background:var(--warn)}
-.median{position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--ink); opacity:.55}
-.dimrow .v{font-size:13.5px; font-weight:500; font-variant-numeric:tabular-nums; text-align:start}
-.charthint{margin-block-start:var(--s4); font-size:12px; color:var(--ink-3); display:flex; align-items:center; gap:var(--s4); flex-wrap:wrap}
-.charthint i{display:inline-block; width:14px; height:8px; border-radius:2px; vertical-align:middle; margin-inline-end:5px}
+/* ---------------------------------------------------------------- attention banner */
+.attn{display:flex; align-items:center; gap:var(--s3); padding:var(--s4) var(--s5); background:var(--warn-soft);
+  border:1px solid color-mix(in srgb,var(--warn) 24%,transparent); border-radius:var(--r-lg); margin-bottom:var(--s4)}
+.attn .g{color:var(--warn); font-size:15px; flex:none}
+.attn .t{font-size:13px; color:var(--warn-ink); line-height:1.5}
+.attn .t b{color:var(--ink); font-weight:650}
+.attn .a{margin-inline-start:auto; flex:none}
 
-/* ---------- table ---------- */
-.tablewrap{overflow-x:auto}
-table{width:100%; border-collapse:collapse; font-size:14px}
-thead th{
-  text-align:start; font-size:12px; font-weight:500; color:var(--ink-3);
-  padding:var(--s3) var(--s5); border-block-end:1px solid var(--border); white-space:nowrap;
-}
-tbody td{padding:var(--s3) var(--s5); border-block-end:1px solid var(--border)}
-tbody tr:last-child td{border-block-end:none}
-tbody tr{cursor:pointer}
-tbody tr:hover{background:var(--brand-tint)}
-tbody tr:focus-visible{background:var(--brand-tint);
-  /* outline-offset would be clipped by the row, so the ring is drawn
-     inside the row instead - opaque, so it clears 1.4.11 */
-  outline:2px solid var(--ring-color); outline-offset:-2px}
-.score{font-weight:700; font-variant-numeric:tabular-nums}
+/* ---------------------------------------------------------------- buttons */
+.btn{appearance:none; cursor:pointer; font-size:12.5px; font-weight:500; border-radius:var(--r);
+  padding:7px 13px; min-height:32px; border:1px solid var(--border-2); background:var(--card); color:var(--ink);
+  display:inline-flex; align-items:center; gap:6px; transition:background var(--dur)}
+.btn:hover{background:var(--sunken)}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .btn.primary{color:#0e0f13} }
+:root[data-theme="dark"] .btn.primary{color:#0e0f13}
+.btn.primary:hover{background:var(--accent-2)}
+.btn.sm{font-size:12px; padding:5px 10px; min-height:28px}
 
-/* ---------- detail drawer ---------- */
-.scrim{position:fixed; inset:0; background:rgb(28 25 23/.35); z-index:40}
-.scrim[hidden]{display:none}
-.drawer{
-  position:fixed; inset-block:0; inset-inline-start:0; width:min(460px,92vw); z-index:41;
-  background:var(--card); border-inline-end:1px solid var(--border);
-  box-shadow:var(--shadow-lg); display:flex; flex-direction:column;
-}
-.drawer[hidden]{display:none}
-.drawer > header{padding:var(--s4) var(--s5); border-block-end:1px solid var(--border); display:flex; align-items:center; gap:var(--s3)}
-.drawer > header h3{margin:0; font-size:16px; font-weight:700}
-.drawer .scroll{overflow-y:auto; padding:var(--s5); flex:1}
-.kv{display:grid; grid-template-columns:auto 1fr; gap:var(--s2) var(--s4); font-size:13.5px; margin-block-end:var(--s5)}
-.kv dt{color:var(--ink-3)}
-.kv dd{margin:0; font-weight:500}
-.quote{
-  background:var(--sunken); border-inline-start:3px solid var(--brand-edge);
-  border-radius:0 var(--r-sm) var(--r-sm) 0; padding:var(--s3) var(--s4);
-  font-size:13.5px; margin-block-end:var(--s3);
-}
-.quote .meta{font-size:11.5px; color:var(--ink-3); margin-block-end:3px}
-.transcript{display:flex; flex-direction:column; gap:var(--s2)}
-.turn{padding:var(--s2) var(--s3); border-radius:var(--r-sm); font-size:13px;
-  background:var(--sunken); border-inline-start:3px solid var(--border)}
-.turn.b{border-inline-start-color:var(--brand-edge)}
-.turn .tmeta{font-size:11px; color:var(--ink-3); margin-block-end:2px;
-  display:flex; gap:var(--s2); align-items:center}
-.turn .who{font-weight:600}
-/* an evidence quote in context: same tint the evidence cards use, plus an
-   outline so the highlight survives forced-colors / poor tint contrast */
-mark.ev{background:var(--warn-tint); color:inherit; padding:0 2px;
-  border-radius:2px; outline:1px solid var(--warn)}
-.dimline{display:flex; align-items:center; gap:var(--s3); padding:var(--s2) 0; border-block-end:1px solid var(--border); font-size:13.5px}
-.dimline:last-child{border:none}
-.dimline .n{flex:1}
-.dimline .s{font-weight:700; font-variant-numeric:tabular-nums}
+/* ---------------------------------------------------------------- thin data bars */
+.rows{display:flex; flex-direction:column}
+.mrow{display:grid; grid-template-columns:1fr minmax(90px,180px) 46px; align-items:center; gap:var(--s4); padding:9px 0}
+.mrow + .mrow{border-top:1px solid var(--border)}
+.mrow .nm{font-size:13px; color:var(--ink-2); display:flex; align-items:center; gap:8px; min-width:0}
+.mrow .val{font-size:13px; font-weight:600; text-align:end; font-variant-numeric:tabular-nums}
+.mrow .val.mut{color:var(--ink-3); font-weight:400}
+.track{position:relative; height:6px; background:var(--bar-soft); border-radius:100px}
+.track .fill{position:absolute; inset-block:0; inset-inline-start:0; background:var(--bar); border-radius:100px}
+.track .fill.warn{background:var(--warn)}
+.gt{font-size:10.5px; color:var(--warn-ink); background:var(--warn-soft); border-radius:5px; padding:1px 6px; font-weight:500; white-space:nowrap}
+.lim{font-size:10.5px; color:var(--warn-ink); margin-inline-start:6px}
+.sr{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); border:0}
 
-/* ---------- live run progress ---------- */
-.runrow{display:grid; grid-template-columns:104px 1fr 92px; align-items:center; gap:var(--s3); padding:var(--s3) 0; border-block-end:1px solid var(--border)}
-.runrow:last-child{border:none}
-.stages{display:flex; gap:3px}
-.stage{flex:1; height:7px; border-radius:2px; background:var(--sunken)}
-.stage.done{background:var(--ok)}
-.stage.active{background:var(--brand-accent); animation:breathe 1.4s ease-in-out infinite}
-.stage.fail{background:var(--bad)}
-.runrow .st{font-size:12.5px; color:var(--ink-2); text-align:start}
+/* distribution: labelled buckets + count */
+.dist .mrow{grid-template-columns:150px 1fr 64px}
+.dist .rng{font-size:11px; color:var(--ink-3); margin-inline-start:6px}
+.dist .cnt{text-align:end}
+.dist .cnt b{font-size:14px; font-weight:650}
+.dist .cnt .g{font-size:10.5px; color:var(--warn-ink); display:block; margin-top:1px}
 
-/* ---------- intake: the screen the operator starts every batch from ---------- */
-.dropzone{
-  border:2px dashed var(--border-strong); border-radius:var(--r-lg);
-  padding:var(--s6) var(--s5); text-align:center; background:var(--sunken);
-}
-.dropzone.hot{border-color:var(--brand-accent); background:var(--brand-tint)}
-.dropzone .mark{font-size:26px; color:var(--ink-3); margin-block-end:var(--s2)}
-.dropzone h4{margin:0 0 var(--s1); font-size:15px; font-weight:700}
-.dropzone p{margin:0 0 var(--s4); font-size:13px; color:var(--ink-3)}
-.filelist{display:flex; flex-direction:column}
-.filerow{
-  display:grid; grid-template-columns:1fr auto auto; gap:var(--s3);
-  align-items:center; padding:var(--s3) var(--s5); border-block-end:1px solid var(--border);
-}
-.filerow:last-child{border-block-end:none}
-.filerow .fname{display:flex; align-items:center; gap:var(--s2); min-width:0}
-.filerow .fmeta{font-size:12.5px; color:var(--ink-3)}
-.problem{
-  display:flex; gap:var(--s3); align-items:flex-start; padding:var(--s3) var(--s4);
-  background:var(--warn-tint); border:1px solid var(--warn); border-radius:var(--r-sm);
-  font-size:13.5px; margin-block-end:var(--s3);
-}
-.problem .mark{color:var(--warn-ink); font-weight:700; flex:none}
-.checklist{display:flex; flex-direction:column; gap:var(--s2); font-size:13.5px}
-.checkitem{display:flex; align-items:center; gap:var(--s3)}
-.checkitem .box{
-  width:19px; height:19px; border-radius:5px; flex:none; display:grid; place-items:center;
-  font-size:11px; border:1px solid var(--border-strong); background:var(--card); color:var(--ink-3);
-}
-.checkitem.done .box{background:var(--ok); border-color:var(--ok); color:var(--ok-ink)}
-.checkitem.done .t{color:var(--ink-2)}
-.checkitem:not(.done) .t{font-weight:500}
+/* bankers dot-plot */
+.dot-legend{display:flex; gap:var(--s5); font-size:11.5px; color:var(--ink-3); margin-top:var(--s4); padding-top:var(--s3); border-top:1px solid var(--border)}
+.dot-legend i{display:inline-block; vertical-align:-1px; margin-inline-end:6px}
+.dotrow{display:grid; grid-template-columns:130px 1fr 44px; align-items:center; gap:var(--s4); padding:11px 0}
+.dotrow + .dotrow{border-top:1px solid var(--border)}
+.dotrow .nm{font-size:13px; color:var(--ink-2)}
+.dotrow .nm .n2{color:var(--ink-3); font-size:11.5px; margin-inline-start:6px}
+.axis{position:relative; height:20px}
+.axis .base{position:absolute; inset-inline:0; top:50%; height:1px; background:var(--border-2)}
+.axis .med{position:absolute; top:2px; bottom:2px; width:1.5px; background:var(--ink-3); border-radius:2px}
+.axis .pt{position:absolute; top:50%; width:11px; height:11px; border-radius:50%; background:var(--accent);
+  transform:translate(50%,-50%); box-shadow:0 0 0 3px var(--card)}
+.dotrow .sc{font-size:13px; font-weight:600; text-align:end}
 
-.empty{text-align:center; padding:var(--s7) var(--s5); color:var(--ink-3)}
-.empty .big{font-size:30px; margin-block-end:var(--s3)}
+/* ---------------------------------------------------------------- tables */
+.tablewrap{overflow-x:auto; border-radius:var(--r-lg)}
+table{width:100%; border-collapse:collapse; font-size:13px}
+thead th{text-align:start; font-size:11px; font-weight:500; color:var(--ink-3); padding:10px var(--s4); white-space:nowrap; border-bottom:1px solid var(--border)}
+tbody td{padding:11px var(--s4); border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr[data-call]{cursor:pointer; transition:background var(--dur)}
+tbody tr[data-call]:hover{background:var(--sunken)}
+tbody tr[data-call]:focus-visible{background:var(--accent-soft); outline:2px solid var(--ring); outline-offset:-2px}
+.sc-cell{display:flex; align-items:center; gap:10px}
+.sc-cell .n{font-weight:600; min-width:40px; font-variant-numeric:tabular-nums}
+.sc-cell .bar{width:52px; height:5px; background:var(--bar-soft); border-radius:100px; overflow:hidden; flex:none}
+.sc-cell .bar i{display:block; height:100%; background:var(--bar); border-radius:100px}
+.tempty{padding:var(--s5); color:var(--ink-3); text-align:center; font-size:13px}
 
-@media (max-width:820px){
-  .shell{grid-template-columns:1fr}
-  .rail{position:static; min-height:0; border-inline-start:none; border-block-end:1px solid var(--border)}
-  .rail nav{flex-direction:row; overflow-x:auto; min-width:0; scrollbar-width:thin;
-            padding-block-end:2px; -webkit-overflow-scrolling:touch}
-  .navlink{white-space:nowrap; width:auto; flex:0 0 auto}
-  .railnote{display:none}
-  .statestrip{grid-template-columns:1fr}
-  .tiles{grid-template-columns:1fr}
-  .dimrow{grid-template-columns:110px 1fr 46px}
-  .main{padding:var(--s4)}
+/* ---------------------------------------------------------------- toolbar */
+.toolbar{display:flex; flex-wrap:wrap; align-items:center; gap:var(--s3); margin-bottom:var(--s4)}
+.seg{display:inline-flex; background:var(--sunken); border:1px solid var(--border); border-radius:var(--r); padding:3px}
+.seg button{appearance:none; border:0; background:none; cursor:pointer; font:inherit; font-size:12px; color:var(--ink-2);
+  padding:5px 12px; min-height:28px; border-radius:6px; transition:background var(--dur)}
+.seg button[aria-pressed="true"]{background:var(--card); color:var(--ink); font-weight:500; box-shadow:var(--shadow)}
+.toolbar .grow{margin-inline-start:auto; font-size:12px; color:var(--ink-3)}
+
+/* run progress */
+.runrow{display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:var(--s4); padding:8px 0}
+.runrow + .runrow{border-top:1px solid var(--border)}
+.pips{display:flex; gap:3px}
+.pips i{width:18px; height:5px; border-radius:100px; background:var(--bar-soft)}
+.pips i.on{background:var(--bar)} .pips i.now{background:var(--accent)}
+
+/* ---------------------------------------------------------------- empty state */
+.emptystate{min-height:60vh; display:grid; place-items:center; text-align:center}
+.emptystate .g{width:52px; height:52px; border-radius:14px; background:var(--sunken); display:grid; place-items:center; font-size:22px; color:var(--ink-3); margin:0 auto var(--s4)}
+.emptystate h2{font-size:18px; margin-bottom:8px}
+.emptystate p{color:var(--ink-3); font-size:13px; max-width:44ch; margin:0 auto}
+.emptystate code{font-family:var(--mono); font-size:12px; background:var(--sunken); padding:2px 6px; border-radius:5px}
+
+/* ---------------------------------------------------------------- calibration */
+.cal-hero{display:flex; gap:var(--s5); align-items:flex-start; padding:var(--s6) var(--s5)}
+.cal-hero .vg{flex:none; width:34px; height:34px; border-radius:10px; display:grid; place-items:center; font-size:17px}
+.cal-hero .vg.ok{background:var(--ok-soft); color:var(--ok)} .cal-hero .vg.warn{background:var(--warn-soft); color:var(--warn)} .cal-hero .vg.bad{background:var(--bad-soft); color:var(--bad)}
+.cal-hero .vt{font-size:15px; line-height:1.6; color:var(--ink); max-width:70ch}
+.gauge{margin-top:var(--s3)}
+.gauge .track{height:8px}
+.gauge .fill{background:var(--accent)}
+.gauge .thr{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--ink-2); border-radius:2px}
+.gauge .scale{display:flex; justify-content:space-between; font-size:11px; color:var(--ink-3); margin-top:6px; font-variant-numeric:tabular-nums}
+
+/* ---------------------------------------------------------------- drawer */
+.scrim{position:fixed; inset:0; background:rgb(20 22 28/.42); z-index:40; backdrop-filter:blur(1px)}
+.drawer{position:fixed; inset-block:0; inset-inline-start:0; width:min(600px,96vw); z-index:41; background:var(--card);
+  border-inline-end:1px solid var(--border); box-shadow:var(--shadow-pop); display:flex; flex-direction:column}
+.drawer > header{display:flex; align-items:center; gap:var(--s3); padding:var(--s4) var(--s5); border-bottom:1px solid var(--border)}
+.drawer > header h3{font-size:15px; display:flex; align-items:center; gap:8px}
+.drawer .ha{margin-inline-start:auto; display:flex; gap:var(--s2)}
+.scroll{overflow-y:auto; padding:var(--s5); flex:1}
+.dsec{margin-top:var(--s6)}
+.dsec:first-child{margin-top:0}
+.dsec > h4{font-size:11px; font-weight:500; color:var(--ink-3); margin-bottom:var(--s3); letter-spacing:.02em}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:6px var(--s4); font-size:13px; align-items:baseline}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0}
+.total{display:flex; align-items:baseline; gap:11px; margin:var(--s4) 0}
+.total .b{font-size:32px; font-weight:650; letter-spacing:-.02em; line-height:1}
+.total .b small{font-size:15px; color:var(--ink-3); font-weight:500}
+.total .band{font-size:12px; color:var(--ink-2); background:var(--sunken); border-radius:6px; padding:3px 10px}
+.callout{border-radius:var(--r); padding:var(--s3) var(--s4); font-size:12.5px; line-height:1.5; margin:var(--s3) 0; background:var(--warn-soft); color:var(--warn-ink); border:1px solid color-mix(in srgb,var(--warn) 22%,transparent)}
+.callout b{color:var(--ink); display:block; margin-bottom:2px}
+.summary{font-size:13px; color:var(--ink-2); line-height:1.65; margin:var(--s3) 0}
+.dline{display:grid; grid-template-columns:1fr 120px 40px; gap:var(--s3); align-items:center; padding:7px 0; font-size:12.5px}
+.dline + .dline{border-top:1px solid var(--border)}
+.dline .dn{display:flex; align-items:center; gap:7px; color:var(--ink-2); min-width:0}
+.dline .sc{text-align:end; font-weight:600}
+.quote{background:var(--sunken); border-inline-start:3px solid var(--border-2); border-radius:0 var(--r) var(--r) 0; padding:9px 13px; font-size:12.5px; margin-bottom:8px}
+.quote .m{font-size:11px; color:var(--ink-3); margin-bottom:3px}
+.trn{display:flex; flex-direction:column; gap:6px}
+.turn{padding:8px 12px; border-radius:var(--r); background:var(--sunken); border-inline-start:2px solid var(--border-2)}
+.turn.b{border-inline-start-color:var(--accent)}
+.turn .tm{font-size:10.5px; color:var(--ink-3); margin-bottom:2px; display:flex; gap:8px}
+.turn .tm .who{font-weight:600; color:var(--ink-2)}
+.turn .bd{font-size:12.5px; line-height:1.55}
+mark.ev{background:var(--warn-soft); color:inherit; padding:0 2px; border-radius:2px; box-shadow:0 0 0 1px var(--warn)}
+.tmsg{color:var(--ink-3); font-size:12.5px; padding:var(--s2) 0}
+
+/* ---------------------------------------------------------------- responsive */
+@media (max-width:960px){ .inner{padding:var(--s5)} .stats{grid-template-columns:1fr} .two{grid-template-columns:1fr !important} }
+@media (max-width:640px){
+  .app{flex-direction:column}
+  .sidebar{width:auto; height:auto; position:static; flex-direction:row; align-items:center; flex-wrap:wrap; gap:var(--s2)}
+  .sidebar nav{flex-direction:row; flex-wrap:wrap; margin-top:0}
+  .navlink{width:auto} .sidebar .grow, .provenance{display:none} .sidebar .foot{margin-top:0}
 }
 </style>
-
-<header class="masthead">
-  <div class="brandmark">
-    <div class="glyph" aria-hidden="true">ב</div>
-    <h1>מרכז בקרת איכות שיחות</h1>
-  </div>
-  <div class="spacer"></div>
-  <button class="iconbtn" id="themeBtn" title="החלפת ערכת צבעים" aria-label="החלפת ערכת צבעים">◐</button>
-</header>
-
-<!-- The strip that carries anything which costs money or can silently break. -->
-<div class="statestrip">
-  <div class="statecell">
-    <span class="pip ok live" id="gpuPip" aria-hidden="true"></span>
-    <div class="grow">
-      <div class="lab">מכונת עיבוד בענן</div>
-      <div class="val" id="gpuText">פועלת · <span class="ltr">RTX 4090</span></div>
-    </div>
-    <div class="meter">
-      <div class="amt"><span class="ltr">$0.42</span></div>
-      <div class="sub">‏1 שעה ו-14 דקות</div>
-    </div>
-    <button class="btn btn-danger btn-sm" id="stopGpu" style="margin-inline-start:var(--s4)">הפסקת המכונה</button>
-  </div>
-  <div class="statecell">
-    <span class="pip ok" aria-hidden="true"></span>
-    <div class="grow">
-      <div class="lab">שירות תמלול</div>
-      <div class="val">זמין <span class="badge quiet mono">ivrit-ai</span></div>
-    </div>
-  </div>
-  <div class="statecell">
-    <span class="pip ok" aria-hidden="true"></span>
-    <div class="grow">
-      <div class="lab">מודל השיפוט</div>
-      <div class="val">זמין <span class="badge quiet mono">dictalm2.0</span></div>
-    </div>
-  </div>
-</div>
-
-<div class="shell">
-  <aside class="rail">
-    <nav aria-label="ניווט ראשי">
-      <button class="navlink" data-view="overview" aria-current="page"><span class="ico" aria-hidden="true">▣</span>סקירה</button>
-      <button class="navlink" data-view="intake"><span class="ico" aria-hidden="true">＋</span>הוספת שיחות</button>
-      <button class="navlink" data-view="calls"><span class="ico" aria-hidden="true">☰</span>שיחות<span class="count num">6</span></button>
-      <button class="navlink" data-view="bankers"><span class="ico" aria-hidden="true">◑</span>בנקאים<span class="count num">3</span></button>
-      <button class="navlink" data-view="calibration"><span class="ico" aria-hidden="true">◎</span>כיול</button>
-      <button class="navlink" data-view="system"><span class="ico" aria-hidden="true">⚙</span>מערכת</button>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="mark" aria-hidden="true">ב</span>בקרת איכות</div>
+    <nav role="tablist">
+      <button class="navlink" data-view="overview" role="tab" aria-current="page"><span class="ico" aria-hidden="true">◧</span>סקירה</button>
+      <button class="navlink" data-view="calls" role="tab"><span class="ico" aria-hidden="true">☰</span>שיחות<span class="count" data-count="calls"></span></button>
+      <button class="navlink" data-view="bankers" role="tab"><span class="ico" aria-hidden="true">◔</span>בנקאים<span class="count" data-count="bankers"></span></button>
+      <button class="navlink" data-view="calibration" role="tab"><span class="ico" aria-hidden="true">⚖</span>כיול השופט</button>
     </nav>
-    <div class="railnote">
-      המכונה בענן מחויבת לפי שנייה כל עוד היא פועלת. הפסיקו אותה בסיום העבודה.
+    <div class="grow"></div>
+    <div class="provenance" id="provenance"></div>
+    <div class="foot">
+      <button class="iconbtn" id="themeBtn" aria-label="החלפת מצב תצוגה" title="בהיר/כהה">◐</button>
+      <span style="font-size:11px;color:var(--ink-3)">מצב תצוגה</span>
     </div>
   </aside>
 
-  <main class="main">
+  <div class="content"><div class="inner" id="inner">
 
-    <!-- ============ OVERVIEW ============ -->
+    <div class="emptystate" id="emptyState" hidden>
+      <div class="g" aria-hidden="true">▢</div>
+      <h2 id="emptyTitle">אין נתונים להצגה</h2>
+      <p id="emptyText">כשהצנרת תסיים לעבד שיחות, הן יופיעו כאן.</p>
+    </div>
+
+    <!-- OVERVIEW -->
     <section class="view" id="view-overview">
-      <div class="viewhead">
-        <h2>סקירה</h2>
-        <p>מצב העיבוד והממצאים המרכזיים מ-6 השיחות שנותחו.</p>
+      <div class="pagehead"><div><h1>סקירה</h1><p id="ovSub">מצב הבקרה והממצאים המרכזיים.</p></div></div>
+      <div id="ovAttn"></div>
+      <div class="stats">
+        <div class="stat"><div class="lab">דורשות בדיקה</div><div class="fig num" id="kReview">—</div><div class="foot" id="kReviewFoot"></div></div>
+        <div class="stat"><div class="lab">ציון ממוצע</div><div class="fig num"><span id="kMean">—</span><small> / 100</small></div><div class="foot">חציון קבוצתי&nbsp;<span class="num" id="kMedian">—</span></div></div>
+        <div class="stat"><div class="lab">שיחות שנותחו</div><div class="fig num" id="kCalls">—</div><div class="foot" id="kCallsFoot">הושלמו</div></div>
       </div>
-
-      <div class="nextstep">
-        <div class="step-n" aria-hidden="true">⚠</div>
-        <div class="txt">
-          <strong>שתי שיחות נכשלו בממד שער וממתינות לבדיקה</strong>
-          <span>ציון השער "זיהוי ואימות לקוח" ירד ל-2 ומטה, ולכן הציון הכולל הוגבל ל-59.</span>
-        </div>
-        <button class="btn btn-primary" data-goto="calls">מעבר לשיחות</button>
+      <div class="grid two mb" style="grid-template-columns:1fr 1fr">
+        <div class="card"><div class="ch"><h3>התפלגות הציונים</h3><span class="sub">הקו = חציון</span></div><div class="cb dist" id="distChart"></div></div>
+        <div class="card"><div class="ch"><h3>ממוצע לפי ממד</h3><span class="sub">1–5 · ⚑ שער</span></div><div class="cb" id="dimChart"></div></div>
       </div>
-
-      <div class="tiles">
-        <div class="tile">
-          <div class="lab">שיחות שנותחו</div>
-          <div class="fig num" id="tileCalls">6</div>
-          <div class="foot">הושלמו ללא שגיאה</div>
-        </div>
-        <div class="tile">
-          <div class="lab">ציון ממוצע</div>
-          <div class="fig num"><span id="tileMean">58.3</span><small> / 100</small></div>
-          <div class="foot"><span class="pip off" aria-hidden="true"></span>חציון קבוצתי <span class="num" id="tileMedian">58.1</span></div>
-        </div>
-        <div class="tile">
-          <div class="lab">דורשות בדיקה</div>
-          <div class="fig num" id="tileReview">2</div>
-          <div class="foot"><span class="badge warn">⚠ חריגת שער</span></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <header>
-          <h3>ציון ממוצע לפי ממד</h3>
-          <span class="sub">סולם 1–5 · הרוחב משקף את תרומת הממד לציון</span>
-        </header>
-        <div class="body">
-          <div class="dims" id="dimChart"></div>
-          <div class="charthint">
-            <span><i style="background:var(--brand-accent)"></i>ממוצע הממד</span>
-            <span><i style="background:var(--warn)"></i>מתחת לסף — דורש טיפול</span>
-            <span>⚑ ממד שער: ציון 2 ומטה מגביל את הציון הכולל</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <header>
-          <h3>שיחות אחרונות</h3>
-          <span class="sub">לחיצה על שורה פותחת את פירוט השיחה</span>
-          <div class="right"><button class="btn btn-ghost btn-sm" data-goto="calls">הצגת הכול</button></div>
-        </header>
-        <div class="tablewrap"><table id="recentTable">
-          <thead><tr>
-            <th>שיחה</th><th>בנקאי</th><th>ציון</th><th>שער</th><th>תאריך</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table></div>
+      <div class="card">
+        <div class="ch"><h3>שיחות אחרונות</h3><span class="sub">לחיצה על שורה — פירוט מלא</span><span class="right"><button class="btn sm" data-goto="calls">כל השיחות</button></span></div>
+        <div class="cb" style="padding-top:var(--s3)"><div class="tablewrap"><table id="recentTable">
+          <thead><tr><th>שיחה</th><th>בנקאי</th><th>ציון</th><th>שער</th><th>מצב</th><th>תאריך</th></tr></thead><tbody></tbody>
+        </table></div></div>
       </div>
     </section>
 
-    <!-- ============ INTAKE ============ -->
-    <section class="view" id="view-intake" hidden>
-      <div class="viewhead">
-        <h2>הוספת שיחות</h2>
-        <p>בחרו הקלטות, ודאו שהפרטים תקינים, והתחילו עיבוד.</p>
-      </div>
-
-      <div class="panel">
-        <header><h3>1 · בחירת הקלטות</h3><span class="sub">קבצי <span class="ltr">WAV</span> או <span class="ltr">MP3</span></span></header>
-        <div class="body">
-          <div class="dropzone" id="dropzone">
-            <div class="mark" aria-hidden="true">↑</div>
-            <h4>גררו לכאן הקלטות</h4>
-            <p>או בחרו קבצים מהמחשב. הקלטות סטריאו מזוהות אוטומטית לפי ערוץ.</p>
-            <button class="btn btn-ghost" id="pickFiles">בחירת קבצים</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <header>
-          <h3>2 · בדיקת הפרטים</h3>
-          <span class="sub"><span class="num">3</span> קבצים נבחרו</span>
-          <div class="right"><span class="badge warn">⚠ בעיה אחת</span></div>
-        </header>
-        <div class="body" style="padding-block-end:0">
-          <div class="problem">
-            <span class="mark" aria-hidden="true">⚠</span>
-            <div>
-              <strong>חסר מזהה בנקאי עבור <span class="mono">CALL009</span></strong><br>
-              בלי מזהה בנקאי השיחה תעובד אך לא תיכלל בדוח הבנקאי. אפשר להוסיף אותו בקובץ
-              <span class="mono">metadata.csv</span> או לבחור מהרשימה.
-            </div>
-          </div>
-        </div>
-        <div class="filelist">
-          <div class="filerow">
-            <div class="fname"><span class="badge quiet">✓</span><span class="mono">CALL007.wav</span></div>
-            <div class="fmeta">סטריאו · <span class="num">4:12</span> · בנקאי <span class="ltr">B001</span></div>
-            <div><button class="btn btn-ghost btn-sm">הסרה</button></div>
-          </div>
-          <div class="filerow">
-            <div class="fname"><span class="badge quiet">✓</span><span class="mono">CALL008.wav</span></div>
-            <div class="fmeta">סטריאו · <span class="num">6:48</span> · בנקאי <span class="ltr">B002</span></div>
-            <div><button class="btn btn-ghost btn-sm">הסרה</button></div>
-          </div>
-          <div class="filerow">
-            <div class="fname"><span class="badge warn">⚠</span><span class="mono">CALL009.wav</span></div>
-            <div class="fmeta">מונו · <span class="num">3:05</span> · בנקאי חסר</div>
-            <div><button class="btn btn-ghost btn-sm">הסרה</button></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <header><h3>3 · לפני ההתחלה</h3></header>
-        <div class="body">
-          <div class="checklist">
-            <div class="checkitem done"><span class="box" aria-hidden="true">✓</span><span class="t">מכונת העיבוד פועלת</span></div>
-            <div class="checkitem done"><span class="box" aria-hidden="true">✓</span><span class="t">שירות התמלול ומודל השיפוט זמינים</span></div>
-            <div class="checkitem done"><span class="box" aria-hidden="true">✓</span><span class="t">הסרת פרטים מזהים פעילה</span></div>
-            <div class="checkitem"><span class="box" aria-hidden="true"></span><span class="t">הקלטה אחת ללא מזהה בנקאי</span></div>
-          </div>
-          <div style="display:flex; gap:var(--s3); align-items:center; margin-block-start:var(--s5)">
-            <button class="btn btn-primary">התחלת עיבוד של 3 שיחות</button>
-            <span style="font-size:12.5px; color:var(--ink-3)">זמן משוער <span class="num">4</span> דקות · עלות משוערת <span class="ltr">$0.03</span></span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ CALLS ============ -->
+    <!-- CALLS -->
     <section class="view" id="view-calls" hidden>
-      <div class="viewhead">
-        <h2>שיחות</h2>
-        <p>כל השיחות שעובדו, עם מצב העיבוד והציון.</p>
+      <div class="pagehead"><div><h1>שיחות</h1><p>כל השיחות שנותחו. סינון, מיון, ולחיצה על שורה לפירוט מלא.</p></div></div>
+      <div class="toolbar">
+        <div class="seg" id="filterSeg" role="group" aria-label="סינון">
+          <button data-filter="all" aria-pressed="true">הכול</button>
+          <button data-filter="review" aria-pressed="false">דורשות בדיקה</button>
+          <button data-filter="gate" aria-pressed="false">חריגת שער</button>
+        </div>
+        <div class="seg" id="sortSeg" role="group" aria-label="מיון">
+          <button data-sort="total" aria-pressed="true">לפי ציון</button>
+          <button data-sort="date" aria-pressed="false">לפי תאריך</button>
+        </div>
+        <span class="grow" id="callsCount"></span>
       </div>
-
-      <div class="panel">
-        <header>
-          <h3>עיבוד פעיל</h3>
-          <span class="sub">שלב 6 מתוך 8</span>
-          <div class="right"><span class="badge ok">● פועל</span></div>
-        </header>
-        <div class="body" id="runList"></div>
+      <div class="card mb" id="runPanel" hidden>
+        <div class="ch"><h3>עיבוד פעיל</h3><span class="sub" id="runSub"></span></div>
+        <div class="cb" id="runList"></div>
       </div>
-
-      <div class="panel">
-        <header>
-          <h3>כל השיחות</h3>
-          <span class="sub"><span class="num">6</span> שיחות</span>
-        </header>
-        <div class="tablewrap"><table id="allTable">
-          <thead><tr>
-            <th>שיחה</th><th>בנקאי</th><th>ציון</th><th>שער</th><th>מצב</th><th>תאריך</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table></div>
-      </div>
+      <div class="card"><div class="tablewrap"><table id="allTable">
+        <thead><tr><th>שיחה</th><th>בנקאי</th><th>ציון</th><th>שער</th><th>מצב</th><th>תאריך</th></tr></thead><tbody></tbody>
+      </table></div></div>
     </section>
 
-    <!-- ============ BANKERS ============ -->
+    <!-- BANKERS -->
     <section class="view" id="view-bankers" hidden>
-      <div class="viewhead">
-        <h2>בנקאים</h2>
-        <p>השוואה בין בנקאים לחציון הקבוצתי.</p>
-      </div>
-      <div class="panel">
-        <header><h3>ציון ממוצע לבנקאי</h3><span class="sub">הקו האנכי מסמן את החציון הקבוצתי</span></header>
-        <div class="body"><div class="dims" id="bankerChart"></div></div>
-      </div>
+      <div class="pagehead"><div><h1>בנקאים</h1><p>ציון ממוצע לכל בנקאי על ציר 0–100, מול החציון הקבוצתי.</p></div></div>
+      <div class="card"><div class="cb"><div id="bankerChart"></div>
+        <div class="dot-legend"><span><i style="width:11px;height:11px;border-radius:50%;background:var(--accent)"></i>ממוצע הבנקאי</span><span><i style="width:2px;height:12px;background:var(--ink-3);vertical-align:-2px"></i>חציון קבוצתי</span></div>
+      </div></div>
     </section>
 
-    <!-- ============ CALIBRATION ============ -->
+    <!-- CALIBRATION -->
     <section class="view" id="view-calibration" hidden>
-      <div class="viewhead">
-        <h2>כיול</h2>
-        <p>מידת ההתאמה בין השופט האוטומטי להערכה אנושית.</p>
-      </div>
-      <div class="tiles">
-        <div class="tile">
-          <div class="lab">‏QWK כולל</div>
-          <div class="fig num" id="calQwk">0.83</div>
-          <div class="foot"><span class="badge ok">✓ עובר</span> הסף הוא <span class="num">0.70</span></div>
-        </div>
-        <div class="tile">
-          <div class="lab">שיחות בכיול</div>
-          <div class="fig num" id="calN">6</div>
-          <div class="foot">מתוכן <span class="num" id="calDouble">3</span> עם שני מעריכים</div>
-        </div>
-        <div class="tile">
-          <div class="lab">ממדים מסומנים</div>
-          <div class="fig num" id="calFlagged">0</div>
-          <div class="foot">אף ממד לא ירד מתחת ל-<span class="num">0.60</span></div>
-        </div>
-      </div>
-      <div class="panel">
-        <header><h3>מסקנה</h3></header>
-        <div class="body" style="color:var(--ink-2); font-size:14px" id="calVerdict">
-          השופט האוטומטי תואם להערכה האנושית ברמה שמאפשרת שימוש. כל ממד נבדק בנפרד,
-          ואף אחד מהם לא סומן כדורש בקרה אנושית.
-        </div>
+      <div class="pagehead"><div><h1>כיול השופט</h1><p>עד כמה השופט האוטומטי תואם להערכה אנושית (QWK). כיול נדרש לפני פריסה.</p></div></div>
+      <div class="card mb"><div class="cal-hero" id="calHero"></div></div>
+      <div class="stats">
+        <div class="stat"><div class="lab">QWK כולל</div><div class="fig num" id="calQwk">—</div><div class="foot" id="calThresh"></div></div>
+        <div class="stat"><div class="lab">שיחות בכיול</div><div class="fig num" id="calN">—</div><div class="foot">מתוכן <span class="num" id="calDouble">—</span>&nbsp;בדירוג כפול</div></div>
+        <div class="stat"><div class="lab">ממדים מסומנים</div><div class="fig num" id="calFlagged">—</div><div class="foot" id="calFlaggedFoot"></div></div>
       </div>
     </section>
 
-    <!-- ============ SYSTEM ============ -->
-    <section class="view" id="view-system" hidden>
-      <div class="viewhead">
-        <h2>מערכת</h2>
-        <p>מצב הרכיבים ופרטי הביקורת של ההרצה האחרונה.</p>
-      </div>
-      <div class="panel">
-        <header><h3>רכיבים</h3></header>
-        <div class="tablewrap"><table>
-          <thead><tr><th>רכיב</th><th>מצב</th><th>פרטים</th></tr></thead>
-          <tbody>
-            <tr><td>מכונת GPU</td><td><span class="badge ok">✓ פועלת</span></td><td class="mono">RTX 4090 · 24GB</td></tr>
-            <tr><td>שירות תמלול</td><td><span class="badge ok">✓ זמין</span></td><td class="mono">ivrit-ai/whisper-large-v3-turbo-ct2</td></tr>
-            <tr><td>מודל שיפוט</td><td><span class="badge ok">✓ זמין</span></td><td class="mono">dicta-il/dictalm2.0-instruct</td></tr>
-            <tr><td>הסרת פרטים מזהים</td><td><span class="badge ok">✓ פעיל</span></td><td>מקומי, לפני שליחה לשיפוט</td></tr>
-          </tbody>
-        </table></div>
-      </div>
-      <div class="panel">
-        <header><h3>ביקורת ההרצה האחרונה</h3><span class="sub">נשמר עם כל ציון</span></header>
-        <div class="body">
-          <dl class="kv">
-            <dt>גרסת מחוון</dt><dd class="mono">1.0.0</dd>
-            <dt>חתימת פרומפט</dt><dd class="mono">117b9d6006d83061</dd>
-            <dt>טמפרטורה</dt><dd class="num">0.0</dd>
-            <dt>הרצה אחרונה</dt><dd class="ltr">2026-09-11 23:14</dd>
-          </dl>
-        </div>
-      </div>
-    </section>
-
-  </main>
+  </div></div>
 </div>
 
 <div class="scrim" id="scrim" hidden></div>
 <aside class="drawer" id="drawer" hidden role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
   <header>
     <h3 id="drawerTitle">שיחה</h3>
-    <div style="margin-inline-start:auto; display:flex; gap:var(--s2)">
-      <a class="btn btn-ghost btn-sm" id="openReport" href="#" target="_blank" rel="noopener" hidden>הדוח המלא</a>
-      <button class="btn btn-ghost btn-sm" id="closeDrawer">סגירה</button>
+    <div class="ha">
+      <a class="btn sm" id="openReport" href="#" target="_blank" rel="noopener" hidden>הדוח המלא</a>
+      <button class="btn sm" id="closeDrawer">סגירה</button>
     </div>
   </header>
   <div class="scroll" id="drawerBody"></div>
 </aside>
 
 <script>
-// Real figures produced by this pipeline's own mock run - not placeholders.
-const DIMS = [
-  {id:'identification', he:'זיהוי ואימות לקוח',  avg:2.83, gate:true},
-  {id:'compliance',     he:'ציות וגילוי נאות',   avg:3.00, gate:true},
-  {id:'empathy',        he:'אמפתיה ושותפות',     avg:3.83, gate:false},
-  {id:'listening',      he:'הקשבה פעילה',        avg:3.67, gate:false},
-  {id:'clarity',        he:'מתן מידע ובהירות',   avg:3.50, gate:false},
-  {id:'resolution',     he:'פתרון הפנייה',       avg:3.33, gate:false},
-  {id:'suitability',    he:'התאמת המענה לצורך',  avg:3.33, gate:false},
-  {id:'closure',        he:'סגירה והצעד הבא',    avg:3.17, gate:false},
-];
-const CALLS = [
-  {id:'CALL006', banker:'B003', total:72.5, gate:false, date:'2026-08-12', status:'הושלם'},
-  {id:'CALL001', banker:'B001', total:62.5, gate:false, date:'2026-08-01', status:'הושלם'},
-  {id:'CALL004', banker:'B002', total:61.2, gate:false, date:'2026-08-08', status:'הושלם'},
-  {id:'CALL002', banker:'B001', total:55.0, gate:false, date:'2026-08-03', status:'הושלם'},
-  {id:'CALL003', banker:'B002', total:53.8, gate:true,  date:'2026-08-05', status:'דורש בדיקה'},
-  {id:'CALL005', banker:'B003', total:45.0, gate:true,  date:'2026-08-10', status:'דורש בדיקה'},
-];
-const BANKERS = [{id:'B001',mean:58.8,n:2},{id:'B002',mean:57.5,n:2},{id:'B003',mean:58.8,n:2}];
-let GROUP_MEDIAN = 58.1;
-const STAGES = ['קליטה','אודיו','תמלול','דוברים','הסרת מזהים','מדדים','שיפוט','דוח'];
+const TOKEN = window.__CALLQA_TOKEN__ || null;
+const esc = v => String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const n1 = v => (v==null||isNaN(v))?'—':Number(v).toFixed(1);
+let STATE=null, byId={}, filter='all', sortBy='total';
 
-const DETAIL = {
-  CALL003:{
-    scores:{identification:2,compliance:3,empathy:4,listening:4,clarity:5,resolution:2,suitability:4,closure:2},
-    summary:'שיחה עניינית; הבנקאי טיפל בפניית הלקוח בהתאם לנהלים, עם נקודות לשיפור.',
-    evidence:[{t:'00:24',sp:'בנקאי',q:'בשמחה אבדוק. לפני כן אני צריך לזהות אותך, מה מספר תעודת הזהות שלך?'},
-              {t:'00:50',sp:'בנקאי',q:'בכיף, שיהיה לך יום נעים ותודה שפנית אלינו.'}],
-    rec:'פתח כל שיחה בבקשת שני פרטים מזהים לפחות, ואמור במפורש "הזיהוי הושלם" לפני מסירת מידע על החשבון.'
-  }
-};
-let byId = Object.fromEntries(DIMS.map(d=>[d.id,d.he]));
-
-/* When served by dashboard/server.py the page swaps the demo figures above for
-   the pipeline's real artifacts. Opened as a plain file it keeps them, so this
-   one file is both the live UI and a standalone prototype. */
-async function loadLive(){
-  const token = window.__CALLQA_TOKEN__;
-  if(!token) return false;                       // opened as a static file
-  try{
-    const r = await fetch('/api/state?t='+encodeURIComponent(token));
-    if(!r.ok) return false;
-    const d = await r.json();
-    if(!d.calls || !d.calls.length) return false;
-    CALLS.length = 0; CALLS.push(...d.calls);
-    DIMS.length  = 0; DIMS.push(...d.dims);
-    BANKERS.length = 0; BANKERS.push(...d.bankers);
-    byId = Object.fromEntries(DIMS.map(x=>[x.id,x.he]));
-    if(d.stages && d.stages.length){ STAGES.length = 0; STAGES.push(...d.stages); }
-    LIVE = d;
-    return true;
-  }catch(e){ return false; }
+function band(t){ return t>=80?{he:'גבוה'}:t>=60?{he:'בינוני'}:t>=40?{he:'גבולי'}:{he:'חלש'}; }
+function gateBadge(g){ return g?'<span class="badge warn"><span class="dot"></span>חריגת שער</span>':'<span class="badge mut"><span class="dot" style="background:var(--ok)"></span>שער תקין</span>'; }
+function statusBadge(s){
+  if(s==='needs_human_review') return '<span class="badge warn"><span class="dot"></span>דורש בדיקה</span>';
+  if(s==='failed') return '<span class="badge bad"><span class="dot"></span>נכשל</span>';
+  return '<span class="badge mut">הושלם</span>';
 }
-let LIVE = null;
-
-/* Everything below interpolates pipeline data into HTML. That data derives
-   from ASR output, file names and config values, so it is escaped: this page
-   holds a session token and can start billable machines. */
-const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
-  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-/* Shared helpers: declared at top level because openCall() and the boot
-   block call them from outside renderAll(). */
-function gateBadge(g){ return g ? '<span class="badge warn">⚠ חריגה</span>' : '<span class="badge quiet">✓ תקין</span>'; }
-function rowHTML(c, withStatus){
+function spk(s){ return s==='banker'?'בנקאי':'לקוח'; }
+function mmss(sec){ const s=Math.max(0,Math.floor(Number(sec)||0)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+function rowHTML(c){
+  const w=Math.max(0,Math.min(100,c.total));
   return `<tr tabindex="0" data-call="${esc(c.id)}">
     <td><span class="mono">${esc(c.id)}</span></td>
     <td><span class="ltr">${esc(c.banker)}</span></td>
-    <td class="score num">${c.total.toFixed(1)}</td>
-    <td>${gateBadge(c.gate)}</td>
-    ${withStatus?`<td>${c.status==='דורש בדיקה'?'<span class="badge warn">⚠ דורש בדיקה</span>':'<span class="badge quiet">הושלם</span>'}</td>`:''}
-    <td><span class="ltr">${esc(c.date)}</span></td>
-  </tr>`;
-}
-const DEMO_RUN = [
-  {id:'CALL007', done:8, stage:'הושלם'},
-  {id:'CALL008', done:6, stage:'שיפוט'},
-  {id:'CALL009', done:0, stage:'ממתין'},
-];
-function renderRun(){
-  const rows = (LIVE && LIVE.running && LIVE.running.length) ? LIVE.running : DEMO_RUN;
-  const panel = document.getElementById('runList');
-  if(!panel) return;
-  const head = panel.closest('.panel').querySelector('header');
-  if (LIVE && !(LIVE.running||[]).length) {
-    panel.innerHTML = '<div class="empty"><div class="big" aria-hidden="true">✓</div>'
-      + 'אין עיבוד פעיל. כל השיחות שנוספו הושלמו.</div>';
-    if(head){ head.querySelector('.sub').textContent='';
-              head.querySelector('.right').innerHTML='<span class="badge quiet">לא פעיל</span>'; }
-    return;
-  }
-  panel.innerHTML = rows.map(r=>`<div class="runrow">
-  <div><span class="mono">${esc(r.id)}</span></div>
-  <div class="stages">${STAGES.map((s,i)=>{
-     const cls = i<r.done ? 'done' : (i===r.done && r.done>0 && r.done<STAGES.length ? 'active' : '');
-     return `<div class="stage ${cls}" title="${esc(s)}"></div>`;}).join('')}</div>
-  <div class="st">${esc(r.stage)}</div>
-</div>`).join('');
+    <td><div class="sc-cell"><span class="n">${n1(c.total)}</span><span class="bar" aria-hidden="true"><i style="width:${w}%"></i></span></div></td>
+    <td>${gateBadge(c.gate)}</td><td>${statusBadge(c.status)}</td>
+    <td><span class="ltr">${esc(c.date)}</span></td></tr>`;
 }
 
-function renderAll(){
-/* ---------- render: dimension bars ---------- */
-document.getElementById('dimChart').innerHTML = DIMS.map(d=>{
-  const pct = ((d.avg-1)/4*100).toFixed(1); // matches the scoring formula
-  const low = d.avg < 3.2;
-  return `<div class="dimrow">
-    <div class="name">${esc(d.he)}${d.gate?'<span class="gatemark" title="ממד שער">⚑ שער</span>':''}</div>
-    <div class="track"><div class="fill${low?' low':''}" style="width:${pct}%"></div></div>
-    <div class="v num">${d.avg.toFixed(2)}</div>
-  </div>`;
-}).join('');
-
-/* ---------- render: banker bars with a group-median marker ---------- */
-document.getElementById('bankerChart').innerHTML = BANKERS.map(b=>{
-  const pct=(b.mean/100*100).toFixed(1), med=(GROUP_MEDIAN).toFixed(1);
-  return `<div class="dimrow">
-    <div class="name"><span class="ltr">${esc(b.id)}</span> · <span class="num">${b.n}</span> שיחות</div>
-    <div class="track"><div class="fill" style="width:${pct}%"></div>
-      <div class="median" style="inset-inline-start:${med}%" title="חציון קבוצתי"></div></div>
-    <div class="v num">${b.mean.toFixed(1)}</div>
-  </div>`;
-}).join('');
-
-/* ---------- render: tables ---------- */
-document.querySelector('#recentTable tbody').innerHTML = CALLS.slice(0,4).map(c=>rowHTML(c,false)).join('');
-document.querySelector('#allTable tbody').innerHTML  = CALLS.map(c=>rowHTML(c,true)).join('');
-
-/* ---------- render: live run ---------- */
-
-  renderRun();
+function renderProvenance(){
+  const a=STATE.audit||{}, s=STATE.summary||{};
+  const el=document.getElementById('provenance');
+  if(!a.lastRun){ el.innerHTML='<div class="row"><b>טרם בוצעה הרצה</b></div>'; return; }
+  el.innerHTML=[
+    ['מודל',`<span class="mono ltr">${esc(a.model)}</span>`],
+    ['מנוע',`<span class="mono">${esc(a.engine)}</span>`],
+    ['מחוון',`<span class="mono ltr">${esc(a.promptVersion)}·${esc((a.promptSha||'').slice(0,6))}</span>`],
+    ['שיחות',`<span class="num">${esc(s.nCalls)}</span>`],
+    ['עודכן',`<span class="ltr">${esc((a.lastRun||'').slice(0,10))}</span>`],
+  ].map(([k,v])=>`<div class="row"><b>${k}</b><span>${v}</span></div>`).join('');
 }
-renderAll();
 
-/* ---------- navigation ---------- */
-const views = document.querySelectorAll('.view');
-function go(name){
-  views.forEach(v=>v.hidden = (v.id !== 'view-'+name));
-  document.querySelectorAll('.navlink').forEach(b=>{
-    if(b.dataset.view===name) b.setAttribute('aria-current','page');
-    else b.removeAttribute('aria-current');
-  });
-  window.scrollTo({top:0, behavior:'instant'});
+function renderDims(el, dims, scores){
+  el.innerHTML='<div class="rows">'+dims.map(d=>{
+    const val=scores?scores[d.id]:d.avg;
+    if(val==null) return `<div class="mrow"><div class="nm">${esc(d.he)}${d.gate?'<span class="gt">⚑ שער</span>':''}</div><div class="track"></div><div class="val mut">—</div></div>`;
+    const pct=Math.max(0,(val-1)/4*100), lim=d.gate&&val<=2;
+    return `<div class="mrow" role="img" aria-label="${esc(d.he)}: ${(+val).toFixed(scores?0:1)} מתוך 5">
+      <div class="nm">${esc(d.he)}${d.gate?'<span class="gt">⚑ שער</span>':''}</div>
+      <div class="track"><div class="fill${lim?' warn':''}" style="width:${pct}%"></div></div>
+      <div class="val">${(+val).toFixed(scores?0:1)}</div></div>`;
+  }).join('')+'</div>';
 }
-document.querySelectorAll('.navlink').forEach(b=>b.addEventListener('click',()=>go(b.dataset.view)));
-document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>go(b.dataset.goto)));
 
-/* ---------- detail drawer ---------- */
+function renderOverview(){
+  const s=STATE.summary||{}, calls=STATE.calls||[];
+  document.getElementById('ovSub').textContent=`הממצאים המרכזיים מ-${s.nCalls} השיחות שנותחו.`;
+  const att=document.getElementById('ovAttn');
+  att.innerHTML = s.needsReview>0 ? `<div class="attn"><span class="g" aria-hidden="true">▲</span>
+    <span class="t"><b>${s.needsReview} שיחות דורשות בדיקה אנושית</b> — חרגו בממד שער או סומנו לבדיקה. כדאי לפתוח אותן קודם.</span>
+    <span class="a"><button class="btn primary sm" data-goto="calls">מעבר לשיחות</button></span></div>` : '';
+  document.getElementById('kReview').textContent=s.needsReview;
+  document.getElementById('kReviewFoot').innerHTML=s.needsReview>0?'<span class="badge warn">ממתינות</span>':'<span class="badge ok">אין ממצאים</span>';
+  document.getElementById('kMean').textContent=n1(s.meanTotal);
+  document.getElementById('kMedian').textContent=n1(STATE.groupMedian);
+  document.getElementById('kCalls').textContent=s.nCalls;
+
+  const defs=[[80,101,'גבוה'],[60,80,'בינוני'],[40,60,'גבולי'],[0,40,'חלש']];
+  const counts=defs.map(([lo,hi])=>calls.filter(c=>c.total>=lo&&c.total<hi).length);
+  const gated=calls.filter(c=>c.gate).length, max=Math.max(1,...counts), med=STATE.groupMedian||0;
+  document.getElementById('distChart').innerHTML='<div class="rows">'+defs.map(([lo,hi,he],i)=>`
+    <div class="mrow" role="img" aria-label="${he} ${lo}–${hi-1}: ${counts[i]} שיחות">
+      <div class="nm">${he}<span class="rng mono ltr">${lo}–${hi-1}</span></div>
+      <div class="track"><div class="fill" style="width:${counts[i]/max*100}%"></div><div class="med" style="position:absolute;top:-3px;bottom:-3px;width:1.5px;background:var(--ink-3);inset-inline-start:${Math.min(100,med)}%"></div></div>
+      <div class="cnt"><b>${counts[i]}</b>${(lo===40&&gated)?`<span class="g">${gated} חריגות שער</span>`:''}</div></div>`).join('')+'</div>'
+    +`<table class="sr"><caption>התפלגות</caption>${defs.map(([,,he],i)=>`<tr><th>${he}</th><td>${counts[i]}</td></tr>`).join('')}</table>`;
+
+  renderDims(document.getElementById('dimChart'), STATE.dims||[], null);
+  document.querySelector('#recentTable tbody').innerHTML=calls.slice(0,6).map(rowHTML).join('')||'<tr><td colspan="6" class="tempty">אין שיחות.</td></tr>';
+}
+
+function renderCalls(){
+  let rows=(STATE.calls||[]).slice();
+  if(filter==='review') rows=rows.filter(c=>c.gate||c.status==='needs_human_review');
+  else if(filter==='gate') rows=rows.filter(c=>c.gate);
+  rows.sort(sortBy==='date'?(a,b)=>(b.date||'').localeCompare(a.date||''):(a,b)=>b.total-a.total);
+  document.querySelector('#allTable tbody').innerHTML=rows.map(rowHTML).join('')||'<tr><td colspan="6" class="tempty">אין שיחות התואמות לסינון.</td></tr>';
+  document.getElementById('callsCount').textContent=`${rows.length} מתוך ${(STATE.calls||[]).length}`;
+  const run=STATE.running||[], stages=STATE.stages||[], panel=document.getElementById('runPanel');
+  if(run.length){ panel.hidden=false; document.getElementById('runSub').textContent=`${run.length} בעיבוד`;
+    document.getElementById('runList').innerHTML=run.map(r=>`<div class="runrow"><span class="mono">${esc(r.id)}</span>
+      <div class="pips">${stages.map((st,i)=>`<i class="${i<r.done?'on':(i===r.done?'now':'')}" title="${esc(st)}"></i>`).join('')}</div>
+      <span style="font-size:12px;color:var(--ink-3)">${esc(r.stage)}</span></div>`).join('');
+  } else panel.hidden=true;
+}
+
+function renderBankers(){
+  const med=STATE.groupMedian||0;
+  document.getElementById('bankerChart').innerHTML=(STATE.bankers||[]).map(b=>`
+    <div class="dotrow" role="img" aria-label="${esc(b.id)}: ממוצע ${n1(b.mean)}, ${b.n} שיחות, חציון ${n1(med)}">
+      <div class="nm"><span class="ltr">${esc(b.id)}</span><span class="n2">${b.n} שיחות${b.n===1?' · יחיד':''}</span></div>
+      <div class="axis"><div class="base"></div><div class="med" style="inset-inline-start:${Math.min(100,med)}%"></div><div class="pt" style="inset-inline-start:${Math.min(100,b.mean)}%"></div></div>
+      <div class="sc">${n1(b.mean)}</div></div>`).join('')||'<div class="tempty">אין נתונים.</div>';
+}
+
+function renderCalibration(){
+  const c=STATE.calibration||{}, thr=c.threshold!=null?c.threshold:0.70, minC=c.minCalls!=null?c.minCalls:20;
+  document.getElementById('calQwk').textContent=c.qwk!=null?Number(c.qwk).toFixed(2):'—';
+  document.getElementById('calThresh').textContent=`הסף ${thr.toFixed(2)}`;
+  document.getElementById('calN').textContent=c.nCalls!=null?c.nCalls:'—';
+  document.getElementById('calDouble').textContent=c.nDouble!=null?c.nDouble:'—';
+  const flagged=c.flagged||[];
+  document.getElementById('calFlagged').textContent=flagged.length;
+  document.getElementById('calFlaggedFoot').innerHTML=flagged.length?`<span class="badge warn">${flagged.map(id=>esc(byId[id]||id)).join(', ')}</span>`:'<span class="badge ok">אף ממד לא ירד</span>';
+  let g,word,txt;
+  if(c.pass&&!flagged.length){ g='✓'; word='ok'; txt='השופט האוטומטי תואם להערכה האנושית ברמה שמאפשרת שימוש, ואף ממד לא סומן כדורש בקרה.'; }
+  else if(c.pass){ g='!'; word='warn'; txt=`ההתאמה הכוללת עוברת את הסף, אך ${flagged.length===1?'ממד ירד':'ממדים ירדו'} מתחת לסף: ${flagged.map(id=>byId[id]||id).join(', ')}. אין לפרוס ${flagged.length===1?'אותו':'אותם'} ללא בקרה אנושית.`; }
+  else if(c.qwk!=null&&c.qwk>=thr){ g='!'; word='warn'; txt=`ההתאמה טובה (QWK ${Number(c.qwk).toFixed(2)} ≥ ${thr.toFixed(2)}), אך מספר השיחות בכיול (${c.nCalls}) נמוך מהמינימום הנדרש לאישור (${minC}). נדרשות עוד שיחות מדורגות-כפול.`; }
+  else { g='✕'; word='bad'; txt='ההתאמה אינה עוברת את הסף. נדרשת בדיקת המחוון או ההערכות האנושיות לפני פריסה.'; }
+  const q=c.qwk!=null?Math.max(0,Math.min(1,c.qwk)):0;
+  document.getElementById('calHero').innerHTML=`<div class="vg ${word}" aria-hidden="true">${g}</div>
+    <div style="flex:1"><div class="vt">${esc(txt)}</div>
+      <div class="gauge"><div class="track"><div class="fill" style="width:${q*100}%"></div><div class="thr" style="inset-inline-start:${thr*100}%"></div></div>
+        <div class="scale"><span class="ltr">0.0</span><span>סף <span class="ltr">${thr.toFixed(2)}</span></span><span class="ltr">1.0</span></div></div></div>`;
+}
+
+/* drawer */
 const drawer=document.getElementById('drawer'), scrim=document.getElementById('scrim');
 function openCall(id){
-  const c = CALLS.find(x=>x.id===id); if(!c) return;
-  const live = (c.scores && Object.keys(c.scores).length)
-    ? {scores:c.scores,
-       evidence:(c.evidence||[]).map(e=>({t:e.t,sp:e.sp==='banker'?'בנקאי':'לקוח',q:e.q})),
-       rec: DETAIL.CALL003.rec}
-    : null;
-  const d = live || DETAIL[id] || DETAIL.CALL003;
-  document.getElementById('drawerTitle').innerHTML = `שיחה <span class="mono">${esc(c.id)}</span>`;
-  document.getElementById('drawerBody').innerHTML = `
-    <dl class="kv">
+  const c=(STATE.calls||[]).find(x=>x.id===id); if(!c) return;
+  const b=band(c.total), gn=(c.failed_gates&&c.failed_gates[0])?(byId[c.failed_gates[0]]||c.failed_gates[0]):null;
+  document.getElementById('drawerTitle').innerHTML=`שיחה <span class="mono">${esc(c.id)}</span>`;
+  document.getElementById('drawerBody').innerHTML=`
+    <div class="dsec"><dl class="kv">
       <dt>בנקאי</dt><dd><span class="ltr">${esc(c.banker)}</span></dd>
       <dt>תאריך</dt><dd><span class="ltr">${esc(c.date)}</span></dd>
-      <dt>ציון כולל</dt><dd><span class="num">${c.total.toFixed(1)}</span> / 100</dd>
-      <dt>שער</dt><dd>${gateBadge(c.gate)}</dd>
-    </dl>
-    ${c.gate?`<div class="quote" style="border-inline-start-color:var(--warn); background:var(--warn-tint)">
-      <div class="meta">מדוע הציון הוגבל</div>
-      ממד השער "זיהוי ואימות לקוח" קיבל ציון 2, ולכן הציון הכולל הוגבל ל-59.</div>`:''}
-    ${c.summary?`<p style="font-size:13.5px; color:var(--ink-2); margin:0 0 var(--s4)">${esc(c.summary)}</p>`:''}
-    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">ציונים לפי ממד</h4>
-    ${Object.entries(d.scores).map(([k,v])=>`<div class="dimline">
-      <span class="n">${esc(byId[k])}</span>
-      <span class="s" style="color:${v<=2?'var(--bad)':v>=4?'var(--ok)':'var(--ink)'}">${v}/5</span>
-    </div>`).join('')}
-    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">ציטוטי ראיה</h4>
-    ${d.evidence.map(e=>`<div class="quote">
-      <div class="meta"><span class="ltr">[${esc(e.t)}]</span> ${esc(e.sp)}</div>${esc(e.q)}</div>`).join('')}
-    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">המלצת אימון</h4>
-    <div class="quote" style="border-inline-start-color:var(--ok); background:var(--ok-tint)">${esc(d.rec)}</div>
-    <h4 style="margin:var(--s5) 0 var(--s2); font-size:13px; color:var(--ink-3); font-weight:500">תמליל השיחה <span style="font-weight:400">(לאחר הסרת מזהים; קטעים מסומנים צוטטו כראיה)</span></h4>
-    <div class="transcript" id="transcriptBox"><div class="empty">טוען תמליל…</div></div>
-  `;
+      <dt>מצב</dt><dd>${statusBadge(c.status)}</dd><dt>שער</dt><dd>${gateBadge(c.gate)}</dd></dl>
+      <div class="total"><span class="b num">${n1(c.total)}<small> / 100</small></span><span class="band">${b.he}</span></div>
+      ${c.gate?`<div class="callout"><b>מדוע הוגבל הציון</b>${gn?`ממד השער "${esc(gn)}" קיבל ציון נמוך, לכן הציון הכולל הוגבל ל-59.`:'אחד מממדי השער קיבל 2 ומטה, לכן הציון הוגבל ל-59.'}</div>`:''}
+      ${c.summary?`<p class="summary">${esc(c.summary)}</p>`:''}</div>
+    <div class="dsec"><h4>ציונים לפי ממד</h4><div id="drawerDims"></div></div>
+    ${(c.evidence&&c.evidence.length)?`<div class="dsec"><h4>ציטוטי ראיה</h4>${c.evidence.map(e=>`<div class="quote"><div class="m"><span class="ltr">[${esc(e.t)}]</span> ${esc(spk(e.sp))}</div>${esc(e.q)}</div>`).join('')}</div>`:''}
+    <div class="dsec"><h4>תמליל השיחה · לאחר הסרת מזהים · קטעים מודגשים צוטטו כראיה</h4><div class="trn" id="transcriptBox"><div class="tmsg">טוען תמליל…</div></div></div>`;
+  const el=document.getElementById('drawerDims');
+  el.innerHTML=(STATE.dims||[]).map(d=>{ const v=(c.scores||{})[d.id];
+    if(v==null) return `<div class="dline"><div class="dn">${esc(d.he)}${d.gate?'<span class="gt">⚑</span>':''}</div><div class="track"></div><div class="sc" style="color:var(--ink-3);font-weight:400">—</div></div>`;
+    const lim=d.gate&&v<=2;
+    return `<div class="dline"><div class="dn">${esc(d.he)}${d.gate?'<span class="gt">⚑</span>':''}</div><div class="track"><div class="fill${lim?' warn':''}" style="width:${(v-1)/4*100}%"></div></div><div class="sc">${v}</div></div>`;
+  }).join('');
   loadTranscript(c.id);
-  const link = document.getElementById('openReport');
-  if (link) {
-    // Only offer the report when a server is actually there to serve it.
-    if (window.__CALLQA_TOKEN__ && c.report) {
-      link.href = '/' + c.report + '?t=' + encodeURIComponent(window.__CALLQA_TOKEN__);
-      link.hidden = false;
-    } else { link.hidden = true; }
-  }
-  drawer.hidden=false; scrim.hidden=false;
-  document.getElementById('closeDrawer').focus();
-}
-function mmssOf(sec){
-  const s = Math.max(0, Math.floor(Number(sec) || 0));
-  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
-}
-/* The full redacted transcript, fetched only when the drawer opens: keeping
-   it out of /api/state is what keeps that endpoint pollable at a hundred
-   calls. Only redacted text ever arrives here - the server has no route to
-   the raw transcripts - and the mask tokens (<ת"ז:████>) are shown on
-   purpose: seeing WHAT was removed is the point for a reviewer. */
-async function loadTranscript(id){
-  const box = document.getElementById('transcriptBox');
-  if(!box) return;
-  const token = window.__CALLQA_TOKEN__;
-  if(!token){
-    box.innerHTML = '<div class="empty">התמליל זמין רק כשהקונסולה מחוברת לשרת.</div>';
-    return;
-  }
-  try{
-    const r = await fetch('/api/transcript/' + encodeURIComponent(id)
-                          + '?t=' + encodeURIComponent(token));
-    if(!r.ok){ box.innerHTML = '<div class="empty">אין תמליל שמור לשיחה זו.</div>'; return; }
-    const d = await r.json();
-    const quotes = (d.evidence || []).filter(e => e.quote);
-    const rows = (d.turns || []).map(t => {
-      let html = esc(t.text);
-      for(const e of quotes){
-        if(e.speaker && t.speaker && e.speaker !== t.speaker) continue;
-        const q = esc(e.quote);
-        if(q && html.includes(q)){
-          html = html.split(q).join(
-            '<mark class="ev" title="צוטט כראיה: ' + esc(byId[e.dim] || e.dim) + '">' + q + '</mark>');
-        }
-      }
-      const who = t.speaker === 'banker' ? 'בנקאי' : 'לקוח';
-      return `<div class="turn ${t.speaker === 'banker' ? 'b' : 'c'}">
-        <div class="tmeta"><span class="who">${who}</span><span class="ltr mono">[${mmssOf(t.start)}]</span></div>
-        <div>${html}</div></div>`;
-    });
-    box.innerHTML = rows.join('') || '<div class="empty">התמליל ריק.</div>';
-    if(d.enabled === false){
-      box.innerHTML = '<div class="quote" style="border-inline-start-color:var(--warn); background:var(--warn-tint)">'
-        + 'הסרת המזהים הייתה כבויה בהרצה זו; התמליל אינו מוצג.</div>';
-    }
-  }catch(err){
-    box.innerHTML = '<div class="empty">שגיאה בטעינת התמליל.</div>';
-  }
+  const link=document.getElementById('openReport');
+  if(TOKEN&&c.report){ link.href='/'+c.report+'?t='+encodeURIComponent(TOKEN); link.hidden=false; } else link.hidden=true;
+  drawer.hidden=false; scrim.hidden=false; document.getElementById('closeDrawer').focus();
 }
 function closeDrawer(){ drawer.hidden=true; scrim.hidden=true; }
-document.addEventListener('click',e=>{
-  const tr = e.target.closest('tr[data-call]'); if(tr) openCall(tr.dataset.call);
-});
-document.addEventListener('keydown',e=>{
-  if(e.key==='Escape') closeDrawer();
-  const tr=e.target.closest && e.target.closest('tr[data-call]');
-  if(tr && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); openCall(tr.dataset.call); }
-});
-document.getElementById('closeDrawer').addEventListener('click',closeDrawer);
-scrim.addEventListener('click',closeDrawer);
-
-/* ---------- GPU stop (demo of the confirm-before-spend pattern) ---------- */
-document.getElementById('stopGpu').addEventListener('click',function(){
-  const pip=document.getElementById('gpuPip');
-  if(this.textContent.trim()==='הפסקת המכונה'){
-    pip.className='pip off';
-    document.getElementById('gpuText').textContent='מושבתת · לא מחויבת';
-    this.textContent='הפעלת המכונה'; this.className='btn btn-primary btn-sm';
-    document.querySelectorAll('.statestrip .pip').forEach((p,i)=>{ if(i>0) p.className='pip off'; });
-    document.querySelectorAll('.statecell .val').forEach((v,i)=>{ if(i>0) v.innerHTML='לא זמין — המכונה מושבתת'; });
-  } else {
-    pip.className='pip ok live';
-    document.getElementById('gpuText').innerHTML='פועלת · <span class="ltr">RTX 4090</span>';
-    this.textContent='הפסקת המכונה'; this.className='btn btn-danger btn-sm';
-    const labels=['זמין <span class="badge quiet mono">ivrit-ai</span>','זמין <span class="badge quiet mono">dictalm2.0</span>'];
-    document.querySelectorAll('.statestrip .pip').forEach((p,i)=>{ if(i>0) p.className='pip ok'; });
-    document.querySelectorAll('.statecell .val').forEach((v,i)=>{ if(i>0) v.innerHTML=labels[i-1]; });
-  }
-});
-
-/* ---------- intake drop affordance ---------- */
-const dz = document.getElementById('dropzone');
-if (dz) {
-  ['dragenter','dragover'].forEach(ev =>
-    dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('hot'); }));
-  ['dragleave','drop'].forEach(ev =>
-    dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('hot'); }));
-  document.getElementById('pickFiles').addEventListener('click', () => dz.classList.add('hot'));
+async function loadTranscript(id){
+  const box=document.getElementById('transcriptBox'); if(!box) return;
+  if(!TOKEN){ box.innerHTML='<div class="tmsg">התמליל זמין רק מול השרת המקומי.</div>'; return; }
+  try{
+    const r=await fetch('/api/transcript/'+encodeURIComponent(id)+'?t='+encodeURIComponent(TOKEN));
+    if(!r.ok){ box.innerHTML='<div class="tmsg">אין תמליל שמור לשיחה זו.</div>'; return; }
+    const d=await r.json();
+    if(d.enabled===false){ box.innerHTML='<div class="callout">הסרת המזהים הייתה כבויה בהרצה זו; התמליל אינו מוצג.</div>'; return; }
+    const qs=(d.evidence||[]).filter(e=>e.quote);
+    box.innerHTML=(d.turns||[]).map(t=>{ let h=esc(t.text);
+      for(const e of qs){ if(e.speaker&&t.speaker&&e.speaker!==t.speaker) continue; const q=esc(e.quote);
+        if(q&&h.includes(q)) h=h.split(q).join('<mark class="ev" title="צוטט כראיה: '+esc(byId[e.dim]||e.dim)+'">'+q+'</mark>'); }
+      return `<div class="turn ${t.speaker==='banker'?'b':'c'}"><div class="tm"><span class="who">${spk(t.speaker)}</span><span class="ltr mono">[${mmss(t.start)}]</span></div><div class="bd">${h}</div></div>`;
+    }).join('')||'<div class="tmsg">התמליל ריק.</div>';
+    if(d.truncated) box.insertAdjacentHTML('beforeend','<div class="tmsg">התמליל ארוך במיוחד והוצג באופן חלקי.</div>');
+  }catch(e){ box.innerHTML='<div class="tmsg">שגיאה בטעינת התמליל.</div>'; }
 }
 
-/* ---------- boot: prefer live pipeline data ---------- */
-loadLive().then(ok => {
-  if(!ok) return;
-  if(LIVE && LIVE.groupMedian) GROUP_MEDIAN = LIVE.groupMedian;
-  renderAll();   // this also re-renders the run panel
-  const s = LIVE.summary || {};
-  const head = document.querySelector('#view-overview .viewhead p');
-  if(head && s.nCalls) head.textContent =
-    `מצב העיבוד והממצאים המרכזיים מ-${s.nCalls} השיחות שנותחו.`;
-  document.querySelectorAll('.navlink[data-view="calls"] .count')
-    .forEach(e => e.textContent = String((LIVE.calls||[]).length));
-  document.querySelectorAll('.navlink[data-view="bankers"] .count')
-    .forEach(e => e.textContent = String((LIVE.bankers||[]).length));
-
-  const set = (id, v) => { const e=document.getElementById(id); if(e && v!=null) e.textContent=v; };
-  set('tileCalls', s.nCalls); set('tileMean', s.meanTotal);
-  set('tileMedian', LIVE.groupMedian); set('tileReview', s.needsReview);
-
-  const cal = LIVE.calibration || {};
-  set('calQwk', cal.qwk != null ? Number(cal.qwk).toFixed(2) : '—');
-  set('calN', cal.nCalls); set('calDouble', cal.nDouble);
-  set('calFlagged', (cal.flagged || []).length);
-  const verdict = document.getElementById('calVerdict');
-  if (verdict) {
-    const flagged = (cal.flagged || []).map(id => byId[id] || id);
-    verdict.textContent = cal.pass
-      ? (flagged.length
-          ? `ההתאמה הכוללת עוברת את הסף, אך ${flagged.length===1?'ממד אחד ירד':'מספר ממדים ירדו'} מתחת ל-0.60: ${flagged.join(', ')}. אין לפרוס ${flagged.length===1?'אותו':'אותם'} ללא בקרה אנושית.`
-          : 'השופט האוטומטי תואם להערכה האנושית ברמה שמאפשרת שימוש, ואף ממד לא סומן כדורש בקרה אנושית.')
-      : 'ההתאמה הכוללת אינה עוברת את הסף. נדרשת בדיקה של המחוון או של ההערכות האנושיות לפני פריסה.';
-  }
-  // the review tile must reflect gate failures AND calibration flags honestly
-  const reviewFoot = document.querySelector('#tileReview')?.parentElement?.querySelector('.foot');
-  if (reviewFoot && s.needsReview === 0) reviewFoot.innerHTML = '<span class="badge quiet">אין ממצאים</span>';
+/* nav */
+function go(name){
+  document.querySelectorAll('.view').forEach(v=>v.hidden=(v.id!=='view-'+name));
+  document.querySelectorAll('.navlink').forEach(b=>b.dataset.view===name?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current'));
+  document.querySelector('.content').scrollTo?.(0,0); window.scrollTo(0,0);
+}
+document.querySelectorAll('.navlink').forEach(b=>b.addEventListener('click',()=>go(b.dataset.view)));
+document.addEventListener('click',e=>{
+  const g=e.target.closest('[data-goto]'); if(g){ go(g.dataset.goto); return; }
+  const tr=e.target.closest('tr[data-call]'); if(tr) openCall(tr.dataset.call);
 });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeDrawer();
+  const tr=e.target.closest&&e.target.closest('tr[data-call]'); if(tr&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); openCall(tr.dataset.call); } });
+document.getElementById('closeDrawer').addEventListener('click',closeDrawer);
+scrim.addEventListener('click',closeDrawer);
+document.getElementById('filterSeg').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; filter=b.dataset.filter;
+  document.querySelectorAll('#filterSeg button').forEach(x=>x.setAttribute('aria-pressed',String(x===b))); renderCalls(); });
+document.getElementById('sortSeg').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; sortBy=b.dataset.sort;
+  document.querySelectorAll('#sortSeg button').forEach(x=>x.setAttribute('aria-pressed',String(x===b))); renderCalls(); });
+document.getElementById('themeBtn').addEventListener('click',()=>{ const cur=document.documentElement.getAttribute('data-theme');
+  const dark=cur?cur==='dark':matchMedia('(prefers-color-scheme: dark)').matches; document.documentElement.setAttribute('data-theme',dark?'light':'dark'); });
 
-/* ---------- theme toggle ---------- */
-document.getElementById('themeBtn').addEventListener('click',()=>{
-  const cur=document.documentElement.getAttribute('data-theme');
-  const dark = cur ? cur==='dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-  document.documentElement.setAttribute('data-theme', dark?'light':'dark');
-});
+/* boot */
+function showEmpty(t,x){ document.getElementById('emptyState').hidden=false; document.querySelectorAll('.view').forEach(v=>v.hidden=true);
+  document.getElementById('emptyTitle').textContent=t; document.getElementById('emptyText').innerHTML=x; }
+function renderAll(){
+  document.getElementById('emptyState').hidden=true;
+  byId=Object.fromEntries((STATE.dims||[]).map(d=>[d.id,d.he]));
+  renderProvenance();
+  document.querySelector('[data-count="calls"]').textContent=(STATE.calls||[]).length;
+  document.querySelector('[data-count="bankers"]').textContent=(STATE.bankers||[]).length;
+  renderOverview(); renderCalls(); renderBankers(); renderCalibration(); go('overview');
+}
+async function boot(){
+  if(!TOKEN){ showEmpty('פועל רק מול השרת המקומי','הפעילו את השרת עם <code>python dashboard/server.py</code> ופתחו את הקישור שהוא מדפיס.'); return; }
+  try{ const r=await fetch('/api/state?t='+encodeURIComponent(TOKEN)); if(!r.ok) throw 0; STATE=await r.json(); }
+  catch(e){ showEmpty('לא ניתן לטעון את נתוני הצנרת','ודאו שהשרת פועל ונסו לרענן.'); return; }
+  if(!STATE.calls||!STATE.calls.length){ renderProvenance(); showEmpty('עדיין לא נותחו שיחות','כשהצנרת תסיים לעבד שיחות, הן יופיעו כאן עם הציונים, הממדים והתמלילים.'); return; }
+  renderAll();
+}
+boot();
 </script>
+</body>
+</html>

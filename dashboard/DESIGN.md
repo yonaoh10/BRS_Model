@@ -1,175 +1,90 @@
-# Operator dashboard — design decisions
+# Reviewer dashboard — design decisions
 
-**Status: working, under review.** `server.py` serves `prototype.html` with
-live data read from `data/output/`. Opened as a plain file the same page falls
-back to embedded sample figures, so it doubles as a standalone prototype.
+**Status: rebuilt 2026-09-17.** `server.py` serves `prototype.html` (one
+self-contained HTML file) with live data read from `data/output/`. Every pixel
+maps to real pipeline output; there is **no embedded sample data**, so opened as
+a bare file the page shows a "connect to the server" empty state rather than
+faking figures.
 
-> **Scope note.** The original build spec puts a web application out of scope
-> ("static HTML reports only", §3). This dashboard is built anyway because the
-> operator asked for one, but it lives entirely in `dashboard/` so the bank
-> deliverable can stay CLI + static HTML, exactly like the `cloud/` option.
-> Deleting this directory removes it.
+> **Scope.** The bank deliverable stays CLI + static HTML (spec §3). This
+> dashboard is an add-on that lives entirely in `dashboard/`; `rm -rf dashboard/
+> tests/test_dashboard_server.py` removes it with nothing else changed.
 
-## The one rule: orange is brand chrome, never status
+## Audience: the bank quality reviewer
 
-This is measured, not preference. Using the data-viz palette validator:
+An earlier version tried to be both a cloud **operator** console (a pinned
+GPU/cost "state strip", model-availability pills) and a **reviewer** console.
+The operator half could never be truthful — the dashboard is offline (strict
+CSP, reads only `data/output/`) and cannot know the real pod/cost/model state —
+so it was hardcoded demo values, and the page read as stitched-together. It is
+now purely the reviewer's tool: which calls need attention, the score
+distribution, per-call detail with the redacted transcript, banker comparison,
+and judge calibration. The cloud lifecycle belongs to `cloud/runpod_cli.py`, not
+here. Provenance a reviewer *does* need — model, engine, prompt version, run
+date — lives quietly in the sidebar footer, read from the real `audit{}`.
 
-| pair | separation | verdict |
-|---|---|---|
-| brand `#ea580c` vs warning `#ca8a04` | ΔE **2.9** (deuteranopia) | indistinguishable |
-| brand `#ea580c` vs danger `#dc2626` | ΔE **8.7** (normal vision) | below the 15 floor |
+## Visual identity: restraint, not decoration
 
-So orange appears only in the masthead, the primary button, the active nav
-item, the focus ring, and data bars. Every status carries an **icon plus a
-Hebrew word**, never colour alone.
+A calm instrument aesthetic (the Linear/Stripe/Vercel tradition), earned by
+rigor rather than ornament:
 
-## Contrast: computed for every token
+- **App shell.** A right-anchored sidebar (RTL) holds the brand, navigation and
+  provenance, and anchors the layout so content fills the width in composed
+  grids instead of floating in a narrow centred column. This is what fixes the
+  "content in a sea of empty space" failure of the first attempt.
+- **Colour is rare.** The canvas is near-monochrome cool slate. **Data bars are
+  a muted slate (`--bar`), not colour** — magnitude reads without noise. The
+  indigo accent (`--brand #4f46e5`) is reserved for interaction only: active
+  nav, focus ring, links, the one primary button per screen. Status colour
+  (green/amber/red) appears only in small badges, always with an icon and a
+  Hebrew word, never colour alone.
+- **Data viz, refined.** Thin (5–6px) bars; the banker comparison is a
+  **dot-plot** on a shared 0–100 axis with the group-median line, not fat bars;
+  the score distribution is a compact histogram with a screen-reader table
+  mirror; calibration is a hero verdict with a QWK-vs-threshold gauge.
+- **Type & space.** System fonts only (the CSP blocks web fonts — the old page's
+  Google-Fonts link silently failed when served). Tabular-lining numerals on
+  every figure so columns align; mono for ids/timestamps/hashes. An 8px spatial
+  grid; hairline borders; a single soft shadow reserved for the floating drawer.
 
-The attractive oranges fail WCAG, which is the trap this design avoids:
+## Accessibility is enforced, not asserted
 
-| step | on white | white text on it |
-|---|---|---|
-| `#f97316` | 2.80:1 | fails |
-| `#ea580c` | 3.56:1 | **fails** — the classic bright-orange button is inaccessible |
-| `#c2410c` | 5.18:1 | passes |
-| `#9a3412` | 7.31:1 | passes |
+`python dashboard/qa_dashboard.py` renders the **live** page across light+dark ×
+desktop(1280×900)+phone(390×844) plus the open detail drawer, and fails on:
+text contrast below WCAG AA computed against the *actually painted* background;
+horizontal overflow at phone width; tap targets under 24px; Latin/digit runs in
+RTL without bidi isolation; focus states with no opaque (≥0.95α, ≥3:1) ring;
+any JS error; and any view left under 40 chars. It must stay at **0 findings**.
 
-Hence: primary button `#c2410c`, headings `#9a3412`, accents/borders `#ea580c`
-(UI-only, ≥3:1).
+It renders the live server (not the file) because the redesign ships no fallback
+data — a file with no server correctly shows only the empty state, which has no
+table or chart to audit. It caught the two real defects in this rebuild: a
+muted-ink colour (`--ink-3`) at 3.1:1 that had to darken to pass AA on the
+sidebar's off-white fill, and an un-isolated `0.70` in the calibration gauge
+label. The retired **cost-meter "never scrolls away" check** went with the
+state strip it guarded.
 
-Status trio validated **as a set** (lightness band, chroma floor, CVD
-separation, normal-vision floor all pass): success `#047857`, warning
-`#ca8a04`, danger `#dc2626`. The amber takes **dark** ink (`#451a03`, 5.10:1)
-because white on amber is 2.94:1. Darkening the amber instead was tried and
-rejected: it collapses colourblind separation from red.
+## The scoring bars map (score-1)/4
 
-Muted ink is `#6f6862`, not the prettier `#78716c` — the rendered audit caught
-the latter at 4.36:1 against the sunken fill. Tokens must be checked against
-the tightest surface they land on, not just the card.
+A 1 reads empty and a 5 reads full, matching the pipeline's own 1→0 / 3→50 /
+5→100 formula; mapping score/5 compressed every real difference into the top of
+the track. Gate dimensions are marked `⚑`; a gate dimension at ≤2 turns its bar
+amber and says "מגביל" — colour plus words, never colour alone.
 
-## Layout
+## Honest states over faked ones
 
-RTL. A masthead and a **state strip both pinned to the top**: the strip carries
-the GPU status, elapsed time and money spent, because the real risk is not the
-hourly rate but forgetting the machine is running. A regression test asserts
-the cost meter never leaves the viewport.
-
-Navigation is a right-hand rail with six destinations. Overview holds a single
-alert, three tiles, one chart and a table — deliberately no second chart, no
-sparklines, no metric soup.
-
-The dimension bars map `(score-1)/4`, matching the pipeline's own scoring
-formula, so a 1 reads empty and a 5 reads full. Mapping `score/5` compressed
-every real difference into the top half of the track.
-
-## Typography
-
-Heebo for the interface (a Hebrew face with a real weight range) and IBM Plex
-Mono for call ids, timestamps and prompt hashes — the audit trail is this
-system's instrument, so it gets an instrument face. Hebrew runs at 1.65 line
-height: its letters have no ascenders to open up the line, so Latin leading
-reads as a wall.
-
-Latin and numeric runs inside Hebrew are wrapped in `.ltr` / `.mono`
-(`unicode-bidi: isolate`) or the bidi algorithm reverses call ids and prices.
-
-## QA
-
-`python dashboard/qa_dashboard.py` renders the page in headless Chromium across
-light/dark × desktop/phone plus the detail drawer, and fails on:
-
-- text contrast below WCAG AA, computed against the **actually painted**
-  background rather than the declared one
-- horizontal overflow at phone width
-- tap targets under 24px
-- Latin/digit runs in RTL without bidi isolation
-- focus states with no visible ring
-- the cost meter scrolling out of view
-
-It has already caught six real defects: the muted-ink contrast failure, a
-551px-wide overflow at 390px (grid items default to `min-width:auto`), the
-cost meter scrolling away, unisolated Latin inside a Hebrew label, and two
-scoping bugs where helpers were swallowed into `renderAll()` so the page threw
-a silent ReferenceError and quietly kept showing its sample data.
-
-That last pair is the instructive one: the page *looked* correct, because the
-fallback made it look correct. The harness only found it once it failed on any
-page error and asserted that the detail drawer actually opens.
-
-An independent adversarial review then found three more in shipped code:
-
-- **Path traversal.** The `/reports/` guard was `str(target).startswith(str(root))`.
-  A string prefix also accepts a *sibling* directory — `reports_backup`,
-  `reports-old` — so files outside the reports tree were reachable. Now
-  `Path.is_relative_to`, with a test that creates such a sibling.
-- **Focus ring failed WCAG 1.4.11.** `rgb(234 88 12 / 0.35)` composites to
-  1.55:1 on the card and 1.60:1 on the dark card; 3:1 is required. The first
-  audit only asserted a ring *existed*. It now rejects translucent rings, and
-  the ring is opaque (`#c2410c` light, `#fb923c` dark).
-- **Unescaped interpolation.** The page built HTML from ASR-derived text with
-  `innerHTML` in 13 places, in a document that holds the session token and can
-  start GPUs. All data is escaped now.
+There is no fallback dataset. Three real states replace the old silent
+sample-data leak: **no token** (opened as a file) → "runs only against the local
+server"; **server up, 0 calls** → "no calls analysed yet"; **fetch failed** →
+"could not load pipeline data". The `running[]` panel reads the live SQLite lock
+table (a held lock = processing now), so completed calls no longer appear as
+in-flight — a `server.py` fix made in this rebuild.
 
 ## Running it
 
 ```bash
 python dashboard/server.py          # prints a URL with a session token
-python dashboard/qa_dashboard.py    # the visual QA harness
+python dashboard/qa_dashboard.py    # the accessibility harness (0 findings)
 ```
 
-It is read-only: it renders what the pipeline already wrote. Actions that
-spend money or mutate state are gated behind `--allow-actions` and are not
-implemented yet, so the Run and Cloud screens described above are design, not
-shipped behaviour.
-
-## Removing it
-
-`rm -rf dashboard/ tests/test_dashboard_server.py` and nothing else changes.
-The server is intentionally not registered as a `callqa` subcommand, so the
-package the bank receives has no reference to it.
-
-## Independent review
-
-A parallel research pass (five research lenses, three independent design
-proposals, three judges, a synthesis and an adversarial critic) was run against
-this work rather than before it. It converged on the same six destinations and
-the same stdlib decision, explicitly rejecting FastAPI + uvicorn + sse-starlette
-(ten wheels replacing a server that already works), htmx (65KB, and adopting it
-means rewriting the working render path), Alpine (needs `unsafe-eval`) and
-Chart.js (208KB, canvas-only, invisible to CSS and screen readers, manual RTL
-axis work). Its verdict was BUILD_WITH_FIXES, and its three verified defects are
-fixed above.
-
-Useful things it established that are worth keeping in view:
-
-- A dashboard is a **single-screen** medium (Few): Overview must answer "is the
-  machine burning money, is anything running, did anything fail" with no
-  scrolling at 1366×768. Everything else is a drill-down.
-- **One filled orange button per screen.** Read-only screens (Calls, Bankers)
-  should have none at all — that absence is what makes the orange button on
-  Run, Cloud and Calibration mean something.
-- Carbon's productive type set is **14px base with fixed, non-fluid headings**
-  for operational UI; Hebrew takes the looser line-height of each pair.
-
-## Still to build
-
-Ordered by what actually blocks an operator, per the critique:
-
-1. **The cloud round trip is incomplete.** Starting a pod generates per-pod
-   secrets and prints shell exports the operator is expected to run by hand.
-   `RUNPOD_API_KEY` also has no path into a double-clicked launcher. Until this
-   is wired, the cloud buttons would fail with a raw English exception.
-2. **No safe first run.** `--mock` is exactly what a non-expert needs on day
-   one, and there is no way to enter it from the UI. The empty state should
-   offer a demo run.
-3. **Validation messages are English.** The intake screen promises plain
-   Hebrew ("row 7, banker_channel, must be L or R"); `ingestion.py` emits
-   English strings. Translating in the dashboard needs structured problem
-   codes rather than free text, so this is a small core change.
-4. **No re-run after a rubric or prompt change.** Scorecards carry
-   `prompt_sha256` precisely so stale calls can be found; nothing surfaces
-   "N calls were scored with an older prompt".
-5. **`watch` has no surface.** If an operator starts it from a terminal, the
-   dashboard cannot see it and the two will contend for the same locks.
-6. Progress that streams during a batch, rather than a snapshot per page load.
-7. A designed empty state for day one.
+Read-only by design: it renders what the pipeline already wrote.
