@@ -51,8 +51,12 @@ def test_qwk_is_undefined_on_constant_ratings() -> None:
 
 
 def test_mean_rounded() -> None:
-    assert _mean_rounded([3, 4]) == 4  # 3.5 rounds to 4
+    assert _mean_rounded([3, 4]) == 4  # 3.5 rounds up to 4
     assert _mean_rounded([3, 3, 4]) == 3
+    # round half UP consistently, not banker's rounding (which gives 2.5 -> 2)
+    assert _mean_rounded([2, 3]) == 3
+    assert _mean_rounded([1, 2]) == 2
+    assert _mean_rounded([4, 5]) == 5
 
 
 def make_card(rubric, call_id: str, scores: dict[str, int], banker: str = "B1") -> ScoreCard:

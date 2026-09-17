@@ -140,7 +140,10 @@ def _safe_qwk(a: list[int], b: list[int], weights: str | None = "quadratic") -> 
 
 
 def _mean_rounded(values: list[int]) -> int:
-    return int(round(sum(values) / len(values)))
+    # Round half UP, not Python's round-half-to-even: the latter nudges the
+    # human "ground truth" down inconsistently (4.5->4 but 3.5->4), skewing the
+    # confusion matrix and per-dimension QWK. Ratings are positive (1..5).
+    return int(sum(values) / len(values) + 0.5)
 
 
 def calibrate(
