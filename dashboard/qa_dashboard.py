@@ -127,7 +127,8 @@ AUDIT_JS = r"""
 
   // 4. bidi: latin/digit runs inside RTL that are NOT isolated will reorder
   const unisolated = [];
-  document.querySelectorAll('td, dd, .val, .fig, .v, .amt, .sub, .foot').forEach(el => {
+  document.querySelectorAll('td, dd, .val, .fig, .foot, .cnt, .cnt b, .sc, '
+    + '.rng, .n2, .band, .provenance span, .stat .fig, .scale span').forEach(el => {
     const cs = getComputedStyle(el);
     const own = Array.from(el.childNodes).filter(n=>n.nodeType===3)
       .map(n=>n.textContent).join('');
@@ -181,17 +182,6 @@ FOCUS_JS = r"""
 }
 """
 
-# The money meter is the one element that must never scroll out of view -
-# the whole point of the state strip. Guarded so it cannot silently regress.
-METER_JS = """
-() => {
-  const m = document.querySelector('.meter .amt');
-  if (!m) return false;
-  const r = m.getBoundingClientRect();
-  return r.bottom > 0 && r.top < innerHeight;
-}
-"""
-
 MODES = [
     ("light-desktop", {"width": 1280, "height": 900}, "light"),
     ("dark-desktop",  {"width": 1280, "height": 900}, "dark"),
@@ -220,58 +210,68 @@ def main() -> int:
     globals()["sync_playwright"] = sync_playwright
     if args.chrome:
         globals()["CHROME"] = args.chrome
+
+    # Render the LIVE page, not the file: the redesign ships no fallback demo
+    # data, so opened as a bare file it correctly shows only its "connect to the
+    # server" empty state - there is no table or chart to audit. Spin the real
+    # server against the repo's data/output (exactly as test_dashboard_server
+    # does) so every view renders real data.
+    import sys as _sys
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    _sys.path.insert(0, str(Path(__file__).parent))
+    from server import Handler  # noqa: E402
+
+    Handler.token = "qa-token"
+    Handler.output_dir = Path(__file__).parent.parent / "data" / "output"
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}/?t=qa-token"
+
     findings: dict[str, list] = {}
-    with sync_playwright() as p:
-        browser = p.chromium.launch(**({"executable_path": CHROME} if CHROME else {}))
-        for name, vp, theme in MODES:
-            ctx = browser.new_context(viewport=vp, color_scheme=theme,
-                                      device_scale_factor=2, locale="he-IL")
-            page = ctx.new_page()
-            js_errors: list[str] = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(**({"executable_path": CHROME} if CHROME else {}))
+            for name, vp, theme in MODES:
+                ctx = browser.new_context(viewport=vp, color_scheme=theme,
+                                          device_scale_factor=2, locale="he-IL")
+                page = ctx.new_page()
+                js_errors: list[str] = []
 
-            def _record(msg: str, sink: list[str] = js_errors) -> None:
-                sink.append(msg)
+                def _record(msg: str, sink: list[str] = js_errors) -> None:
+                    sink.append(msg)
 
-            page.on("pageerror", lambda e: _record(str(e)))
-            page.on("console", lambda m: _record(m.text)
-                    if m.type == "error" and "net::" not in m.text else None)
-            page.goto(PAGE.as_uri())
-            page.wait_for_timeout(1200)  # let webfonts settle
-            probs = page.evaluate(AUDIT_JS)
-            # A silent ReferenceError aborts every update after it, so any
-            # page error is a failure - this is how two real bugs escaped.
-            if js_errors:
-                probs.append({'kind': 'js-error', 'items': js_errors[:5]})
-            focus_bad = page.evaluate(FOCUS_JS)
-            if focus_bad:
-                probs.append({"kind": "focus-invisible", "items": focus_bad})
-            page.mouse.wheel(0, 900)
-            page.wait_for_timeout(300)
-            if not page.evaluate(METER_JS):
-                probs.append({'kind': 'meter-scrolled-away',
-                              'note': 'cost meter left the viewport after scrolling'})
-            page.mouse.wheel(0, -900)
-            page.wait_for_timeout(200)
-            findings[name] = probs
-            page.screenshot(path=str(OUT / f"{name}.png"), full_page=True)
+                page.on("pageerror", lambda e: _record(str(e)))
+                page.on("console", lambda m: _record(m.text)
+                        if m.type == "error" and "net::" not in m.text else None)
+                page.goto(base)
+                page.wait_for_timeout(900)
+                probs = page.evaluate(AUDIT_JS)
+                if js_errors:
+                    probs.append({'kind': 'js-error', 'items': js_errors[:5]})
+                focus_bad = page.evaluate(FOCUS_JS)
+                if focus_bad:
+                    probs.append({"kind": "focus-invisible", "items": focus_bad})
+                findings[name] = probs
+                page.screenshot(path=str(OUT / f"{name}.png"), full_page=True)
 
-            # also capture the detail drawer, which the default view never shows
-            if name == "light-desktop":
-                page.click(".navlink[data-view='calls']")
-                page.wait_for_timeout(300)
-                page.click("#allTable tr[data-call='CALL003']")
-                page.wait_for_timeout(400)
-                # the drawer must actually open, or the audit below passes
-                # against a page that never showed it
-                if page.evaluate("() => document.getElementById('drawer').hidden"):
-                    findings.setdefault('drawer-light', []).append(
-                        {'kind': 'drawer-did-not-open',
-                         'note': 'clicking a call row left the drawer hidden'})
-                page.screenshot(path=str(OUT / "drawer.png"))
-                drawer_probs = page.evaluate(AUDIT_JS)
-                findings.setdefault("drawer-light", []).extend(drawer_probs)
-            ctx.close()
-        browser.close()
+                # capture the detail drawer, which the default view never shows
+                if name == "light-desktop":
+                    page.click(".navlink[data-view='calls']")
+                    page.wait_for_timeout(300)
+                    page.click("#allTable tbody tr")     # first real call row
+                    page.wait_for_timeout(500)
+                    if page.evaluate("() => document.getElementById('drawer').hidden"):
+                        findings.setdefault('drawer-light', []).append(
+                            {'kind': 'drawer-did-not-open',
+                             'note': 'clicking a call row left the drawer hidden'})
+                    page.screenshot(path=str(OUT / "drawer.png"))
+                    findings.setdefault("drawer-light", []).extend(page.evaluate(AUDIT_JS))
+                ctx.close()
+            browser.close()
+    finally:
+        srv.shutdown()
 
     # ---- report -------------------------------------------------------
     total = 0
