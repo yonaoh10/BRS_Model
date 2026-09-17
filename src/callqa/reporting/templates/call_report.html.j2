@@ -12,7 +12,7 @@
 </div>
 
 {% if scorecard.judge_engine == "mock" %}
-<div class="card" style="border-right: 4px solid #c0392b;">
+<div class="card" style="border-inline-start: 3px solid var(--bad);">
   <span class="badge badge-fail">דוח הדגמה - שיפוט מדומה</span>
   <div>
     הציונים, הנימוקים והציטוטים בדוח זה נוצרו על-ידי מנוע בדיקה (mock)
@@ -23,7 +23,7 @@
 {% endif %}
 
 {% if review_reasons %}
-<div class="card" style="border-right: 4px solid #9a6700;">
+<div class="card" style="border-inline-start: 3px solid var(--warn);">
   <span class="badge badge-warn">השיחה ממתינה לבדיקה אנושית</span>
   <div class="muted">
     המערכת אינה עומדת מאחורי המספרים בדוח זה ללא אישור אנושי, מהסיבות הבאות:
@@ -90,8 +90,11 @@
 
 <div class="card">
   <h2>ציון כולל</h2>
-  <div style="display:flex; align-items:center; gap:24px;">
-    <div class="score-big" style="color: {{ total_color }};">{{ scorecard.weighted_total }}</div>
+  {% set wt = scorecard.weighted_total %}
+  {% set band = 'גבוה' if wt >= 80 else ('בינוני' if wt >= 60 else ('גבולי' if wt >= 40 else 'חלש')) %}
+  <div style="display:flex; align-items:center; gap:20px;">
+    <div class="score-big num">{{ scorecard.weighted_total }}</div>
+    <span class="band">{{ band }}</span>
     <div>
       <div>מתוך 100 · כל ממד (1-5) ממופה לסולם 0-100 כך ש-1=0, 3=50, 5=100,
         ומשוקלל לפי משקלי המחוון</div>
@@ -118,18 +121,22 @@
   <h2>ציונים לפי ממד</h2>
   {% for dim in dimensions %}
   {% set ds = scorecard.scores[dim.id] %}
-  <h3>
-    {{ dim.name_he }} —
-    <span style="color: {{ dim_colors[dim.id] }};">{{ ds.score }}/5</span>
-    <span class="muted">(משקל {{ (dim.weight * 100) | round | int }}%{% if dim.gate %}, ממד שער{% endif %})</span>
-  </h3>
-  <p>{{ ds.reasoning_he }}</p>
-  {% for ev in ds.evidence %}
-  <div class="quote">
-    <span class="ts">[{{ ev.timestamp }}] {{ speaker_he[ev.speaker] }}:</span>
-    "{{ ev.quote }}"
+  <div style="margin-top: 18px;">
+    <div class="bar-row">
+      <div class="bar-label">{{ dim.name_he }}{% if dim.gate %} <span class="gt">⚑ שער</span>{% endif %}</div>
+      <div class="bar-track"><div class="bar-fill{% if dim.gate and ds.score <= 2 %} warn{% endif %}"
+           style="width: {{ (ds.score - 1) / 4 * 100 }}%;"></div></div>
+      <div class="bar-value">{{ ds.score }}/5</div>
+    </div>
+    <div class="muted" style="margin: 2px 0 6px;">משקל {{ (dim.weight * 100) | round | int }}%{% if dim.gate and ds.score <= 2 %} · מגביל את הציון הכולל{% endif %}</div>
+    <p>{{ ds.reasoning_he }}</p>
+    {% for ev in ds.evidence %}
+    <div class="quote">
+      <span class="ts">[{{ ev.timestamp }}] {{ speaker_he[ev.speaker] }}:</span>
+      "{{ ev.quote }}"
+    </div>
+    {% endfor %}
   </div>
-  {% endfor %}
   {% endfor %}
 </div>
 
@@ -174,16 +181,15 @@
       קטעים מודגשים בצהוב צוטטו כראיה בציונים; ריחוף עליהם מציג את הממד.
     </div>
     {% for turn in transcript_turns %}
-    <div style="margin:0 0 8px; padding:6px 10px; background:#f6f7f9; border-radius:6px;
-                border-right:3px solid {{ '#1f6feb' if turn.speaker == 'banker' else '#d0d4da' }};">
-      <div class="muted" style="font-size:0.85em;">
-        {{ speaker_he[turn.speaker] }} <span class="mono" dir="ltr">[{{ turn.ts }}]</span>
+    <div style="margin:0 0 6px; padding:8px 12px; background:var(--sunken); border-radius:8px;
+                border-inline-start:2px solid {{ 'var(--accent)' if turn.speaker == 'banker' else 'var(--border-2)' }};">
+      <div class="muted" style="font-size:11px; margin-bottom:2px;">
+        {{ speaker_he[turn.speaker] }} <span class="mono">[{{ turn.ts }}]</span>
       </div>
-      <div>
+      <div style="font-size:12.5px;">
         {%- for segment, dim_he in turn.segments -%}
           {%- if dim_he -%}
-            <mark style="background:#fff3c2; outline:1px solid #9a6700; border-radius:2px;"
-                  title="צוטט כראיה בממד: {{ dim_he }}">{{ segment }}</mark>
+            <mark title="צוטט כראיה בממד: {{ dim_he }}">{{ segment }}</mark>
           {%- else -%}{{ segment }}{%- endif -%}
         {%- endfor -%}
       </div>
