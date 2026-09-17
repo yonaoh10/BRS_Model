@@ -63,3 +63,30 @@ def test_atomic_write(tmp_path: Path) -> None:
     assert target.read_text() == "world"
     # No stray temp files left behind.
     assert list(target.parent.glob("*.tmp")) == []
+
+
+def test_concurrent_writes_do_not_lock_the_database(tmp_path: Path) -> None:
+    """Under a thread pool the state DB is hammered from many connections at
+    once. Re-asserting PRAGMA journal_mode=WAL on every connection raced into
+    'database is locked' and aborted the whole run; WAL is now set once."""
+    import threading
+
+    db = StateDB(tmp_path / "state.db")
+    errors: list[Exception] = []
+
+    def worker(n: int) -> None:
+        try:
+            for i in range(8):
+                db.mark_stage_done(f"C{n}", f"stage{i}", None)
+                db.completed_stages(f"C{n}")
+        except Exception as exc:  # noqa: BLE001 - capturing is the point
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"concurrent access raised: {errors[:3]}"
+    assert len(db.completed_stages("C0")) == 8

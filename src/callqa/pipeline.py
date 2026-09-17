@@ -272,13 +272,18 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
     if not CALL_ID_RE.match(call_id):
         return CallResult(call_id=sanitize_call_id(call_id), status="failed",
                           error="unsafe call_id refused")
-    state = state or StateDB(config.paths.state_db)
     try:
+        # Constructing the StateDB can fail (bad path, disk error); keep it
+        # inside the guard so a DB error yields a failed envelope rather than
+        # escaping process_call, which promises never to raise.
+        state = state or StateDB(config.paths.state_db)
         state.acquire_lock(call_id)
     except CallLockedError as exc:
         # Prefixed so a driver can tell "somebody else has this call" apart
         # from "this call is broken" and not quarantine a healthy recording.
         return CallResult(call_id=call_id, status="failed", error=f"locked: {exc}")
+    except Exception as exc:  # noqa: BLE001 - a state-DB failure must not escape
+        return CallResult(call_id=call_id, status="failed", error=sanitize_error(exc))
 
     stages_completed: list[str] = []
     review_reasons: list[str] = []
