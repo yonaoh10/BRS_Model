@@ -433,6 +433,33 @@ def cmd_validate_inputs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retention(args: argparse.Namespace) -> int:
+    """List (or destroy) RAW PII-bearing artifacts older than the retention window."""
+    from callqa.ops.retention import apply_retention, find_expired
+
+    config = _load_config(args)
+    raw_days = config.retention.raw_days
+    out = config.paths.output_dir
+    if args.apply:
+        destroyed = apply_retention(out, raw_days)
+        total = sum(d["bytes"] for d in destroyed)
+        print(f"destroyed {len(destroyed)} raw artifact(s) older than {raw_days} days "
+              f"({total // (1024*1024)} MiB); log: {out / 'retention' / 'log.jsonl'}")
+        return EXIT_SUCCESS
+    expired = find_expired(out, raw_days)
+    if not expired:
+        print(f"nothing older than {raw_days} days")
+        return EXIT_SUCCESS
+    total = sum(e.bytes for e in expired)
+    print(f"{len(expired)} raw artifact(s) older than {raw_days} days "
+          f"({total // (1024*1024)} MiB) — run with --apply to destroy:")
+    for e in expired[:50]:
+        print(f"  {e.path.name}  ({e.age_days}d, {e.bytes // 1024} KiB)")
+    if len(expired) > 50:
+        print(f"  ... and {len(expired) - 50} more")
+    return EXIT_SUCCESS
+
+
 def cmd_review_queue(args: argparse.Namespace) -> int:
     """List calls held for human review that have no recorded verdict yet."""
     from callqa.ops.review import pending_reviews
@@ -639,6 +666,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--deep", action="store_true", help="re-hash local model weights (slow)")
     _add_common_args(p)
     p.set_defaults(func=cmd_preflight)
+
+    p = sub.add_parser("retention", help="retire raw PII-bearing artifacts past the window")
+    p.add_argument("--apply", action="store_true", help="destroy them (default: list only)")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_retention)
 
     p = sub.add_parser("review-queue", help="list calls held for human review with no verdict")
     p.add_argument("--rater", default=None, help="only calls this rater hasn't reviewed")
