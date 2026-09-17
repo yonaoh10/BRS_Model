@@ -1,0 +1,31 @@
+name: CI
+
+# Runs in the DEVELOPMENT environment to validate a release before it is handed
+# to the air-gapped bank. The bank never runs CI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e . ruff pytest
+      - name: Lint
+        run: ruff check src tests scripts dashboard cloud
+      - name: Tests
+        run: python -m pytest -q
+      - name: Mock end-to-end
+        run: make mock-e2e
+      - name: Evaluation gate (no regression vs baseline)
+        run: python -m callqa eval --mock --baseline eval/baseline.json
