@@ -311,6 +311,113 @@ def test_page_applies_live_data_without_js_errors(live_server: str) -> None:
         browser.close()
 
 
+def _get(url: str, headers: dict | None = None):
+    """Return (status, headers, body-bytes) for a GET, following no redirects."""
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, dict(resp.headers), resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers), exc.read()
+
+
+# ------------------------------------------------------- audio endpoint (door)
+
+def test_audio_endpoint_serves_redacted_audio(live_server: str, pipeline_output: Path) -> None:
+    """The mock run seeds PII into a dialog, so the redaction stage writes a
+    silenced recording alongside the redacted transcript; it must be served."""
+    have = list((pipeline_output / "redacted_audio").glob("*.wav"))
+    assert have, "the pipeline must produce a redacted-audio artifact for the sample set"
+    call_id = have[0].stem
+    status, headers, body = _get(f"{live_server}/api/audio/{call_id}?t=test-token-value")
+    assert status == 200
+    assert headers.get("Content-Type") == "audio/wav"
+    assert headers.get("Accept-Ranges") == "bytes"
+    assert body[:4] == b"RIFF", "a real WAV is served"
+
+
+def test_audio_endpoint_requires_token(live_server: str, pipeline_output: Path) -> None:
+    call_id = next((pipeline_output / "redacted_audio").glob("*.wav")).stem
+    assert _status(f"{live_server}/api/audio/{call_id}") == 403
+    assert _status(f"{live_server}/api/audio/{call_id}?t=wrong") == 403
+
+
+def test_audio_endpoint_rejects_bad_call_ids(live_server: str) -> None:
+    """The call_id charset check is this endpoint's traversal guard, exactly as
+    for transcripts."""
+    for bad in ("..%2F..%2Faudio%2Fwav%2FCALL001.mono", "a%2Fb", ".hidden", "x" * 80):
+        assert _status(f"{live_server}/api/audio/{bad}?t=test-token-value") == 404
+    assert _status(f"{live_server}/api/audio/NOSUCH?t=test-token-value") == 404
+
+
+def test_audio_endpoint_never_serves_the_raw_recording(live_server: str,
+                                                        pipeline_output: Path) -> None:
+    """The raw recordings under audio/wav/ have PII spoken aloud. The audio
+    endpoint reads ONLY redacted_audio/; a raw file with no redacted counterpart
+    must be unreachable, and there must be no route to audio/wav/ at all."""
+    raw = pipeline_output / "audio" / "wav"
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "PLANT01.mono.wav").write_bytes(b"RIFF....RAW-CUSTOMER-AUDIO")
+    # no redacted_audio/PLANT01.wav exists, so the door refuses it
+    assert _status(f"{live_server}/api/audio/PLANT01?t=test-token-value") == 404
+    assert _status(f"{live_server}/api/audio/PLANT01.mono?t=test-token-value") == 404
+    # and there is simply no route into the raw directory
+    assert _status(f"{live_server}/audio/wav/PLANT01.mono.wav?t=test-token-value") == 404
+
+
+def test_audio_endpoint_supports_range_requests(live_server: str, pipeline_output: Path) -> None:
+    """A browser seeks with Range; the endpoint must answer 206 with the slice."""
+    call_id = next((pipeline_output / "redacted_audio").glob("*.wav")).stem
+    status, headers, body = _get(f"{live_server}/api/audio/{call_id}?t=test-token-value",
+                                 {"Range": "bytes=0-99"})
+    assert status == 206
+    assert headers.get("Content-Range", "").startswith("bytes 0-99/")
+    assert len(body) == 100
+
+
+def test_transcript_endpoint_exposes_audio_metadata(live_server: str,
+                                                    pipeline_output: Path) -> None:
+    """The drawer learns whether a call has playable audio, and its silences,
+    from the transcript response - and that metadata must carry no raw PII."""
+    have = list((pipeline_output / "redacted_audio").glob("*.wav"))
+    assert have
+    call_id = have[0].stem
+    body = _get_json(f"{live_server}/api/transcript/{call_id}?t=test-token-value")
+    audio = body.get("audio") or {}
+    assert audio.get("available") is True
+    assert isinstance(audio.get("silences"), list)
+    assert isinstance(audio.get("duration"), (int, float))
+    assert RAW_ID not in json.dumps(body) and RAW_PHONE not in json.dumps(body)
+
+
+def test_disabled_redaction_exposes_no_audio(live_server: str, pipeline_output: Path) -> None:
+    """A disabled-redaction call must never offer audio: there is no redacted
+    recording for it, and the raw one must stay unreachable."""
+    artifact = {
+        "call_id": "RAWLEAK2", "engine": "regex:DISABLED", "enabled": False,
+        "redaction_counts": {},
+        "turns": [{"speaker": "customer", "start": 0.0, "end": 2.0,
+                   "text": f"תעודת הזהות שלי {RAW_ID}"}],
+    }
+    path = pipeline_output / "redacted" / "RAWLEAK2.json"
+    path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+    # Plant a stale silenced WAV + sidecar as if a prior enabled run had left
+    # them: even then, once redaction is disabled the audio route must refuse.
+    adir = pipeline_output / "redacted_audio"
+    adir.mkdir(exist_ok=True)
+    (adir / "RAWLEAK2.wav").write_bytes(b"RIFF....stale-but-silenced")
+    (adir / "RAWLEAK2.json").write_text('{"duration":1,"sample_rate":16000,"silences":[]}',
+                                        encoding="utf-8")
+    try:
+        body = _get_json(f"{live_server}/api/transcript/RAWLEAK2?t=test-token-value")
+        assert (body.get("audio") or {}).get("available") is False
+        assert _status(f"{live_server}/api/audio/RAWLEAK2?t=test-token-value") == 404
+    finally:
+        path.unlink()
+        (adir / "RAWLEAK2.wav").unlink()
+        (adir / "RAWLEAK2.json").unlink()
+
+
 def test_transcript_endpoint_bounds_a_pathological_artifact(live_server: str,
                                                             pipeline_output: Path) -> None:
     """A corrupt/huge redacted artifact must not serve an unbounded body:

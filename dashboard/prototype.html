@@ -270,6 +270,52 @@ tbody tr[data-call]:focus-visible{background:var(--accent-soft); outline:2px sol
 mark.ev{background:var(--warn-soft); color:inherit; padding:0 2px; border-radius:2px; box-shadow:0 0 0 1px var(--warn)}
 .tmsg{color:var(--ink-3); font-size:12.5px; padding:var(--s2) 0}
 
+/* ---------------------------------------------------------------- audio player */
+/* The recording, silenced wherever the transcript was masked. Sticky so the
+   controls stay in reach while the transcript scrolls under them. */
+/* #playerSec must not be the sticky containing block, or the player releases as
+   soon as this short section scrolls past. display:contents dissolves its box so
+   the player's containing block becomes the scrolling drawer body. */
+#playerSec{display:contents}
+#playerSec > h4{margin-top:var(--s6)}
+.player{position:sticky; top:0; z-index:3; background:var(--card); border:1px solid var(--border);
+  border-radius:var(--r); padding:var(--s3) var(--s4) var(--s4)}
+.pctl{display:flex; align-items:center; gap:var(--s3); flex-wrap:wrap}
+.pbtn{appearance:none; cursor:pointer; width:36px; height:36px; flex:none; border-radius:50%;
+  border:1px solid var(--accent); background:var(--accent); color:#fff; display:grid; place-items:center;
+  font-size:13px; line-height:1; transition:background var(--dur)}
+.pbtn:hover{background:var(--accent-2); border-color:var(--accent-2)}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .pbtn{color:#0e0f13} }
+:root[data-theme="dark"] .pbtn{color:#0e0f13}
+.ptime{font-size:12px; color:var(--ink-2)}
+.pspeed{display:inline-flex; background:var(--sunken); border:1px solid var(--border); border-radius:var(--r); padding:3px; margin-inline-start:auto}
+.pspeed button{appearance:none; border:0; background:none; cursor:pointer; font:inherit; font-size:11.5px;
+  color:var(--ink-2); padding:5px 10px; min-height:28px; min-width:32px; border-radius:6px; transition:background var(--dur)}
+.pspeed button[aria-pressed="true"]{background:var(--card); color:var(--ink); font-weight:600; box-shadow:var(--shadow)}
+.ptl{position:relative; direction:ltr; height:26px; margin-top:var(--s3); cursor:pointer}
+.ptl-base{position:absolute; left:0; right:0; top:50%; transform:translateY(-50%); height:6px; background:var(--bar-soft); border-radius:100px}
+.ptl-fill{position:absolute; left:0; top:50%; transform:translateY(-50%); height:6px; width:0; background:var(--bar); border-radius:100px}
+.ptl-head{position:absolute; left:0; top:50%; transform:translate(-50%,-50%); width:13px; height:13px; border-radius:50%;
+  background:var(--accent); box-shadow:0 0 0 3px var(--card)}
+/* silenced spans: a hatched band — pattern, not colour alone */
+.ptl-sil{position:absolute; top:50%; transform:translateY(-50%); height:11px; border-radius:2px; pointer-events:none;
+  background:repeating-linear-gradient(45deg,var(--border-2) 0 3px,transparent 3px 6px); outline:1px solid var(--border-2)}
+/* evidence marks: a small triangle above the track — shape, not colour alone */
+.ptl-ev{position:absolute; top:1px; width:0; height:0; transform:translateX(-50%); pointer-events:none;
+  border-inline:4px solid transparent; border-top:7px solid var(--warn)}
+.pkey{display:flex; align-items:center; gap:var(--s4); margin-top:var(--s3); font-size:11px; color:var(--ink-3); flex-wrap:wrap}
+.pkey span{display:inline-flex; align-items:center}
+.pkey i{display:inline-block; margin-inline-end:5px}
+.pkey .k-sil{width:15px; height:10px; border-radius:2px; background:repeating-linear-gradient(45deg,var(--border-2) 0 3px,transparent 3px 6px); outline:1px solid var(--border-2)}
+.pkey .k-ev{width:0; height:0; border-inline:5px solid transparent; border-top:8px solid var(--warn)}
+.pkey #pFollowBack{margin-inline-start:auto}
+/* the line being spoken — accent border + tint + a worded indicator */
+.turn[data-start]{cursor:pointer}
+.turn[data-start]:hover{background:var(--border)}
+.turn.active{background:var(--accent-soft); border-inline-start-color:var(--accent)}
+.turn.active:hover{background:var(--accent-soft)}
+.turn.active .who::after{content:" · ▶ מתנגן"; color:var(--accent-ink); font-weight:600}
+
 /* ---------------------------------------------------------------- responsive */
 @media (max-width:960px){ .inner{padding:var(--s5)} .stats{grid-template-columns:1fr} .two{grid-template-columns:1fr !important} }
 @media (max-width:640px){
@@ -523,6 +569,7 @@ function openCall(id){
       ${c.summary?`<p class="summary">${esc(c.summary)}</p>`:''}</div>
     <div class="dsec"><h4>ציונים לפי ממד</h4><div id="drawerDims"></div></div>
     ${(c.evidence&&c.evidence.length)?`<div class="dsec"><h4>ציטוטי ראיה</h4>${c.evidence.map(e=>`<div class="quote"><div class="m"><span class="ltr">[${esc(e.t)}]</span> ${esc(spk(e.sp))}</div>${esc(e.q)}</div>`).join('')}</div>`:''}
+    <div class="dsec" id="playerSec" hidden></div>
     <div class="dsec"><h4>תמליל השיחה · לאחר הסרת מזהים · קטעים מודגשים צוטטו כראיה</h4><div class="trn" id="transcriptBox"><div class="tmsg">טוען תמליל…</div></div></div>`;
   const el=document.getElementById('drawerDims');
   el.innerHTML=(STATE.dims||[]).map(d=>{ const v=(c.scores||{})[d.id];
@@ -535,7 +582,95 @@ function openCall(id){
   if(TOKEN&&c.report){ link.href='/'+c.report+'?t='+encodeURIComponent(TOKEN); link.hidden=false; } else link.hidden=true;
   drawer.hidden=false; scrim.hidden=false; document.getElementById('closeDrawer').focus();
 }
-function closeDrawer(){ drawer.hidden=true; scrim.hidden=true; }
+function closeDrawer(){ teardownPlayer(); drawer.hidden=true; scrim.hidden=true; }
+
+/* audio player — the redacted recording, following the transcript */
+let PLAYER=null;
+function tsToSec(ts){ const m=String(ts==null?'':ts).match(/(\d+):(\d+)/); return m?(+m[1])*60+(+m[2]):null; }
+function teardownPlayer(){ if(!PLAYER) return; try{PLAYER.audio.pause();}catch(e){}
+  (PLAYER.cleanup||[]).forEach(fn=>{try{fn();}catch(e){}}); try{PLAYER.audio.removeAttribute('src'); PLAYER.audio.load();}catch(e){} PLAYER=null; }
+function setupPlayer(id, d){
+  teardownPlayer();
+  const sec=document.getElementById('playerSec'), box=document.getElementById('transcriptBox');
+  if(!sec||!box) return;
+  const info=d.audio||{};
+  if(!TOKEN || !info.available){ sec.hidden=true; return; }
+  const dur=Number(info.duration)||0;
+  if(!(dur>0)){ sec.hidden=true; return; }
+  const sil=(info.silences||[]).filter(r=>Array.isArray(r)&&r.length===2);
+  const evs=(d.evidence||[]).map(e=>tsToSec(e.t)).filter(t=>t!=null&&t>=0&&t<=dur);
+  sec.hidden=false;
+  sec.innerHTML=`<h4>הקלטת השיחה · לאחר השתקת המזהים</h4>
+    <div class="player" role="group" aria-label="נגן ההקלטה">
+      <div class="pctl">
+        <button class="pbtn" id="pPlay" aria-label="נגן">▶</button>
+        <span class="ptime"><span class="ltr mono" id="pCur">00:00</span> · <span class="ltr mono" id="pDur">${mmss(dur)}</span></span>
+        <div class="pspeed" id="pSpeed" role="group" aria-label="מהירות ניגון">
+          <button data-rate="1" aria-pressed="true">1×</button>
+          <button data-rate="1.5" aria-pressed="false">1.5×</button>
+          <button data-rate="2" aria-pressed="false">2×</button>
+        </div>
+      </div>
+      <div class="ptl" id="pTl" role="slider" tabindex="0" aria-label="מיקום בהקלטה"
+           aria-valuemin="0" aria-valuemax="${Math.round(dur)}" aria-valuenow="0" aria-valuetext="00:00">
+        <div class="ptl-base"></div><div class="ptl-fill" id="pFill"></div>
+        ${sil.map(([a,b])=>`<div class="ptl-sil" style="left:${a/dur*100}%;width:${Math.max(0.7,(b-a)/dur*100)}%" title="קטע מושתק — מזהה שהוסר"></div>`).join('')}
+        ${evs.map(t=>`<div class="ptl-ev" style="left:${t/dur*100}%" title="ציטוט ראיה [${mmss(t)}]"></div>`).join('')}
+        <div class="ptl-head" id="pHead"></div>
+      </div>
+      <div class="pkey">
+        <span><i class="k-sil" aria-hidden="true"></i>קטע מושתק</span>
+        <span><i class="k-ev" aria-hidden="true"></i>ציטוט ראיה</span>
+        <button class="btn sm" id="pFollowBack" hidden>חזרה למקום המושמע</button>
+      </div>
+    </div>`;
+  const audio=new Audio('/api/audio/'+encodeURIComponent(id)+'?t='+encodeURIComponent(TOKEN));
+  audio.preload='metadata';
+  const pPlay=document.getElementById('pPlay'), pTl=document.getElementById('pTl'),
+    pFill=document.getElementById('pFill'), pHead=document.getElementById('pHead'),
+    pCur=document.getElementById('pCur'), pDur=document.getElementById('pDur'),
+    pSpeed=document.getElementById('pSpeed'), pBack=document.getElementById('pFollowBack');
+  const st={audio, box, follow:true, active:null, lastProg:0, cleanup:[]};
+  PLAYER=st;
+  const total=()=> (audio.duration && isFinite(audio.duration)) ? audio.duration : dur;
+  function paint(){
+    const t=audio.currentTime||0, T=total()||1, pct=Math.max(0,Math.min(100,t/T*100));
+    pFill.style.width=pct+'%'; pHead.style.left=pct+'%';
+    pCur.textContent=mmss(t); pTl.setAttribute('aria-valuenow',Math.round(t)); pTl.setAttribute('aria-valuetext',mmss(t));
+    const el=activeTurn(t);
+    if(el!==st.active){ if(st.active) st.active.classList.remove('active');
+      if(el){ el.classList.add('active'); if(st.follow) scrollToActive(el); } st.active=el; }
+  }
+  function activeTurn(t){
+    let cur=null; for(const el of box.querySelectorAll('.turn[data-start]')){
+      const s=+el.dataset.start; if(t>=s) cur=el; else break; } return cur;
+  }
+  function scrollToActive(el){ st.lastProg=Date.now(); el.scrollIntoView({block:'center', behavior:'auto'}); }
+  function setIcon(){ const playing=!audio.paused && !audio.ended;
+    pPlay.textContent=playing?'⏸':'▶'; pPlay.setAttribute('aria-label',playing?'השהה':'נגן'); }
+  function seek(t){ audio.currentTime=Math.max(0,Math.min(total()-0.05,t)); paint(); }
+  function relSeek(dt){ seek((audio.currentTime||0)+dt); }
+  function fromEvent(clientX){ const r=pTl.getBoundingClientRect(); const x=(clientX-r.left)/r.width; return Math.max(0,Math.min(1,x))*total(); }
+
+  const on=(el,ev,fn,opts)=>{ el.addEventListener(ev,fn,opts); st.cleanup.push(()=>el.removeEventListener(ev,fn,opts)); };
+  on(pPlay,'click',()=>{ if(audio.paused) audio.play().catch(()=>{}); else audio.pause(); });
+  on(audio,'play',setIcon); on(audio,'pause',setIcon); on(audio,'ended',setIcon);
+  on(audio,'timeupdate',paint);
+  on(audio,'loadedmetadata',()=>{ pDur.textContent=mmss(total()); pTl.setAttribute('aria-valuemax',Math.round(total())); });
+  on(pSpeed,'click',e=>{ const b=e.target.closest('button'); if(!b) return; audio.playbackRate=+b.dataset.rate;
+    pSpeed.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b))); });
+  on(pTl,'click',e=>seek(fromEvent(e.clientX)));
+  on(pTl,'keydown',e=>{ const k=e.key;
+    if(k==='ArrowLeft'){ e.preventDefault(); relSeek(-5); } else if(k==='ArrowRight'){ e.preventDefault(); relSeek(5); }
+    else if(k==='Home'){ e.preventDefault(); seek(0); } else if(k==='End'){ e.preventDefault(); seek(total()); }
+    else if(k===' '||k==='Enter'){ e.preventDefault(); if(audio.paused) audio.play().catch(()=>{}); else audio.pause(); } });
+  on(box,'click',e=>{ const el=e.target.closest('.turn[data-start]'); if(!el) return;
+    st.follow=true; pBack.hidden=true; seek(+el.dataset.start); audio.play().catch(()=>{}); });
+  const scroller=box.closest('.scroll')||box;  // #drawerBody is what actually scrolls, not #transcriptBox
+  on(scroller,'scroll',()=>{ if(Date.now()-st.lastProg<500) return; if(st.follow){ st.follow=false; pBack.hidden=false; } });
+  on(pBack,'click',()=>{ st.follow=true; pBack.hidden=true; if(st.active) scrollToActive(st.active); });
+  setIcon(); paint();
+}
 async function loadTranscript(id){
   const box=document.getElementById('transcriptBox'); if(!box) return;
   if(!TOKEN){ box.innerHTML='<div class="tmsg">התמליל זמין רק מול השרת המקומי.</div>'; return; }
@@ -548,9 +683,10 @@ async function loadTranscript(id){
     box.innerHTML=(d.turns||[]).map(t=>{ let h=esc(t.text);
       for(const e of qs){ if(e.speaker&&t.speaker&&e.speaker!==t.speaker) continue; const q=esc(e.quote);
         if(q&&h.includes(q)) h=h.split(q).join('<mark class="ev" title="צוטט כראיה: '+esc(byId[e.dim]||e.dim)+'">'+q+'</mark>'); }
-      return `<div class="turn ${t.speaker==='banker'?'b':'c'}"><div class="tm"><span class="who">${spk(t.speaker)}</span><span class="ltr mono">[${mmss(t.start)}]</span></div><div class="bd">${h}</div></div>`;
+      return `<div class="turn ${t.speaker==='banker'?'b':'c'}" data-start="${t.start}" data-end="${t.end}"><div class="tm"><span class="who">${spk(t.speaker)}</span><span class="ltr mono">[${mmss(t.start)}]</span></div><div class="bd">${h}</div></div>`;
     }).join('')||'<div class="tmsg">התמליל ריק.</div>';
     if(d.truncated) box.insertAdjacentHTML('beforeend','<div class="tmsg">התמליל ארוך במיוחד והוצג באופן חלקי.</div>');
+    try{ setupPlayer(id, d); }catch(err){ const s=document.getElementById('playerSec'); if(s) s.hidden=true; }
   }catch(e){ box.innerHTML='<div class="tmsg">שגיאה בטעינת התמליל.</div>'; }
 }
 

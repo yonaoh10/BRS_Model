@@ -64,6 +64,22 @@ sidebar's off-white fill, and an un-isolated `0.70` in the calibration gauge
 label. The retired **cost-meter "never scrolls away" check** went with the
 state strip it guarded.
 
+## Playback without a raw-audio door
+
+The detail drawer plays the recording while the transcript follows along, the
+spoken line highlighted, with the judge's evidence and the silenced spans marked
+on the timeline. The recording has the customer reading identifiers aloud, so a
+play button would be a second raw-PII exit the redaction stage never covered.
+It is closed the same way the transcript door is: the browser only ever reaches
+a REDACTED recording. The pipeline writes a copy silenced wherever the transcript
+was masked (`callqa.audio_redaction`, produced in the redaction stage, stored
+under `data/output/redacted_audio/`); `/api/audio/<id>` serves only that
+directory — the raw WAVs under `audio/wav/` have no route at all — with the same
+token, Origin/Host and containment guards as `/reports/`, plus HTTP Range so the
+browser can seek. The audio is only as trustworthy as the text mask it mirrors:
+silenced exactly where the transcript was, generously padded, and no further. A
+disabled-redaction call exposes no audio, exactly as it exposes no transcript.
+
 ## The scoring bars map (score-1)/4
 
 A 1 reads empty and a 5 reads full, matching the pipeline's own 1→0 / 3→50 /

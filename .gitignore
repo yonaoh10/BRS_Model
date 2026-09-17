@@ -31,3 +31,16 @@ wheels/
 
 # rescued QA material: audio is derivable from Calls/, keep out of git
 qa/rescued-2026-09-15/qa_perf/*.wav
+
+# Data backups (contain raw, un-redacted transcripts + the state DB) must never
+# be committed. Belt-and-suspenders alongside the data/ rule above.
+*.tar.gz
+*.tgz
+*.zip
+data_backup*
+
+# OS cruft
+.DS_Store
+
+# scratch / QA working files
+scratchpad/
