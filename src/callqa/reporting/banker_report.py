@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,6 +31,26 @@ def _footer_meta(cards: list[ScoreCard]) -> str:
         f"חתימת פרומפט: {sample.prompt_sha256[:16]} · "
         f"נוצר: {datetime.now(UTC).isoformat(timespec='seconds')}"
     )
+
+
+def _banker_slugs(banker_ids: list[str]) -> dict[str, str]:
+    """A unique, path-safe filename stem per banker id.
+
+    safe_filename alone collides: distinct ids reduce to the same name
+    ("B 001", "B/001" -> "B_001") or to the "unknown" fallback, and one
+    banker's report then silently overwrote another's. Disambiguate a collision
+    with a short hash of the raw id. Deterministic (sorted) so filenames are
+    stable across runs.
+    """
+    slugs: dict[str, str] = {}
+    owner: dict[str, str] = {}   # stem -> the banker_id that claimed it
+    for bid in sorted(set(banker_ids)):
+        stem = safe_filename(bid)
+        if owner.get(stem, bid) != bid:
+            stem = f"{stem}-{hashlib.sha256(bid.encode('utf-8')).hexdigest()[:8]}"
+        owner[stem] = bid
+        slugs[bid] = stem
+    return slugs
 
 
 def render_banker_report(
@@ -74,13 +95,14 @@ def generate_banker_reports(
 
     written: list[Path] = []
     bankers_dir = output_dir / "reports" / "bankers"
+    # One unique, path-safe stem per banker, used for BOTH the written file and
+    # the index link so they can never diverge.
+    slugs = _banker_slugs([agg.banker_id for agg in aggregates.values()])
     for agg in aggregates.values():
         html = render_banker_report(
             agg, rubric, group_dim, group_total, group_comparison, recommendations, footer
         )
-        # A banker_id comes from a CSV the bank edits; without this it chose
-        # the output path, and "../../x" wrote outside output_dir entirely.
-        path = bankers_dir / f"{safe_filename(agg.banker_id)}.html"
+        path = bankers_dir / f"{slugs[agg.banker_id]}.html"
         atomic_write_text(path, html)
         written.append(path)
 
@@ -89,6 +111,7 @@ def generate_banker_reports(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
         n_calls=len(cards),
         bankers=list(aggregates.values()),
+        banker_slugs=slugs,
         cards=sorted(cards, key=lambda c: c.call_id),
         calibration_exists=(output_dir / "reports" / "calibration.html").exists(),
         footer_meta=footer,
