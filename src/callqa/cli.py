@@ -433,6 +433,43 @@ def cmd_validate_inputs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_drift(args: argparse.Namespace) -> int:
+    """Compare the current output window to a known-good baseline and flag drift."""
+    import json
+
+    from callqa.ops.drift import DRIFT_DIR, append_history, build_baseline, check_drift
+
+    config = _load_config(args)
+    baseline_path = config.paths.output_dir / DRIFT_DIR / "baseline.json"
+
+    if args.set_baseline:
+        baseline = build_baseline(config.paths.output_dir)
+        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        baseline_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2),
+                                 encoding="utf-8")
+        print(f"drift baseline set from {baseline['n_calls']} calls: {baseline_path}")
+        return EXIT_SUCCESS
+
+    if not baseline_path.exists():
+        print("no drift baseline — run `callqa drift --set-baseline` on a known-good "
+              "period first", file=sys.stderr)
+        return EXIT_FAILED
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    results = check_drift(config.paths.output_dir, baseline)
+    append_history(config.paths.output_dir, results)
+    flagged = False
+    for r in results:
+        mark = {"ok": "OK  ", "warn": "WARN", "flag": "FLAG", "skip": "--  "}[r.status]
+        print(f"[{mark}] {r.name}: {r.detail}")
+        if r.status == "flag":
+            flagged = True
+    if flagged:
+        print("drift DETECTED — investigate before trusting new scores", file=sys.stderr)
+        return EXIT_FAILED
+    print("no drift flagged")
+    return EXIT_SUCCESS
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     """Evaluate the whole system against the golden set; optionally gate on a baseline."""
     from callqa.eval.harness import DEFAULT_GOLDEN, EvalReport, compare, evaluate
@@ -554,6 +591,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--deep", action="store_true", help="re-hash local model weights (slow)")
     _add_common_args(p)
     p.set_defaults(func=cmd_preflight)
+
+    p = sub.add_parser("drift", help="flag drift in scores/review-rate/quality vs a baseline")
+    p.add_argument("--set-baseline", action="store_true",
+                   help="capture the current output as the known-good baseline")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_drift)
 
     p = sub.add_parser("eval", help="evaluate the whole system against the golden set")
     p.add_argument("--golden-dir", default=None,
