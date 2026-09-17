@@ -39,6 +39,14 @@ def test_longest_monologue_exact() -> None:
     assert longest_monologue(BANKER, CUSTOMER) == 20.0
 
 
+def test_longest_monologue_with_a_nested_segment() -> None:
+    """Same-speaker segments are sorted by start only, so a later-starting
+    segment can end earlier (an overlapping/nested turn from attribution). The
+    run must extend to the outer span, not collapse to the inner one."""
+    banker = [VADSegment(start=0.0, end=30.0), VADSegment(start=5.0, end=8.0)]
+    assert longest_monologue(banker, []) == 30.0
+
+
 def test_interruptions_exact() -> None:
     assert count_interruptions(BANKER, CUSTOMER) == 0
     assert count_interruptions(CUSTOMER, BANKER) == 0

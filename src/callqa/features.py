@@ -70,7 +70,12 @@ def longest_monologue(
         if interruption >= MONOLOGUE_BREAK_SEC:
             longest = max(longest, run_end - run_start)
             run_start = nxt.start
-        run_end = nxt.end
+            run_end = nxt.end
+        else:
+            # Sorted by start only, so a nested/overlapping same-speaker segment
+            # can END earlier than the run so far; extend, never regress, or the
+            # run collapses to an inner segment and the monologue is under-reported.
+            run_end = max(run_end, nxt.end)
     return round(max(longest, run_end - run_start), 3)
 
 
