@@ -15,6 +15,12 @@ mock-e2e: sample
 	python -m callqa calibrate --mock
 	@echo "Open data/output/reports/index.html"
 
+eval:
+	python -m callqa eval --mock --baseline eval/baseline.json
+
+golden:
+	python scripts/build_golden_set.py
+
 clean:
 	rm -rf data/output data/callqa_state.db*
 
