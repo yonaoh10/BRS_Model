@@ -43,6 +43,29 @@ def git_sha() -> str:
         return "none"
 
 
+def dir_sha256(path: Path) -> str:
+    """A deterministic content hash of every file under `path`.
+
+    Merkle-style: the hash of sorted (relative-path, file-content-hash) pairs, so
+    it is stable across machines and independent of filesystem walk order. Used
+    to fingerprint model weights once at download and verify them at preflight.
+    """
+    root = Path(path)
+    top = hashlib.sha256()
+    for f in sorted(root.rglob("*")):
+        if not f.is_file():
+            continue
+        fh = hashlib.sha256()
+        with f.open("rb") as fp:
+            for chunk in iter(lambda fp=fp: fp.read(1 << 20), b""):
+                fh.update(chunk)
+        top.update(f.relative_to(root).as_posix().encode("utf-8"))
+        top.update(b"\0")
+        top.update(fh.hexdigest().encode("ascii"))
+        top.update(b"\n")
+    return top.hexdigest()
+
+
 def config_sha256(config: Config) -> str:
     """Content hash of the EFFECTIVE config, so a changed setting is detectable."""
     payload = json.dumps(config.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)

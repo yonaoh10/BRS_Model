@@ -35,6 +35,9 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from callqa.ops.provenance import dir_sha256  # noqa: E402 - the one canonical hasher
+
 ASR_MODEL_ID = "ivrit-ai/whisper-large-v3-turbo-ct2"  # Apache-2.0
 DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"  # CC-BY-4.0; accept terms on HF
 NER_MODEL_ID = "dicta-il/dictabert-ner"  # optional
@@ -104,6 +107,16 @@ def _update_manifest(models_dir: Path, entry: dict) -> None:
 
 
 def _record(models_dir: Path, role: str, model_id: str, local_path: Path) -> None:
+    # Content hash of the weights, computed once here at download time. Preflight
+    # re-hashes with --deep to verify the loaded weights are the ones that
+    # produced earlier results; verify compares it across runs. A name is not a
+    # fingerprint (a model can be re-trained under the same id), so this is.
+    print("   hashing weights (once) ...", flush=True)
+    try:
+        weight_sha256 = dir_sha256(local_path)
+    except OSError as exc:  # pragma: no cover - defensive
+        print(f"   note: could not hash weights ({exc}); sha256 left blank")
+        weight_sha256 = ""
     _update_manifest(
         models_dir,
         {
@@ -111,6 +124,7 @@ def _record(models_dir: Path, role: str, model_id: str, local_path: Path) -> Non
             "model_id": model_id,
             "local_path": str(local_path),
             "size_bytes": _dir_size(local_path),
+            "sha256": weight_sha256,
             "downloaded_at": datetime.now(UTC).isoformat(timespec="seconds"),
         },
     )
