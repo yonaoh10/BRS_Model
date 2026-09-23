@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
+import os
 import statistics
 import subprocess
 import sys
@@ -21,6 +21,7 @@ from callqa.config import Config
 from callqa.eval.metrics import cer, gold_spans, redaction_prf, role_accuracy, wer
 from callqa.models import DialogTranscript, ScoreCard
 from callqa.ops.provenance import fingerprint
+from callqa.portable import remove_tree
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ def _generate_synthetic_inputs(dest: Path) -> None:
     subprocess.run(
         [sys.executable, str(_REPO_ROOT / "scripts" / "generate_sample_data.py"),
          "--input-dir", str(dest)],
-        check=True, capture_output=True)
+        check=True, capture_output=True, env=dict(os.environ, PYTHONUTF8="1"))
 
 
 def evaluate(config: Config, golden_dir: Path | None = None) -> EvalReport:
@@ -119,7 +120,12 @@ def evaluate(config: Config, golden_dir: Path | None = None) -> EvalReport:
     try:
         return _evaluate_in(work, config, golden_dir)
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        # Not ignore_errors: on Windows a file an antivirus is still scanning
+        # cannot be deleted, and silently leaving the tree meant raw
+        # transcripts in %TEMP%, outside any retention sweep.
+        if not remove_tree(work):
+            logger.error("could not delete the evaluation's working folder %s; it "
+                         "holds RAW transcripts - delete it by hand", work)
 
 
 def _evaluate_in(work: Path, config: Config, golden_dir: Path | None) -> EvalReport:

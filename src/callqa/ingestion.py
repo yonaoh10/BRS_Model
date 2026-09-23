@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import logging
 import re
 import subprocess
+import unicodedata
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,17 +38,48 @@ _UNSAFE_CALL_ID_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _LONG_DIGIT_RUN = re.compile(r"\d{7,}")
 
 
+# Names Windows reserves for devices, in any case and with any extension:
+# "CON.json" is the console, not a file, so a call called CON could never be
+# written. Rejected in metadata and prefixed when derived from a file name.
+WINDOWS_RESERVED_NAMES = frozenset(
+    {"con", "prn", "aux", "nul", "conin$", "conout$"}
+    | {f"{dev}{n}" for dev in ("com", "lpt") for n in range(1, 10)}
+)
+
+
+def is_windows_reserved(name: str) -> bool:
+    return name.split(".", 1)[0].strip().casefold() in WINDOWS_RESERVED_NAMES
+
+
 def sanitize_call_id(raw: str, *, warn: bool = True) -> str:
-    """Turn an arbitrary filename stem into a safe call_id."""
-    cleaned = _UNSAFE_CALL_ID_CHARS.sub("_", (raw or "").strip()).strip("._-")
+    """Turn an arbitrary filename stem into a safe call_id.
+
+    Two DIFFERENT names must never produce the same id: the id keys every
+    stage's state, so the second recording was "processed" by reusing the
+    first one's transcript and scores. Replacing the unsafe characters alone
+    did exactly that to Hebrew file names - "שיחה.wav" and "הקלטה.wav" both
+    became "call", "שיחה 1" and "הקלטה 1" both "1". Whenever the name had to
+    change, a short hash of the ORIGINAL name is appended, so distinct names
+    stay distinct and the same name always gives the same id.
+    """
+    original = (raw or "").strip()
+    cleaned = _UNSAFE_CALL_ID_CHARS.sub("_", original).strip("._-")
     if not cleaned:
         cleaned = "call"
     if not cleaned[0].isalnum():
         cleaned = "c" + cleaned
+    if cleaned != original and original:
+        digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:8]
+        cleaned = f"{cleaned[:55]}-{digest}"
+    if is_windows_reserved(cleaned):
+        cleaned = "c_" + cleaned
     cleaned = cleaned[:64]
     if warn:
-        if cleaned != (raw or "").strip():
-            logger.warning("call_id %r is not filename-safe; using %r", raw, cleaned)
+        if cleaned != original:
+            # The ORIGINAL name is not logged: a recording named after the
+            # customer is exactly the case this path exists for.
+            logger.warning("a recording's name is not filename-safe; using call_id %r",
+                           cleaned)
         if _LONG_DIGIT_RUN.search(cleaned):
             logger.warning(
                 "call_id %r contains a long digit run. If recordings are named "
@@ -106,12 +139,44 @@ def _read_text_any_encoding(path: Path) -> str:
     # a cp1255 file would come back as unreadable CJK rather than Hebrew.
     if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
         return raw.decode("utf-16")
-    for encoding in ("utf-8-sig", "utf-8", "cp1255", "iso-8859-8"):
+    for encoding in ("utf-8-sig", "cp1255"):
         try:
             return raw.decode(encoding)
         except (UnicodeDecodeError, UnicodeError):
             continue
-    return raw.decode("utf-8", errors="replace")
+    # Neither encoding reads the WHOLE file: an Excel round trip left the old
+    # rows in UTF-8 and saved the new ones in cp1255. Decoding the file as one
+    # (iso-8859-8 "succeeds" on anything) turned the UTF-8 rows into garbage,
+    # banker names included - and a garbled banker name is not redacted. So
+    # each line is decoded on its own.
+    lines = []
+    for line in raw.removeprefix(b"\xef\xbb\xbf").split(b"\n"):
+        try:
+            lines.append(line.decode("utf-8"))
+        except UnicodeDecodeError:
+            lines.append(line.decode("cp1255", errors="replace"))
+    return "\n".join(lines)
+
+
+# Invisible direction and formatting marks (Unicode category Cf) that arrive
+# with text pasted from a Hebrew UI, Outlook or a web page. "CALL001.wav" with
+# a right-to-left mark in front of it looks identical and is a different name.
+def _visible(value: str) -> str:
+    return "".join(ch for ch in value if unicodedata.category(ch) != "Cf").strip()
+
+
+def _csv_reader(text: str) -> csv.DictReader:
+    """A DictReader with the delimiter the file actually uses.
+
+    Excel's only Unicode export on older Office is "Unicode Text": UTF-16 and
+    TAB-separated; a European regional format writes ';'. Parsed as commas,
+    the whole header was one column and the error said the columns were missing.
+    """
+    header = text.lstrip("\ufeff").split("\n", 1)[0]
+    delimiter = ","
+    if "," not in header:
+        delimiter = "\t" if "\t" in header else (";" if ";" in header else ",")
+    return csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
 
 
 def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> MetadataValidation:
@@ -132,61 +197,75 @@ def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> Metadata
         result.problems.append(MetadataProblem(
             0, "-", f"could not read {metadata_csv.name}: {exc}"))
         return result
-    with io.StringIO(text, newline="") as fh:
-        reader = csv.DictReader(fh)
-        fieldnames = [c.strip() for c in (reader.fieldnames or [])]
-        missing = [c for c in REQUIRED_COLUMNS if c not in fieldnames]
-        if missing:
+    reader = _csv_reader(text)
+    seen_ids: set[str] = set()
+    fieldnames = [_visible(c) for c in (reader.fieldnames or [])]
+    missing = [c for c in REQUIRED_COLUMNS if c not in fieldnames]
+    if missing:
+        result.problems.append(
+            MetadataProblem(0, ",".join(missing), "required column(s) missing")
+        )
+        return result
+    for i, raw_row in enumerate(reader, start=1):
+        extra = raw_row.pop(None, None)
+        if extra:
+            # csv.DictReader puts surplus fields under the None key, and
+            # the value is a LIST - stripping it raised AttributeError and
+            # killed the whole validation run.
+            result.problems.append(MetadataProblem(
+                i, "-", f"row has {len(extra)} more fields than the header"))
+            continue
+        row = {_visible(k or ""): _visible(v) if isinstance(v, str) else ""
+               for k, v in raw_row.items()}
+        if not any(row.values()):
+            # Excel writes a cleared row as ",,,,,,". It is not a call,
+            # and reporting it as three empty values made the whole file
+            # invalid - after which watch/process ran EVERY call on
+            # defaults (banker unknown, channel L).
+            continue
+        for col in REQUIRED_COLUMNS:
+            if not row.get(col):
+                result.problems.append(MetadataProblem(i, col, "empty value"))
+        call_id = row.get("call_id", "")
+        # Case-insensitively: on Windows "A100" and "a100" are the same
+        # file, so two calls would overwrite each other's artifacts.
+        if call_id and call_id.casefold() in seen_ids:
+            result.problems.append(MetadataProblem(i, "call_id", f"duplicate call_id '{call_id}'"))
+            continue
+        if call_id and is_windows_reserved(call_id):
+            result.problems.append(MetadataProblem(
+                i, "call_id", f"'{call_id}' is a name Windows reserves for a device; "
+                "choose another call_id"))
+            continue
+        if call_id and not CALL_ID_RE.match(call_id):
+            result.problems.append(MetadataProblem(
+                i, "call_id",
+                f"'{call_id}' is not a safe identifier: use letters, digits, "
+                f". _ - only (max 64 characters)",
+            ))
+            continue
+        channel = row.get("banker_channel", "")
+        if channel and channel not in ("L", "R"):
             result.problems.append(
-                MetadataProblem(0, ",".join(missing), "required column(s) missing")
+                MetadataProblem(i, "banker_channel", f"must be L or R, got '{channel}'")
             )
-            return result
-        for i, raw_row in enumerate(reader, start=1):
-            extra = raw_row.pop(None, None)
-            if extra:
-                # csv.DictReader puts surplus fields under the None key, and
-                # the value is a LIST - stripping it raised AttributeError and
-                # killed the whole validation run.
-                result.problems.append(MetadataProblem(
-                    i, "-", f"row has {len(extra)} more fields than the header"))
-                continue
-            row = {(k or "").strip(): (v or "").strip() if isinstance(v, str) else ""
-                   for k, v in raw_row.items()}
-            for col in REQUIRED_COLUMNS:
-                if not row.get(col):
-                    result.problems.append(MetadataProblem(i, col, "empty value"))
-            call_id = row.get("call_id", "")
-            if call_id in result.rows:
-                result.problems.append(MetadataProblem(i, "call_id", f"duplicate call_id '{call_id}'"))
-                continue
-            if call_id and not CALL_ID_RE.match(call_id):
-                result.problems.append(MetadataProblem(
-                    i, "call_id",
-                    f"'{call_id}' is not a safe identifier: use letters, digits, "
-                    f". _ - only (max 64 characters)",
-                ))
-                continue
-            channel = row.get("banker_channel", "")
-            if channel and channel not in ("L", "R"):
+        file_name = row.get("file_name", "")
+        if file_name and (Path(file_name).is_absolute() or Path(file_name).name != file_name):
+            # An absolute path or one containing a separator reads a file
+            # outside the recordings directory - and the pipeline then
+            # writes its RAW transcript into the output tree.
+            result.problems.append(MetadataProblem(
+                i, "file_name",
+                f"must be a file name inside calls/, not a path: {file_name!r}"))
+            continue
+        if calls_dir is not None and file_name:
+            if not (calls_dir / file_name).exists():
                 result.problems.append(
-                    MetadataProblem(i, "banker_channel", f"must be L or R, got '{channel}'")
+                    MetadataProblem(i, "file_name", f"audio file not found: {file_name}")
                 )
-            file_name = row.get("file_name", "")
-            if file_name and (Path(file_name).is_absolute() or Path(file_name).name != file_name):
-                # An absolute path or one containing a separator reads a file
-                # outside the recordings directory - and the pipeline then
-                # writes its RAW transcript into the output tree.
-                result.problems.append(MetadataProblem(
-                    i, "file_name",
-                    f"must be a file name inside calls/, not a path: {file_name!r}"))
-                continue
-            if calls_dir is not None and file_name:
-                if not (calls_dir / file_name).exists():
-                    result.problems.append(
-                        MetadataProblem(i, "file_name", f"audio file not found: {file_name}")
-                    )
-            if call_id:
-                result.rows[call_id] = row
+        if call_id:
+            result.rows[call_id] = row
+            seen_ids.add(call_id.casefold())
     return result
 
 

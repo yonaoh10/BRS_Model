@@ -58,6 +58,15 @@ def detect_device(requested: str) -> tuple[str, str]:
 
 
 def main() -> int:
+    # Printing a Hebrew path to a redirected stream is a UnicodeEncodeError
+    # under the Windows ANSI code page (callqa.portable.configure_stdio, inlined
+    # because this script may run before callqa is installed).
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") != "utf8":
+            try:
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, ValueError, OSError):
+                pass
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--audio", type=Path, required=True)
@@ -139,9 +148,15 @@ def main() -> int:
     print(f"so one call of this length costs about {per_call:.0f}s end to end,")
     print(f"and {args.project} of them about "
           f"{(load_sec + per_call * args.project) / 60:.0f} minutes in one process.")
-    print("\nfirst lines of the transcript, to check it is actually Hebrew:")
-    for seg in segments[:3]:
-        print(f"  [{seg.start:6.1f}] {seg.text.strip()[:90]}")
+    # Not the transcript itself: this runs on real recordings, and a raw
+    # transcript is exactly what must never reach a console or a log. Whether
+    # the model actually produced Hebrew is a number.
+    text = " ".join(seg.text for seg in segments)
+    letters = [ch for ch in text if ch.isalpha()]
+    hebrew = sum("\u0590" <= ch <= "\u05ff" for ch in letters)
+    print(f"\nHebrew letters in the transcript: {hebrew}/{len(letters)} "
+          f"({100 * hebrew / max(len(letters), 1):.0f}%) - near 100% means the model "
+          "really transcribed Hebrew")
     return 0
 
 

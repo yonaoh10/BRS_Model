@@ -14,7 +14,7 @@ import hashlib
 import json
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from callqa import __version__
 from callqa.config import Config
@@ -71,9 +71,23 @@ def dir_sha256(path: Path) -> str:
     return top.hexdigest()
 
 
+def _portable(value: object) -> object:
+    """Paths as forward-slash strings: `data\\output` on Windows and
+    `data/output` on Linux are the same setting and must hash the same, or
+    every Windows result looks produced by a different configuration."""
+    if isinstance(value, PurePath):
+        return value.as_posix()
+    if isinstance(value, dict):
+        return {k: _portable(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_portable(v) for v in value]
+    return value
+
+
 def config_sha256(config: Config) -> str:
     """Content hash of the EFFECTIVE config, so a changed setting is detectable."""
-    payload = json.dumps(config.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    payload = json.dumps(_portable(config.model_dump(mode="python")), sort_keys=True,
+                         ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

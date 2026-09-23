@@ -13,6 +13,7 @@ Usage: python scripts/build_golden_set.py
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -76,18 +77,28 @@ def _reference_for(out: Path, call_id: str) -> dict:
 
 
 def main() -> int:
+    # Printing a Hebrew path to a redirected stream is a UnicodeEncodeError
+    # under the Windows ANSI code page (callqa.portable.configure_stdio, inlined
+    # because this script may run before callqa is installed).
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") != "utf8":
+            try:
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, ValueError, OSError):
+                pass
     work = Path(tempfile.mkdtemp(prefix="callqa-golden-"))
     inp, out = work / "input", work / "output"
+    utf8 = dict(os.environ, PYTHONUTF8="1")
     subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "generate_sample_data.py"),
-                    "--input-dir", str(inp)], check=True, capture_output=True)
+                    "--input-dir", str(inp)], check=True, capture_output=True, env=utf8)
     cfg = work / "cfg.yaml"
     cfg.write_text(
-        f"paths: {{input_dir: {inp}, output_dir: {out}, state_db: {work}/s.db,"
-        f" models_dir: {work}/models}}\n"
+        f"paths: {{input_dir: '{inp.as_posix()}', output_dir: '{out.as_posix()}', "
+        f"state_db: '{work.as_posix()}/s.db', models_dir: '{work.as_posix()}/models'}}\n"
         "run: {mock: true}\naudio: {vad: energy}\nasr: {engine: mock}\n"
         "judge: {engine: mock, model: mock}\n", encoding="utf-8")
     subprocess.run([sys.executable, "-m", "callqa", "run", "--config", str(cfg), "--mock"],
-                   cwd=REPO_ROOT, check=True, capture_output=True)
+                   cwd=REPO_ROOT, check=True, capture_output=True, env=utf8)
 
     references: dict[str, dict] = {}
     for card_path in sorted((out / "scores").glob("*.json")):

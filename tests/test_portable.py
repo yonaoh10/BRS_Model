@@ -69,12 +69,12 @@ def test_a_private_dir_is_private(tmp_path: Path) -> None:
     target = tmp_path / "raw" / "audio"
     portable.make_private_dir(target)
     assert target.is_dir()
-    assert portable.private_to_owner(target)
+    assert portable.private_to_owner(target), portable.acl_summary(target)
     # and what is created inside it later inherits that
     inner = target / "call.wav"
     inner.write_bytes(b"RIFF")
     if os.name == "nt":
-        assert portable.private_to_owner(inner)
+        assert portable.private_to_owner(inner), portable.acl_summary(inner)
 
 
 def test_ffmpeg_is_found_where_a_user_without_admin_can_put_it(tmp_path, monkeypatch) -> None:  # noqa: ANN001
@@ -101,3 +101,36 @@ def test_hebrew_to_a_redirected_ansi_stream_does_not_raise(monkeypatch) -> None:
     print("שיחה נכשלה")
     sys.stdout.flush()
     assert raw.getvalue().decode("utf-8").strip() == "שיחה נכשלה"
+
+
+def test_a_dotenv_saved_by_windows_tools_is_read(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """Notepad's BOM, PowerShell 5.1's UTF-16 and an "ANSI" save all used to
+    lose the judge key - the BOM variant silently."""
+    from callqa import dotenv
+
+    for i, data in enumerate([
+        "\ufeffCALLQA_TEST_KEY_A=one\n".encode(),
+        "CALLQA_TEST_KEY_B=two\r\n".encode("utf-16"),
+        "# הערה\nCALLQA_TEST_KEY_C=three\n".encode("cp1255"),
+    ]):
+        env = tmp_path / f"{i}.env"
+        env.write_bytes(data)
+        monkeypatch.setattr(dotenv, "_LOADED", set())
+        dotenv.load_dotenv(env)
+    assert os.environ.pop("CALLQA_TEST_KEY_A") == "one"
+    assert os.environ.pop("CALLQA_TEST_KEY_B") == "two"
+    assert os.environ.pop("CALLQA_TEST_KEY_C") == "three"
+
+
+def test_yaml_errors_name_the_file_and_the_windows_cause(tmp_path: Path) -> None:
+    import pytest
+
+    from callqa.resources import load_yaml
+
+    bad = tmp_path / "config.yaml"
+    bad.write_text('asr:\n  model_dir: "C:\\Users\\x\\models"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="single quotes"):
+        load_yaml(bad)
+    utf16 = tmp_path / "rubric.yaml"
+    utf16.write_bytes("name: 'רובריקה'\n".encode("utf-16"))
+    assert load_yaml(utf16) == {"name": "רובריקה"}

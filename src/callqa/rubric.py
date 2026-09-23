@@ -5,11 +5,10 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, Field, field_validator
 
 from callqa.models import DimensionScore
-from callqa.resources import find_config
+from callqa.resources import find_config, load_yaml
 
 GATE_CAP = 59.0
 
@@ -59,7 +58,7 @@ class Rubric(BaseModel):
 
 def load_rubric(path: str | Path | None = None) -> Rubric:
     resolved = find_config("rubric.yaml", path)
-    data = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+    data = load_yaml(resolved)
     rubric = Rubric.model_validate(data)
     ids = [d.id for d in rubric.dimensions]
     duplicates = sorted({i for i in ids if ids.count(i) > 1})
@@ -73,9 +72,12 @@ def load_rubric(path: str | Path | None = None) -> Rubric:
             "rubric defines no gate dimension, so the gate cap can never apply. "
             "Mark at least one dimension with gate: true."
         )
-    rubric.sha256 = hashlib.sha256(
-        resolved.read_bytes()
-    ).hexdigest()[:16]
+    # Normalized: a Git-for-Windows clone checks the file out with CRLF and
+    # Notepad may add a byte-order mark, and neither changes the rubric. Hashed
+    # raw, the same rubric had two hashes, and results from a Windows and a
+    # Linux install fell into different cohorts. LF files hash as before.
+    content = resolved.read_bytes().removeprefix(b"\xef\xbb\xbf").replace(b"\r\n", b"\n")
+    rubric.sha256 = hashlib.sha256(content).hexdigest()[:16]
     return rubric
 
 

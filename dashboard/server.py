@@ -204,6 +204,23 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
 
 # ---------------------------------------------------------------- http layer
 
+def _audio_is_current(output_dir: Path, call_id: str) -> bool:
+    """Is the silenced WAV at least as new as the redacted transcript?
+
+    The WAV is silenced where the transcript's mask was when it was made. When
+    the mask is recomputed the pipeline regenerates the WAV, and if that fails
+    it deletes the old one - but a file another program holds open (a media
+    player on Windows) cannot always be deleted. An older WAV may leave audible
+    an identifier the new mask covers, so it is never served.
+    """
+    wav = output_dir / "redacted_audio" / f"{call_id}.wav"
+    transcript = output_dir / "redacted" / f"{call_id}.json"
+    try:
+        return wav.is_file() and wav.stat().st_mtime >= transcript.stat().st_mtime
+    except OSError:
+        return False
+
+
 class Handler(BaseHTTPRequestHandler):
     token = ""
     output_dir = Path("data/output")
@@ -384,8 +401,7 @@ class Handler(BaseHTTPRequestHandler):
             audio = {"available": False}
             audio_meta = _load_json(
                 type(self).output_dir / "redacted_audio" / f"{call_id}.json")
-            wav_present = (type(self).output_dir / "redacted_audio"
-                           / f"{call_id}.wav").is_file()
+            wav_present = _audio_is_current(type(self).output_dir, call_id)
             if enabled and wav_present and isinstance(audio_meta, dict):
                 audio = {
                     "available": True,
@@ -420,7 +436,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             audio_root = (type(self).output_dir / "redacted_audio").resolve()
             target = (audio_root / f"{call_id}.wav").resolve()
-            if not target.is_relative_to(audio_root) or not target.is_file():
+            if not target.is_relative_to(audio_root) or not target.is_file() \
+                    or not _audio_is_current(type(self).output_dir, call_id):
                 self._send(404, b'{"error":"not found"}', "application/json")
                 return
             # Defence in depth: the pipeline never writes audio for a

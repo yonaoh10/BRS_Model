@@ -16,6 +16,7 @@ standing between you and real calls is the models (docs/DEPLOYMENT.md).
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _step(*args: str) -> int:
     print(f"\n> python {' '.join(args)}", flush=True)
-    return subprocess.call([sys.executable, *args], cwd=ROOT)
+    return subprocess.call([sys.executable, *args], cwd=ROOT,
+                           env=dict(os.environ, PYTHONUTF8="1"))
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -62,7 +62,10 @@ def main(argv: list[str]) -> int:
     from callqa.speakers.pyannote_engine import LazyPyannoteDiarizer
     from callqa.state import atomic_write_text
     try:
-        config = SpeakersConfig.model_validate_json(sys.stdin.read())
+        # Bytes, not text: the parent writes UTF-8, and a text-mode stdin on
+        # Windows decodes with the ANSI code page - a model path with Hebrew in
+        # it was a UnicodeDecodeError.
+        config = SpeakersConfig.model_validate_json(sys.stdin.buffer.read())
         segments = LazyPyannoteDiarizer(config).diarize(wav, call_id)
         atomic_write_text(out_json, json.dumps(
             [{"label": s.label, "start": s.start, "end": s.end} for s in segments]

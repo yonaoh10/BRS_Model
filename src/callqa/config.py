@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from callqa.resources import load_yaml
 
 ENV_PREFIX = "CALLQA_"
 ENV_NESTED_DELIMITER = "__"
@@ -275,7 +276,7 @@ def load_config(
         path = Path(config_path)
         if not path.exists():
             raise FileNotFoundError(f"Config file not found: {path}")
-        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        loaded = load_yaml(path)
         if loaded is not None:
             if not isinstance(loaded, dict):
                 raise ValueError(f"Config file must contain a YAML mapping: {path}")

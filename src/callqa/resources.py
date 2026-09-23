@@ -57,3 +57,34 @@ def find_config(name: str, explicit: str | Path | None = None) -> Path:
         f"could not find {name}. Looked in:\n  {searched}\n"
         f"Run the CLI from the project directory, or set {ENV_CONFIG_DIR}."
     )
+
+
+def load_yaml(path: Path) -> object:
+    """Parse one of the bank-editable YAML files, with errors that say what to do.
+
+    These files are Hebrew and meant to be edited on Windows, where an editor
+    may save them as UTF-16 ("Unicode") or add a byte-order mark, and where a
+    path pasted between double quotes turns its backslashes into escape
+    sequences ("C:\\Users\\..." is \\U, the start of an 8-digit escape). Each of
+    those failed with a bare decoder or scanner traceback naming neither the
+    file nor the cause.
+    """
+    import yaml
+
+    raw = path.read_bytes()
+    try:
+        if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            text = raw.decode("utf-16")
+        else:
+            text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValueError(f"{path} is not saved as UTF-8. Open it in Notepad and save it "
+                         "again with Encoding: UTF-8.") from None
+    try:
+        return yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        hint = ""
+        if "escape" in str(exc):
+            hint = (" A Windows path inside double quotes is read as escape sequences:"
+                    " use forward slashes (C:/Users/...) or single quotes ('C:\\Users\\...').")
+        raise ValueError(f"{path} is not valid YAML: {exc}.{hint}") from None

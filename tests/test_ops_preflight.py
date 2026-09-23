@@ -147,3 +147,31 @@ def test_preflight_says_why_the_inputs_are_not_ready(tmp_path: Path) -> None:
     check, n = _inputs_check(_cfg(tmp_path))
     assert not check.ok and n == 0
     assert "not found" in check.detail
+
+
+def test_a_cache_copied_without_its_symlinks_is_reported(tmp_path, monkeypatch):
+    """Copying ~/.cache/huggingface onto Windows without the right to create
+    symlinks leaves the snapshot entries empty; the folder still exists."""
+    from callqa.config import Config
+    from callqa.ops.preflight import _diarization_check
+
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hub"))
+    snap = tmp_path / "hub" / "models--pyannote--speaker-diarization-community-1" / "snapshots" / "abc"
+    snap.mkdir(parents=True)
+    (snap / "config.yaml").write_bytes(b"")
+    check = _diarization_check(Config())
+    assert not check.ok and "symlinks" in check.detail
+    (snap / "config.yaml").write_text("pipeline: {}\n", encoding="utf-8")
+    assert _diarization_check(Config()).ok
+
+
+def test_raw_data_on_a_synced_or_network_folder_fails_preflight(tmp_path, monkeypatch):
+    from callqa.config import Config
+    from callqa.ops import preflight
+
+    config = Config()
+    config.paths.output_dir = tmp_path / "out"
+    monkeypatch.setattr(preflight, "location_risk",
+                        lambda p: "a OneDrive folder" if "out" in str(p) or p == tmp_path else None)
+    failing = [c for c in preflight._location_checks(config) if not c.ok]
+    assert failing and all(c.critical for c in failing if c.name == "location:output")

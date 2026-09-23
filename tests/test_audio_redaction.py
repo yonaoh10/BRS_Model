@@ -20,7 +20,7 @@ from callqa.audio import _read_wav
 from callqa.audio_redaction import AUDIO_PAD_SEC, produce_redacted_audio
 from callqa.models import AudioArtifact, CallInput, DialogTranscript, DialogTurn, Word
 from callqa.pipeline import process_call
-from callqa.portable import private_to_owner
+from callqa.portable import acl_summary, private_to_owner
 from callqa.state import StateDB
 
 RATE = 16000
@@ -283,8 +283,8 @@ def test_pipeline_writes_redacted_audio_and_sidecar(processed) -> None:  # noqa:
     if os.name == "nt":
         # chmod means nothing there: the folder's permissions are replaced by
         # owner + SYSTEM + Administrators, and the WAV inherits them.
-        assert private_to_owner(wav.parent)
-        assert private_to_owner(wav)
+        assert private_to_owner(wav.parent), acl_summary(wav.parent)
+        assert private_to_owner(wav), acl_summary(wav)
     else:
         # written 0600 inside a 0700 dir
         assert (wav.stat().st_mode & 0o777) == 0o600

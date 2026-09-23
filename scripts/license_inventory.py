@@ -98,6 +98,15 @@ def render(rows: list[tuple[str, str, str]]) -> str:
 
 
 def main() -> int:
+    # Printing a Hebrew path to a redirected stream is a UnicodeEncodeError
+    # under the Windows ANSI code page (callqa.portable.configure_stdio, inlined
+    # because this script may run before callqa is installed).
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") != "utf8":
+            try:
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, ValueError, OSError):
+                pass
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-o", "--output", default=None, help="write here instead of stdout")

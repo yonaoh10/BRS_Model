@@ -52,8 +52,17 @@ jobs:
           New-Item -ItemType Directory -Force tools | Out-Null
           gh release download latest --repo BtbN/FFmpeg-Builds --pattern "ffmpeg-master-latest-win64-lgpl.zip" --dir $env:RUNNER_TEMP
           Expand-Archive "$env:RUNNER_TEMP\ffmpeg-master-latest-win64-lgpl.zip" -DestinationPath tools
-          gh release download --repo ggml-org/llama.cpp --pattern "*-bin-win-cpu-x64.zip" --dir $env:RUNNER_TEMP
-          Get-ChildItem "$env:RUNNER_TEMP\*-bin-win-cpu-x64.zip" | ForEach-Object { Expand-Archive $_.FullName -DestinationPath tools\llama }
+          # The newest release that has a Windows CPU build (a release can be
+          # published before its Windows assets are uploaded). The names are
+          # printed so the README's description of the file stays true.
+          $zip = $null
+          foreach ($tag in (gh release list --repo ggml-org/llama.cpp --limit 8 --json tagName --jq '.[].tagName')) {
+            $names = gh release view $tag --repo ggml-org/llama.cpp --json assets --jq '.assets[].name'
+            $win = $names | Where-Object { $_ -match 'win' -and $_ -match 'x64' -and $_ -match 'cpu' -and $_ -like '*.zip' }
+            if ($win) { Write-Host "llama.cpp $tag Windows builds:"; $names | Where-Object { $_ -match 'win' } | ForEach-Object { Write-Host "  $_" }; $zip = @($win)[0]; gh release download $tag --repo ggml-org/llama.cpp --pattern $zip --dir $env:RUNNER_TEMP; break }
+          }
+          if (-not $zip) { throw "no Windows CPU build of llama.cpp in its last releases" }
+          Expand-Archive (Join-Path $env:RUNNER_TEMP $zip) -DestinationPath tools\llama
           .\.venv\Scripts\python -c "from callqa.portable import find_executable as f; p = f('ffmpeg'); print('ffmpeg:', p); assert p and 'tools' in p"
 
       - name: Models, with the project's downloader

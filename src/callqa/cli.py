@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-import shutil
+import os
 import sys
 import threading
 import time
@@ -23,7 +23,14 @@ from callqa.models import (
     CallInput,
     CallResult,
 )
-from callqa.portable import configure_stdio
+from callqa.portable import (
+    IS_WINDOWS,
+    configure_stdio,
+    held_open_for_writing,
+    make_private_root,
+    move,
+    project_root,
+)
 from callqa.resources import find_config
 
 logger = logging.getLogger("callqa")
@@ -34,11 +41,30 @@ WATCHED_EXTENSIONS = frozenset({".wav", ".mp3", ".m4a", ".aac", ".mp4", ".ogg",
                                 ".opus", ".flac", ".wma", ".amr"})
 
 
-def _setup_logging(verbose: bool = False) -> None:
+def _started_in_system_folder() -> bool:
+    """Task Scheduler starts a task in C:\\Windows\\System32 unless told
+    otherwise, and the data paths are relative to the current folder."""
+    system_root = os.environ.get("SystemRoot")
+    if not system_root:
+        return False
+    try:
+        return Path.cwd().resolve().is_relative_to(Path(system_root).resolve())
+    except OSError:
+        return False
+
+
+def _setup_logging(verbose: bool = False, log_file: str | None = None) -> None:
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    if log_file:
+        # UTF-8, whatever redirection the caller would have used: a Scheduled
+        # Task's output has nowhere to go, and PowerShell's `*>` re-encodes
+        # Hebrew through the console code page into mojibake.
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        stream=sys.stderr,
+        handlers=handlers,
     )
 
 
@@ -47,6 +73,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--mock", action="store_true", help="run with deterministic mock engines")
     parser.add_argument("--force", action="store_true", help="rerun completed stages")
     parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("--log-file", default=None,
+                        help="also write the log to this file (UTF-8); for scheduled runs")
 
 
 def _load_config(args: argparse.Namespace) -> Config:
@@ -72,7 +100,28 @@ def _load_config(args: argparse.Namespace) -> Config:
 def _build_engines(config: Config):  # noqa: ANN202
     from callqa.engines import build_engines
 
+    _secure_data_dirs(config)
     return build_engines(config)
+
+
+def _secure_data_dirs(config: Config) -> None:
+    """Make the folders that will hold raw audio and transcripts owner-only
+    BEFORE anything is written into them (Windows; POSIX files are 0600).
+
+    The output folder is the pipeline's own. The state database's folder and
+    the input folder are included only when they are inside the project: an
+    input folder elsewhere may be a drop share another system writes into, and
+    its permissions are not this program's to change.
+    """
+    make_private_root(config.paths.output_dir)
+    root = project_root()
+    for folder in (config.paths.state_db.parent, config.paths.input_dir):
+        try:
+            inside = folder.resolve().is_relative_to(root)
+        except OSError:
+            inside = False
+        if inside:
+            make_private_root(folder)
 
 
 def _metadata_lookup(config: Config) -> dict[str, dict[str, str]]:
@@ -112,10 +161,16 @@ def _call_input(
     row = None
     if explicit_id:
         row = rows.get(explicit_id)
+    # normcase: on Windows "REC001.WAV" on disk IS the "REC001.wav" in the
+    # sheet, and an exact comparison ran the call on defaults (banker unknown,
+    # channel L) while validate-inputs, asking the filesystem, said all was well.
     if row is None:
-        row = next((r for r in rows.values() if r.get("file_name") == audio_path.name), None)
+        name = os.path.normcase(audio_path.name)
+        row = next((r for r in rows.values()
+                    if os.path.normcase(r.get("file_name", "")) == name), None)
     if row is None:
-        row = rows.get(audio_path.stem)
+        stem = os.path.normcase(audio_path.stem)
+        row = next((r for cid, r in rows.items() if os.path.normcase(cid) == stem), None)
     call_id = explicit_id or (row or {}).get("call_id") or sanitize_call_id(audio_path.stem)
     if row is not None:
         call = call_input_from_metadata(row, audio_path.parent)
@@ -307,6 +362,9 @@ def watch_loop(
                 continue
             if now - prev[1] < config.watch.stable_seconds:
                 continue
+            if held_open_for_writing(path):
+                logger.info("%s is still being written; waiting", path.name)
+                continue
             # Stable: process it (sequential, one call at a time).
             call = _call_input(path, config)
             result = _record_call(recorder, call, engines, state)
@@ -327,7 +385,7 @@ def watch_loop(
                 target_dir = processed_dir if result.status != "failed" else failed_dir
                 target_dir.mkdir(parents=True, exist_ok=True)
                 try:
-                    shutil.move(str(path), str(target_dir / path.name))
+                    move(path, target_dir / path.name)
                 except OSError as exc:
                     logger.error("could not move %s: %s", path.name, exc)
         if max_cycles is not None and cycles >= max_cycles:
@@ -446,6 +504,13 @@ def cmd_retention(args: argparse.Namespace) -> int:
         total = sum(d["bytes"] for d in destroyed)
         print(f"destroyed {len(destroyed)} raw artifact(s) older than {raw_days} days "
               f"({total // (1024*1024)} MiB); log: {out / 'retention' / 'log.jsonl'}")
+        # "Destroyed N" alone read as success when some could not be deleted
+        # (read-only or locked on Windows) and are still on disk, raw PII and all.
+        left = find_expired(out, raw_days, input_dir=config.paths.input_dir)
+        if left:
+            print(f"{len(left)} expired raw artifact(s) could NOT be destroyed and are "
+                  "still on disk; see the log above and retry", file=sys.stderr)
+            return EXIT_FAILED
         return EXIT_SUCCESS
     expired = find_expired(out, raw_days, input_dir=config.paths.input_dir)
     if not expired:
@@ -501,6 +566,10 @@ def cmd_review(args: argparse.Namespace) -> int:
     ratings = config.paths.input_dir / "human_ratings.csv"
     try:
         record_review(ratings, args.call_id, args.rater, scores, dim_ids)
+    except PermissionError:
+        print(f"review not recorded: {ratings.name} is open in another program (Excel?). "
+              "Close it and run this again.", file=sys.stderr)
+        return EXIT_FAILED
     except ReviewError as exc:
         print(f"review rejected: {exc}", file=sys.stderr)
         return EXIT_FAILED
@@ -739,11 +808,16 @@ def main(argv: list[str] | None = None) -> int:
     # First of all: a Hebrew message printed to a redirected stream on Windows
     # (a Scheduled Task, `> log.txt`) otherwise raises UnicodeEncodeError.
     configure_stdio()
+    if IS_WINDOWS and _started_in_system_folder():
+        print("callqa was started in the Windows system folder, so its data folders "
+              "would be created there. Run it from the project folder - in Task "
+              "Scheduler, set 'Start in' to the project folder.", file=sys.stderr)
+        return EXIT_FAILED
     # Before the parser: config overrides come from the environment, and the
     # operator's `.env` is where the endpoint of a GPU box or a judge key lives.
     load_dotenv()
     args = build_parser().parse_args(argv)
-    _setup_logging(getattr(args, "verbose", False))
+    _setup_logging(getattr(args, "verbose", False), getattr(args, "log_file", None))
     return args.func(args)
 
 

@@ -78,6 +78,15 @@ def mock_score(call_id: str, dim: str) -> int:
 
 
 def main() -> int:
+    # Printing a Hebrew path to a redirected stream is a UnicodeEncodeError
+    # under the Windows ANSI code page (callqa.portable.configure_stdio, inlined
+    # because this script may run before callqa is installed).
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", "") or "").lower().replace("-", "") != "utf8":
+            try:
+                stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (AttributeError, ValueError, OSError):
+                pass
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", default="data/input", type=Path)
     parser.add_argument("--seed", default=42, type=int)
@@ -93,7 +102,8 @@ def main() -> int:
         right = synth_channel([s for s in range(n_slots) if s % 2 == 1], 440 + 30 * i, rng)
         write_stereo_wav(calls_dir / f"{call_id}.wav", left, right)
 
-    with (args.input_dir / "metadata.csv").open("w", newline="", encoding="utf-8") as fh:
+    # utf-8-sig so Excel opens them as UTF-8 (and saves them back that way).
+    with (args.input_dir / "metadata.csv").open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.writer(fh)
         writer.writerow(
             ["call_id", "banker_id", "file_name", "call_date", "call_type",
@@ -104,7 +114,7 @@ def main() -> int:
 
     # Human ratings: rater R1 on all calls, rater R2 on half (doubly-rated).
     rng = np.random.default_rng(args.seed)
-    with (args.input_dir / "human_ratings.csv").open("w", newline="", encoding="utf-8") as fh:
+    with (args.input_dir / "human_ratings.csv").open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.writer(fh)
         writer.writerow(["call_id", "rater_id", *DIMENSIONS])
         for call_id, *_ in CALLS:

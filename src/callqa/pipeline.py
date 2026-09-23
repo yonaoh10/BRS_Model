@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import TypeVar
 
@@ -250,8 +251,20 @@ class _EarlyDiarization:
             return "<no worker log>"
 
     def _cleanup_files(self) -> None:
-        self._out_path.unlink(missing_ok=True)
-        self._log_path.unlink(missing_ok=True)
+        # Best effort. On Windows an antivirus or indexer holds a new file for
+        # a moment, and an unlink raising PermissionError here escaped from a
+        # finally block - failing a call whose segments had been read fine and
+        # skipping the release of its lock. Leftovers are the worker's own
+        # timing files, beside the WAV the retention sweep already covers.
+        for path in (self._out_path, self._log_path):
+            for attempt in range(5):
+                try:
+                    path.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    time.sleep(0.2 * (attempt + 1))
+                except OSError:
+                    break
 
 
 def _report_is_intact(path: Path) -> bool:
@@ -438,6 +451,16 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                 except Exception as exc:  # noqa: BLE001 - never fail a call on audio
                     logger.warning("redacted audio not produced for %s: %s",
                                    call_id, sanitize_error(exc))
+                    # Fail CLOSED. If the new WAV could not replace the old one
+                    # (on Windows: a media player or a long antivirus scan holds
+                    # it), the old file silences the OLD mask, which may miss an
+                    # identifier the new one covers. No audio beats stale audio.
+                    for stale in (audio_out, audio_sidecar):
+                        try:
+                            stale.unlink(missing_ok=True)
+                        except OSError:
+                            logger.error("stale redacted audio could not be removed: %s",
+                                         stale.name)
 
         # -- stage 6: features -------------------------------------------
         features_path = store.path("features")

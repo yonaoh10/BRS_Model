@@ -15,6 +15,7 @@ from pathlib import Path
 
 from callqa.config import Config
 from callqa.ops.provenance import dir_sha256, read_model_manifest
+from callqa.portable import IS_WINDOWS, location_risk, private_to_owner
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,17 @@ def _diarization_check(config: Config) -> Check:
         return Check("model:diarization", True, False, f"local pipeline at {model}")
     cached = _hf_hub_cache() / ("models--" + model.replace("/", "--"))
     if cached.exists():
+        # The folder can exist with nothing usable in it. The cache keeps its
+        # files as symlinks into blobs/, and a copy onto Windows made without
+        # the right to create symlinks (no admin, no Developer Mode) leaves
+        # them missing or empty - and the first mono call is where that showed.
+        files = [f for f in (cached / "snapshots").glob("*/*") if not f.is_dir()]
+        if files and not any(f.is_file() and f.stat().st_size > 0 for f in files):
+            return Check(
+                "model:diarization", False, False,
+                f"the Hugging Face cache at {cached} has no readable files: it was copied "
+                "without following its symlinks. Copy it again with links resolved "
+                "(e.g. zip it on the source machine, or `cp -rL`).")
         return Check("model:diarization", True, False, f"in the Hugging Face cache ({cached})")
     return Check(
         "model:diarization", False, False,
@@ -169,9 +181,42 @@ def _engine_checks(config: Config, deep: bool) -> list[Check]:
     return checks
 
 
+def _location_checks(config: Config) -> list[Check]:
+    """Where the raw data will live (Windows).
+
+    OneDrive's Known Folder Move syncs Desktop and Documents to the cloud, and
+    that is where an unzipped download lands by habit; SQLite's locking is
+    unreliable on a network share. The output and the state database may be
+    in neither. An input folder on a share can be a deliberate drop folder, so
+    that one only warns - unless it is OneDrive.
+    """
+    checks: list[Check] = []
+    places = (("output", config.paths.output_dir, True),
+              ("state database", config.paths.state_db.parent, True),
+              ("input", config.paths.input_dir, False))
+    for label, path, critical in places:
+        risk = location_risk(_existing_ancestor(path))
+        if risk:
+            checks.append(Check(
+                f"location:{label}", False, critical or "OneDrive" in risk,
+                f"{path} is on {risk}. Keep the project in a local folder under your "
+                "user profile, e.g. C:\\Users\\<name>\\BRS_Model-main."))
+    output = config.paths.output_dir
+    if IS_WINDOWS and output.exists():
+        private = private_to_owner(output)
+        checks.append(Check(
+            "privacy", private, True,
+            "the output folder is readable by this user, SYSTEM and Administrators only"
+            if private else
+            f"{output} can be read by other users of this machine. Run any pipeline "
+            "command once (it restricts the folder), or restrict it with icacls."))
+    return checks
+
+
 def run_preflight(config: Config, deep: bool = False) -> list[Check]:
     """All checks. `deep` re-hashes local model weights (slow)."""
     checks = [Check("configuration", True, True, "loaded and valid")]
+    checks.extend(_location_checks(config))
     inputs, n_calls = _inputs_check(config)
     checks.append(inputs)
     checks.extend(_engine_checks(config, deep))

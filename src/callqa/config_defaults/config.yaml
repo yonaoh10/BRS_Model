@@ -24,7 +24,9 @@ audio:
 
 asr:
   engine: faster_whisper  # faster_whisper | mock
-  model_dir: "{models_dir}/ivrit-whisper-large-v3-turbo-ct2"  # PLACEHOLDER - populated by scripts/download_models.py
+  # Paths: forward slashes work on Windows too. A Windows path with backslashes
+  # must stay in SINGLE quotes - inside double quotes a backslash is an escape.
+  model_dir: '{models_dir}/ivrit-whisper-large-v3-turbo-ct2'  # PLACEHOLDER - populated by scripts/download_models.py
   language: he            # MUST be forced; never autodetect
   compute_type: float16   # use int8 on CPU
   word_timestamps: true
@@ -35,7 +37,7 @@ speakers:
   banker_channel: from_metadata   # L | R | from_metadata
   # Accept the conditions once on huggingface.co and set HF_TOKEN to fetch it;
   # afterwards it runs offline. A filesystem path here loads a local pipeline.
-  diarization_model: "pyannote/speaker-diarization-community-1"
+  diarization_model: 'pyannote/speaker-diarization-community-1'   # or a local folder, in single quotes
   num_speakers: 2         # a banker call has exactly two parties; 0 = estimate
   device: auto            # auto | cpu | cuda
   exclusive: true         # one speaker per moment, for word-level alignment

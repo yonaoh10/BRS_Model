@@ -1,0 +1,10 @@
+# One line-ending convention in every checkout, Windows included (Git for
+# Windows otherwise converts to CRLF). Nothing here depends on it any more -
+# hashes and parsers normalise - but a checkout that matches the ZIP download
+# byte for byte is one less thing to wonder about.
+* text=auto eol=lf
+
+*.wav binary
+*.mp3 binary
+*.png binary
+*.gguf binary

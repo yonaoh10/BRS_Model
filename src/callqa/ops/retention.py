@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from callqa.portable import remove_file
+
 logger = logging.getLogger(__name__)
 
 # RAW, PII-bearing artifacts. "transcripts/*.json" catches both the raw
@@ -92,11 +94,13 @@ def apply_retention(output_dir: Path, raw_days: int, now: float | None = None,
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     with log_path.open("a", encoding="utf-8") as fh:
         for e in expired:
+            rel = _label(e.path, output_dir, input_dir)
             try:
-                rel = _label(e.path, output_dir, input_dir)
-                e.path.unlink()
-            except OSError as exc:  # pragma: no cover - defensive
-                logger.warning("could not destroy %s: %s", e.path, exc)
+                remove_file(e.path)
+            except OSError as exc:
+                # The label, not the full path: a recording's file name is
+                # where a customer's number turns up.
+                logger.error("could not destroy %s: %s", rel, type(exc).__name__)
                 continue
             rec = {"at": stamp, "path": rel, "age_days": e.age_days, "bytes": e.bytes}
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")

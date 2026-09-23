@@ -125,9 +125,36 @@ class TestIdentifiersAreNotPaths:
             CallInput(call_id=hostile, audio_path=Path("x.wav"))
 
     def test_a_filename_is_turned_into_a_safe_call_id(self) -> None:
-        assert sanitize_call_id("../../../etc/passwd") == "etc_passwd"
+        from callqa.ingestion import CALL_ID_RE
+
+        hostile = sanitize_call_id("../../../etc/passwd")
+        assert hostile.startswith("etc_passwd-") and CALL_ID_RE.match(hostile)
         assert sanitize_call_id("CALL001") == "CALL001"
         assert sanitize_call_id("") == "call"
+
+    def test_distinct_names_never_share_a_call_id(self) -> None:
+        """The id keys every stage's state: two recordings with one id means
+        the second is "processed" by reusing the first one's results. Hebrew
+        names used to collapse - "שיחה" and "הקלטה" were both "call"."""
+        from callqa.ingestion import CALL_ID_RE
+
+        names = ["שיחה", "הקלטה", "שיחה עם דני", "שיחה 1", "הקלטה 1", "a b", "a_b", "a-b"]
+        ids = [sanitize_call_id(n) for n in names]
+        assert len(set(ids)) == len(ids), ids
+        assert all(CALL_ID_RE.match(i) for i in ids)
+        assert sanitize_call_id("שיחה") == sanitize_call_id("שיחה")      # stable
+
+    def test_windows_device_names_are_never_call_ids(self, tmp_path: Path) -> None:
+        """CON, NUL, COM1... are devices on Windows: "CON.json" can never be written."""
+        from callqa.ingestion import is_windows_reserved
+
+        for name in ("CON", "nul", "Com1", "lpt9", "aux"):
+            safe = sanitize_call_id(name)
+            assert not is_windows_reserved(safe), safe
+        csv_path = tmp_path / "metadata.csv"
+        csv_path.write_text("call_id,banker_id,file_name\nCON,B1,a.wav\n", encoding="utf-8")
+        problems = load_metadata(csv_path).problems
+        assert any("reserves" in p.problem for p in problems)
 
     def test_a_banker_id_cannot_choose_where_its_report_is_written(self) -> None:
         assert "/" not in safe_filename("../../../BANKERPWN")
@@ -1070,7 +1097,7 @@ class TestCallIdSafety:
 
         assert result.status == "failed"
         assert "unsafe" in (result.error or "")
-        assert result.call_id == "PWNED"          # sanitized, not the traversal string
+        assert result.call_id.startswith("PWNED-")  # sanitized, not the traversal string
         out = engines.config.paths.output_dir
         assert not (out.parent / "PWNED.dialog.json").exists()   # nothing escaped
         assert not (out / "transcripts" / "PWNED.dialog.json").exists()
@@ -1145,3 +1172,46 @@ def test_concurrent_workers_load_the_asr_model_once(monkeypatch, tmp_path: Path)
     for t in threads:
         t.join()
     assert len(loads) == 1, f"the model was loaded {len(loads)} times"
+
+
+class TestSpreadsheetsFromWindows:
+    """metadata.csv is made in Excel on a Hebrew Windows desktop."""
+
+    def _write(self, tmp_path: Path, data: bytes) -> Path:
+        path = tmp_path / "metadata.csv"
+        path.write_bytes(data)
+        return path
+
+    def test_rows_excel_left_empty_are_not_calls(self, tmp_path: Path) -> None:
+        path = self._write(tmp_path, b"call_id,banker_id,file_name\r\nC1,B1,c1.wav\r\n,,\r\n,,\r\n"
+)
+        v = load_metadata(path)
+        assert v.ok and list(v.rows) == ["C1"]
+
+    def test_call_ids_differing_only_in_case_are_duplicates(self, tmp_path: Path) -> None:
+        """On NTFS A100.json and a100.json are the same file."""
+        path = self._write(tmp_path, b"call_id,banker_id,file_name\nA100,B1,a.wav\na100,B1,b.wav\n")
+        assert any("duplicate" in p.problem for p in load_metadata(path).problems)
+
+    def test_unicode_text_export_is_tab_separated_utf16(self, tmp_path: Path) -> None:
+        text = "call_id\tbanker_id\tfile_name\tbanker_name\r\nC1\tB1\tc1.wav\tדנה כהן\r\n"
+        path = self._write(tmp_path, text.encode("utf-16"))
+        v = load_metadata(path)
+        assert v.ok and v.rows["C1"]["banker_name"] == "דנה כהן"
+
+    def test_mixed_utf8_and_cp1255_rows_both_decode(self, tmp_path: Path) -> None:
+        """An Excel round trip keeps the old rows in UTF-8 and saves the new
+        ones in cp1255. Decoded as one, the UTF-8 banker name came back as
+        garbage - and a garbage banker name is never redacted."""
+        data = ("call_id,banker_id,file_name,banker_name\n".encode("ascii")
+                + "C1,B1,c1.wav,דנה כהן\n".encode()
+                + "C2,B2,c2.wav,רון לוי\n".encode("cp1255"))
+        v = load_metadata(self._write(tmp_path, data))
+        assert v.ok
+        assert v.rows["C1"]["banker_name"] == "דנה כהן"
+        assert v.rows["C2"]["banker_name"] == "רון לוי"
+
+    def test_invisible_direction_marks_are_dropped(self, tmp_path: Path) -> None:
+        data = "call_id,banker_id,file_name\nC1,B1,‏c1.wav‎\n".encode()
+        v = load_metadata(self._write(tmp_path, data))
+        assert v.rows["C1"]["file_name"] == "c1.wav"

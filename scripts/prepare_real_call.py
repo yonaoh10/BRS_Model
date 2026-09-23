@@ -29,14 +29,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from callqa.ingestion import sanitize_call_id  # noqa: E402
-from callqa.portable import configure_stdio, find_executable, run_text  # noqa: E402
+from callqa.ingestion import _read_text_any_encoding, sanitize_call_id  # noqa: E402
+from callqa.portable import configure_stdio, find_executable, replace, run_text  # noqa: E402
 
 COLUMNS = ["call_id", "banker_id", "file_name", "call_date", "call_type",
            "banker_channel", "banker_name"]
@@ -94,37 +95,50 @@ def upsert_metadata(path: Path, row: dict[str, str]) -> None:
     rows: list[dict[str, str]] = []
     fieldnames = list(COLUMNS)
     if path.exists():
-        with path.open(newline="", encoding="utf-8-sig") as fh:
-            reader = csv.DictReader(fh)
-            existing = [c for c in (reader.fieldnames or []) if c]
-            fieldnames = existing + [c for c in COLUMNS if c not in existing]
-            rows = [r for r in reader if r.get("call_id") != row["call_id"]]
+        # Whatever encoding Excel saved it in (cp1255 by default on a Hebrew
+        # Windows) - read the way the pipeline itself reads it.
+        reader = csv.DictReader(io.StringIO(_read_text_any_encoding(path), newline=""))
+        existing = [c for c in (reader.fieldnames or []) if c]
+        fieldnames = existing + [c for c in COLUMNS if c not in existing]
+        rows = [r for r in reader if r.get("call_id") != row["call_id"]]
         backup = path.with_suffix(path.suffix + ".bak")
         backup.write_bytes(path.read_bytes())
     rows.append(row)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", newline="", encoding="utf-8") as fh:
+    # utf-8-sig: with the byte-order mark, Excel opens the file as UTF-8 and
+    # keeps it UTF-8; without it Excel reads the Hebrew as cp1255 garbage.
+    with tmp.open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         for r in rows:
             writer.writerow({c: (r.get(c) or "") for c in fieldnames})
-    tmp.replace(path)
+    try:
+        replace(tmp, path)
+    except PermissionError:
+        tmp.unlink(missing_ok=True)
+        raise SystemExit(f"ERROR: {path.name} is open in another program (Excel?). "
+                         "Close it and run this again.") from None
+
+
+def _path(value: str) -> Path:
+    # Neither cmd.exe nor PowerShell expands "~" for a program they start.
+    return Path(value).expanduser()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--call-id", required=True)
-    ap.add_argument("--banker-track", type=Path, help="the banker's own recording")
-    ap.add_argument("--customer-track", type=Path, help="the customer's own recording")
-    ap.add_argument("--mono", type=Path, help="a single recording of the whole call")
+    ap.add_argument("--banker-track", type=_path, help="the banker's own recording")
+    ap.add_argument("--customer-track", type=_path, help="the customer's own recording")
+    ap.add_argument("--mono", type=_path, help="a single recording of the whole call")
     ap.add_argument("--offset", type=float, default=0.0,
                     help="seconds the customer track lags the banker track (may be negative)")
     ap.add_argument("--banker-id", default="B900")
     ap.add_argument("--banker-name", default="")
     ap.add_argument("--call-date", default="")
     ap.add_argument("--call-type", default="simulation")
-    ap.add_argument("--input-dir", type=Path, default=REPO_ROOT / "data" / "input")
+    ap.add_argument("--input-dir", type=_path, default=REPO_ROOT / "data" / "input")
     args = ap.parse_args()
 
     configure_stdio()
@@ -133,7 +147,7 @@ def main() -> int:
               file=sys.stderr)
         return 2
     call_id = sanitize_call_id(args.call_id)
-    if call_id != call_id:
+    if call_id != args.call_id:
         print(f"note: using call id {call_id!r} (a call id becomes a file name)")
     two_tracks = bool(args.banker_track and args.customer_track)
     if two_tracks == bool(args.mono):

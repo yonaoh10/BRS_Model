@@ -60,6 +60,24 @@ def parse_env_file(text: str) -> dict[str, str]:
     return values
 
 
+def _decode_env(raw: bytes) -> str:
+    """The .env as text, however Windows saved it.
+
+    utf-8-sig: Notepad writes a byte-order mark, and with plain utf-8 it glued
+    itself to the FIRST key - "\ufeffCALLQA_JUDGE__API_KEY" - which was then
+    silently skipped. UTF-16: what `"KEY=value" > .env` produces in Windows
+    PowerShell 5.1. cp1255: an editor saving the Hebrew-commented copy of
+    .env.example as "ANSI". Keys and values are ASCII, so whatever is lost to
+    replacement is only ever a comment.
+    """
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16", errors="replace")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1255", errors="replace")
+
+
 def load_dotenv(explicit: Path | None = None) -> list[str]:
     """Load the first `.env` found. Returns the names that were actually set."""
     paths = [explicit] if explicit else candidate_files()
@@ -67,14 +85,7 @@ def load_dotenv(explicit: Path | None = None) -> list[str]:
         if path is None or not path.is_file() or path.resolve() in _LOADED:
             continue
         try:
-            # utf-8-sig: Windows Notepad has written a byte-order mark for
-            # years, and with plain utf-8 it glued itself to the FIRST key -
-            # "\ufeffCALLQA_JUDGE__API_KEY" - which was then silently skipped.
-            values = parse_env_file(path.read_text(encoding="utf-8-sig"))
-        except UnicodeDecodeError:
-            logger.warning("could not read %s: it is not UTF-8. Save it again as "
-                           "UTF-8 (Notepad: File > Save as > Encoding: UTF-8).", path)
-            continue
+            values = parse_env_file(_decode_env(path.read_bytes()))
         except OSError as exc:
             logger.warning("could not read %s: %s", path, exc)
             continue

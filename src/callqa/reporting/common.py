@@ -5,11 +5,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from callqa.judge.prompts import mmss
-from callqa.resources import find_config
+from callqa.resources import find_config, load_yaml
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -39,7 +38,7 @@ def load_recommendations(path: str | Path | None = None) -> dict[str, list[str]]
         p = find_config("recommendations_he.yaml", path)
     except FileNotFoundError:
         return {}
-    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    data = load_yaml(p) or {}
     return {k: list(v) for k, v in data.items() if isinstance(v, list)}
 
 

@@ -18,6 +18,7 @@ import logging
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -148,6 +149,52 @@ def replace(src: str | os.PathLike, dst: str | os.PathLike) -> None:
             delay = min(delay * 2, 1.0)
 
 
+def remove_file(path: Path) -> None:
+    """Delete a file, the way Windows needs it deleted.
+
+    On Windows a file with the read-only attribute cannot be deleted (a
+    recording copied from a read-only share or a DMS export keeps it), and one
+    an antivirus is scanning cannot be deleted for a moment. Both are retried;
+    anything still failing raises, so the caller knows the data is still there.
+    """
+    attempts = 6 if IS_WINDOWS else 1
+    for attempt in range(attempts):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            try:
+                os.chmod(path, stat.S_IWRITE)
+            except OSError:
+                pass
+            time.sleep(0.2 * (attempt + 1))
+
+
+def remove_tree(path: Path) -> bool:
+    """shutil.rmtree that clears read-only flags and waits out brief locks.
+    True when the tree is gone."""
+    def _retry(func, target, _exc) -> None:  # noqa: ANN001
+        for attempt in range(5):
+            try:
+                os.chmod(target, stat.S_IWRITE)
+                func(target)
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                time.sleep(0.2 * (attempt + 1))
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_retry)
+    else:  # pragma: no cover - 3.11
+        shutil.rmtree(path, onerror=_retry)
+    return not path.exists()
+
+
 _PRIVATE_DONE: set[str] = set()
 _PRIVATE_LOCK = threading.Lock()
 
@@ -208,7 +255,11 @@ def make_private_dir(path: Path) -> None:
         except OSError:  # pragma: no cover - unusual filesystems
             logger.debug("could not restrict permissions on %s", path)
         return
-    key = str(path.resolve()).lower()
+    resolved = path.resolve()
+    if resolved == Path(resolved.anchor):
+        logger.warning("not changing the permissions of a drive root (%s)", resolved)
+        return
+    key = str(resolved).lower()
     with _PRIVATE_LOCK:
         if key in _PRIVATE_DONE:
             return
@@ -218,10 +269,10 @@ def make_private_dir(path: Path) -> None:
         logger.warning("could not determine the current user's SID; %s keeps its "
                        "inherited permissions", path)
         return
-    cmd = ["icacls", str(path), "/inheritance:r", "/grant:r",
+    cmd = [_icacls(), str(path), "/inheritance:r", "/grant:r",
            f"*{sid}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/Q"]
     try:
-        proc = run_text(cmd, timeout=60)
+        proc = run_text(cmd, timeout=60, encoding="oem")
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("could not restrict permissions on %s: %s", path, exc)
         return
@@ -230,22 +281,118 @@ def make_private_dir(path: Path) -> None:
                        (proc.stdout + proc.stderr).strip()[:300])
 
 
+def make_private_root(path: Path) -> None:
+    """A folder the pipeline writes raw material under, made owner-only on
+    Windows so everything created inside inherits that. On POSIX the files
+    themselves are written 0600, so the folder is only created."""
+    if IS_WINDOWS:
+        make_private_dir(path)
+    else:
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def _icacls() -> str:
+    # The system copy by absolute path: a bare "icacls" is resolved through the
+    # current directory and PATH, where anyone able to write there could put
+    # their own.
+    return os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")
+
+
+def location_risk(path: Path) -> str | None:
+    """Why `path` is a bad place for raw call data on this machine, or None.
+
+    Windows only. OneDrive's Known Folder Move silently syncs Desktop and
+    Documents to the cloud - raw transcripts included - and SQLite's locking
+    is unreliable on a network share.
+    """
+    if not IS_WINDOWS:
+        return None
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    text = str(resolved)
+    if text.startswith("\\\\"):
+        return "a network share (UNC path)"
+    for var in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer"):
+        root = os.environ.get(var)
+        if root and resolved.is_relative_to(Path(root)):
+            return "a OneDrive folder, which syncs its contents to the cloud"
+    drive = resolved.anchor
+    if drive:
+        _kernel32.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
+        _kernel32.GetDriveTypeW.restype = wintypes.UINT
+        if _kernel32.GetDriveTypeW(drive) == 4:          # DRIVE_REMOTE
+            return f"a network drive ({drive})"
+    return None
+
+
+_OWNER_ONLY_SIDS = {"S-1-5-18", "S-1-5-32-544"}          # SYSTEM, Administrators
+
+
+def _allowed_sids(path: Path) -> list[str] | None:  # pragma: no cover - Windows only
+    """The SIDs the folder's DACL ALLOWS, read with the Win32 security API.
+
+    Not icacls's output: that is a display format, translated into the
+    machine's language and printed in the console code page.
+    """
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi32.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi32.GetAce.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)]
+    advapi32.GetAce.restype = wintypes.BOOL
+    advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p,
+                                                ctypes.POINTER(wintypes.LPWSTR)]
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+    se_file_object, dacl_security_information = 1, 0x4
+    dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    if advapi32.GetNamedSecurityInfoW(str(path), se_file_object, dacl_security_information,
+                                      None, None, ctypes.byref(dacl), None,
+                                      ctypes.byref(descriptor)) != 0:
+        return None
+    try:
+        if not dacl.value:
+            return None                      # a NULL DACL grants everyone everything
+        ace_count = ctypes.cast(dacl, ctypes.POINTER(ctypes.c_uint16))[2]
+        sids: list[str] = []
+        for index in range(ace_count):
+            ace = ctypes.c_void_p()
+            if not advapi32.GetAce(dacl, index, ctypes.byref(ace)):
+                return None
+            if ctypes.cast(ace, ctypes.POINTER(ctypes.c_ubyte))[0] != 0:
+                continue                     # only ACCESS_ALLOWED_ACE grants anything
+            text = wintypes.LPWSTR()
+            # ACCESS_ALLOWED_ACE: 4-byte header, 4-byte mask, then the SID.
+            if not advapi32.ConvertSidToStringSidW(ace.value + 8, ctypes.byref(text)):
+                return None
+            sids.append(text.value)
+            _kernel32.LocalFree(ctypes.cast(text, ctypes.c_void_p))
+        return sids
+    finally:
+        _kernel32.LocalFree(descriptor)
+
+
+def acl_summary(path: Path) -> str:
+    """For diagnostics: who may access `path`, as SIDs (Windows) or a mode."""
+    if not IS_WINDOWS:
+        return oct(path.stat().st_mode & 0o777)
+    return f"user={_current_user_sid()} allowed={_allowed_sids(path)}"
+
+
 def private_to_owner(path: Path) -> bool:
-    """Does anyone other than the owner, SYSTEM and Administrators have access?
-    False when it cannot be determined. For tests and preflight."""
+    """Is `path` accessible only to its owner (and, on Windows, SYSTEM and
+    Administrators)? False when it cannot be determined."""
     if not IS_WINDOWS:
         return (path.stat().st_mode & 0o077) == 0
-    sid = _current_user_sid()
-    try:
-        proc = run_text(["icacls", str(path)], timeout=60)
-    except (OSError, subprocess.SubprocessError):
+    user = _current_user_sid()
+    sids = _allowed_sids(path)
+    if user is None or not sids:
         return False
-    if proc.returncode != 0 or sid is None:
-        return False
-    # icacls prints names, not SIDs, and names are translated; so compare the
-    # NUMBER of entries instead: after make_private_dir there are exactly three.
-    entries = [line for line in proc.stdout.splitlines() if ":(" in line]
-    return len(entries) == 3
+    return user in sids and set(sids) <= _OWNER_ONLY_SIDS | {user}
 
 
 # -- external programs ------------------------------------------------------
@@ -280,15 +427,17 @@ def find_executable(name: str) -> str | None:
     return shutil.which(name)
 
 
-def run_text(cmd: list[str], timeout: float | None = None,
+def run_text(cmd: list[str], timeout: float | None = None, encoding: str = "utf-8",
              **kwargs) -> subprocess.CompletedProcess:  # noqa: ANN003
     """subprocess.run capturing text, decoded as UTF-8 whatever the OS.
 
     `text=True` alone decodes with the ANSI code page on Windows (cp1252 or
     cp1255), and ffmpeg, ffprobe and git all write UTF-8: a Hebrew file name in
-    an error message was a UnicodeDecodeError instead of the message.
+    an error message was a UnicodeDecodeError instead of the message. Windows'
+    own console tools (icacls) write the OEM code page instead: encoding="oem".
+    Undecodable bytes are replaced, never raised.
     """
-    return subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace",
+    return subprocess.run(cmd, capture_output=True, encoding=encoding, errors="replace",
                           timeout=timeout, **kwargs)
 
 
