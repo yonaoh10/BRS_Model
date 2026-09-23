@@ -54,6 +54,48 @@ the repository, extract it, and deploy it on infrastructure of his own choosing.
   installed; without it the stdlib reader raised `EOFError` straight out. This
   was the failing test that made CI red at 1.0.0.
 
+### Fixed — found by an independent adversarial audit
+The release candidate was audited by 109 independent reviewers across eight
+dimensions, each finding then adversarially re-verified; 89 were confirmed.
+Every one that does not require an owner's decision is fixed. The ones that
+mattered most:
+- **Redacted audio leaked on overlapping speech.** A turn counted as silenced
+  if any silenced word overlapped it in *time*, and stereo turns overlap as a
+  matter of course, so one speaker's masked identifier "covered" the other
+  speaker's audible one. Silencing is now accounted per turn against the masks
+  in the redacted transcript itself, so the audio can never be less silenced
+  than the text is masked, whatever rule or model masked it.
+- **`redaction.ner: true` did nothing** once presidio became opt-in, because NER
+  lived inside presidio. It now works on its own, and a missing NER model is a
+  hard stop at start-up rather than a quiet fallback.
+- **Account numbers next to a currency word leaked** ("החשבון שלי 481902
+  שקלים"). "בחשבון" (in the account) still introduces a balance; "החשבון" /
+  "לחשבון" now introduce an identifier.
+- **A customer naming themselves** ("קוראים לי ...", "שמי ...") is masked.
+- **The air-gapped install**: the offline installer used a bare `pip` into the
+  system Python, which RHEL lacks and PEP 668 forbids; it now builds a virtual
+  environment and checks the bundle's Python version. Verified with the
+  network cut: 393 tests pass on exactly the pinned versions.
+- **CI tested a dependency set nobody deploys** (pyproject floors resolved
+  against live PyPI). It now installs the pinned requirements.
+- **`callqa eval` left raw transcripts in /tmp**, and its redaction metric could
+  not see redaction being switched off. It now cleans up, and a new
+  zero-tolerance metric checks the transcript the pipeline actually wrote.
+- **Retention** now retires the original recordings `watch` kept in
+  `input/processed/` and `input/failed/`, and crash-orphaned raw temp files;
+  its window now ships in `config.yaml` instead of only as a code default.
+- **Drift**: two of six signals had never collected a sample; the control band
+  collapsed to a point on ordinary data; a one-call baseline was accepted.
+- **The model downloader** silently skipped the judge model when the gated
+  diarization step lacked a token, and turned every error into "not installed".
+- **Preflight** checks model size against the download record (a truncated
+  copy used to pass), the diarization cache where pyannote actually reads it,
+  and says which input problem it found.
+- `run --max-workers N` loaded each model N times; silero VAD ignored the
+  sample rate; a reviewer's score was dropped after a rubric change; resumed
+  runs invented per-stage timings; the judge reported a refused API key as an
+  unreachable server.
+
 ### Fixed — correctness
 - The offline wheels bundle downloaded nothing at all: one `--platform` tag
   cannot resolve the pin set, and the first error aborted the script. The whole
@@ -83,9 +125,14 @@ the repository, extract it, and deploy it on infrastructure of his own choosing.
   never committed.
 
 ### Known limits
-- A name mentioned in passing that nobody asked for is not masked. Nothing
-  about the string marks it as an identifier and no question anchors it.
-  `redaction.ner` helps, at a cost. Documented in `docs/DEPLOYMENT.md` §9.
+- A third party named in passing, with no question and no self-naming phrase,
+  is not masked by the rules. `redaction.ner: true` covers it, at a cost.
+  Documented in `docs/DEPLOYMENT.md` §9.
+- Editing the rubric does not re-score calls already processed: resume reuses
+  stored scorecards. `callqa verify` reports which calls are stale; reprocess
+  them with `--force`. A report for a call missing a current dimension now
+  refuses with that instruction instead of failing obscurely.
+- LICENSE names no copyright holder or client. That is the owner's decision.
 - There is still no measured agreement between the judge and human QA
   reviewers: that needs ≥20 human-rated calls, which the project has never had.
 
