@@ -66,6 +66,59 @@ def test_a_review_rate_spike_is_flagged(tmp_path: Path) -> None:
 def test_a_signal_with_too_little_data_is_skipped_not_judged(tmp_path: Path) -> None:
     out = tmp_path / "output"
     _write(out, [80, 81], ["success", "success"])            # below the min-samples floor
-    baseline = build_baseline(out)
+    # force: this test is about the CURRENT window being too small to judge,
+    # not about the baseline, which is refused below 20 calls on its own.
+    baseline = build_baseline(out, force=True)
     results = {r.name: r.status for r in check_drift(out, baseline)}
     assert results.get("score") == "skip"
+
+
+def test_a_baseline_from_a_handful_of_calls_is_refused(tmp_path: Path) -> None:
+    """A one-call baseline was accepted as success; a healthy 30-call window
+    checked against it then read PSI 1.8 and "drift DETECTED" - a page to
+    whoever is on call, about nothing."""
+    import pytest
+
+    from callqa.ops.drift import DriftBaselineError
+
+    out = tmp_path / "output"
+    _write(out, [80.0], ["success"])
+    with pytest.raises(DriftBaselineError, match="at least 20"):
+        build_baseline(out)
+    assert build_baseline(out, force=True)["n_calls"] == 1     # deliberate override
+
+
+def test_a_mostly_constant_signal_does_not_collapse_the_control_band() -> None:
+    """When more than half the samples equal the median, the MAD is zero, and a
+    zero-width band flagged ANY deviation - the normal shape of a count such as
+    identifiers-masked-per-call. Only a truly constant baseline keeps it."""
+    from callqa.ops.drift import _control_limits
+
+    mostly_two = [2.0] * 12 + [1.0, 3.0, 4.0, 1.0, 3.0]
+    med, lo, hi = _control_limits(mostly_two)
+    assert lo < med < hi, (lo, med, hi)
+    assert lo <= 1.0 and hi >= 3.0                  # ordinary variation is in-band
+
+    constant = [0.0] * 10
+    _, lo, hi = _control_limits(constant)
+    assert lo == hi == 0.0                          # here any change IS a change
+
+
+def test_transcription_quality_is_read_from_the_nested_transcripts(tmp_path: Path) -> None:
+    """`quality` lives on each channel's transcript, not on the bundle. Read
+    off the bundle, both transcription signals collected zero samples on every
+    call ever processed, and disappeared from every report silently."""
+    from callqa.ops.drift import collect_signals
+
+    out = tmp_path / "output"
+    (out / "transcripts").mkdir(parents=True)
+    for i in range(3):
+        bundle = {"call_id": f"C{i}",
+                  "banker": {"quality": {"mean_logprob": -0.3, "low_confidence_ratio": 0.05}},
+                  "customer": {"quality": {"mean_logprob": -0.5, "low_confidence_ratio": 0.10}}}
+        (out / "transcripts" / f"C{i}.json").write_text(json.dumps(bundle), encoding="utf-8")
+    (out / "transcripts" / "M.json").write_text(json.dumps(
+        {"call_id": "M", "mono": {"quality": {"mean_logprob": -0.4,
+                                              "low_confidence_ratio": 0.2}}}), encoding="utf-8")
+    s = collect_signals(out)
+    assert len(s.logprob) == 7 and len(s.low_conf) == 7

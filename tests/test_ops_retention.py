@@ -86,3 +86,23 @@ def test_a_crash_orphaned_raw_temp_file_is_retired_too(tmp_path: Path) -> None:
     expired = {e.path for e in find_expired(out, raw_days=90)}
     assert orphan in expired
     assert kept not in expired                    # derived, non-PII: kept
+
+
+def test_the_original_recordings_watch_kept_are_retired(tmp_path: Path) -> None:
+    """`watch` moves every processed recording to input/processed/, and
+    retention swept only the output tree - so the rawest data in the system,
+    the customer's voice, unredacted, was kept forever. The live drop
+    directory, input/calls/, belongs to the recording system and is never
+    touched."""
+    out, inp = tmp_path / "output", tmp_path / "input"
+    kept_by_watch = _write(inp / "processed" / "C1.wav", "raw voice", age_days=120)
+    failed = _write(inp / "failed" / "C2.wav", "raw voice", age_days=120)
+    live = _write(inp / "calls" / "C3.wav", "raw voice", age_days=120)
+
+    expired = {e.path for e in find_expired(out, raw_days=90, input_dir=inp)}
+    assert kept_by_watch in expired and failed in expired
+    assert live not in expired
+
+    destroyed = apply_retention(out, raw_days=90, input_dir=inp)
+    assert not kept_by_watch.exists() and not failed.exists() and live.exists()
+    assert {d["path"] for d in destroyed} >= {"input/processed/C1.wav", "input/failed/C2.wav"}

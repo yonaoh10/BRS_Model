@@ -30,6 +30,7 @@ SCORE_BINS = [0, 20, 40, 60, 80, 100]
 PSI_WARN, PSI_FLAG = 0.10, 0.25       # standard PSI bands (bank model-risk)
 WILSON_Z = 2.576                       # 99%
 CONTROL_SIGMA = 3.0                    # Shewhart
+MIN_BASELINE_CALLS = 20                # as calibration: fewer is noise
 _MAD_TO_SIGMA = 1.4826
 _MIN_SAMPLES = 5                       # below this a signal is reported, not judged
 _EPS = 1e-9                            # absorb float noise at interval boundaries
@@ -86,8 +87,17 @@ def collect_signals(output_dir: Path) -> Signals:
         if p.name.endswith(".dialog.json"):
             continue
         t = _load(p)
-        q = t.get("quality") if isinstance(t, dict) else None
-        if isinstance(q, dict):
+        if not isinstance(t, dict):
+            continue
+        # The file is a TranscriptBundle: {banker, customer} on a stereo call,
+        # {mono} on a single-channel one. `quality` lives on each of those, not
+        # on the bundle. Reading it off the bundle meant these two documented
+        # signals collected zero samples on every call ever processed, and
+        # vanished from every baseline and every report without a word.
+        for part in ("banker", "customer", "mono"):
+            q = (t.get(part) or {}).get("quality") if isinstance(t.get(part), dict) else None
+            if not isinstance(q, dict):
+                continue
             if q.get("mean_logprob") is not None:
                 s.logprob.append(float(q["mean_logprob"]))
             if q.get("low_confidence_ratio") is not None:
@@ -136,15 +146,43 @@ def wilson_interval(p: float, n: int, z: float = WILSON_Z) -> tuple[float, float
 
 
 def _control_limits(values: list[float]) -> tuple[float, float, float]:
+    """Median +/- 3 robust sigmas, where sigma comes from the MAD.
+
+    The MAD is zero whenever more than half the samples equal the median - the
+    NORMAL case for a count like redaction_per_call, or a ratio that is usually
+    exactly 0.0 - and a zero sigma collapsed the band to a single point, so any
+    deviation at all read as drift. That is not a robust estimate; it is a
+    degenerate one. When the MAD is zero, the ordinary standard deviation is
+    used instead. Only a genuinely CONSTANT baseline - every sample identical -
+    keeps a zero-width band, because there any change really is a change.
+    """
     med = statistics.median(values)
-    mad = statistics.median([abs(v - med) for v in values]) * _MAD_TO_SIGMA
-    return med, med - CONTROL_SIGMA * mad, med + CONTROL_SIGMA * mad
+    sigma = statistics.median([abs(v - med) for v in values]) * _MAD_TO_SIGMA
+    if sigma == 0 and len(set(values)) > 1:
+        sigma = statistics.pstdev(values)
+    return med, med - CONTROL_SIGMA * sigma, med + CONTROL_SIGMA * sigma
 
 
 # --------------------------------------------------------------- baseline
 
-def build_baseline(output_dir: Path) -> dict:
+class DriftBaselineError(ValueError):
+    """The window offered as a baseline is too small to be a reference."""
+
+
+def build_baseline(output_dir: Path, force: bool = False) -> dict:
     s = collect_signals(output_dir)
+    n = s.n_total or len(s.scores)
+    # A reference built from one call was accepted and reported as success;
+    # a perfectly healthy 30-call window checked against it then read PSI 1.8,
+    # "drift DETECTED", and a page to whoever is on call. The floor is the same
+    # one calibration uses, for the same reason.
+    if n < MIN_BASELINE_CALLS and not force:
+        raise DriftBaselineError(
+            f"a drift baseline needs at least {MIN_BASELINE_CALLS} processed calls "
+            f"from a known-good period; this output directory has {n}. A smaller "
+            "reference flags normal variation as drift. Process more calls first, "
+            "or pass --force if you understand the numbers will be noise."
+        )
     signals: dict = {}
     if s.scores:
         signals["score"] = {"type": "psi", "bins": SCORE_BINS,

@@ -18,7 +18,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from callqa.config import Config
-from callqa.eval.metrics import cer, redaction_prf, role_accuracy, wer
+from callqa.eval.metrics import cer, gold_spans, redaction_prf, role_accuracy, wer
 from callqa.models import DialogTranscript, ScoreCard
 from callqa.ops.provenance import fingerprint
 
@@ -28,7 +28,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_GOLDEN = _REPO_ROOT / "eval" / "golden"
 
 # Regression tolerances for the gate. Rates are on 0..1; judge QWK is noisier.
-_TOL = {"rate": 0.02, "qwk": 0.05}
+# "leak": zero tolerance. An identifier surviving into the artifact is
+# not a regression within noise; it is a leak, and one is enough.
+_TOL = {"rate": 0.02, "qwk": 0.05, "leak": 0.0}
 
 
 class CallMetrics(BaseModel):
@@ -76,6 +78,14 @@ class EvalReport(BaseModel):
     redaction_recall_mean: float
     redaction_precision_mean: float
     redaction_f1_mean: float
+    # Of the gold identifiers, the fraction ABSENT from the redacted transcript
+    # the pipeline actually wrote. recall above scores the detector over the
+    # reference text; this scores the artifact. They differ exactly when the
+    # detector is fine and the pipeline did not apply it - redaction switched
+    # off, a detector wired without its turn boundaries - which the recall
+    # number cannot see: with redaction DISABLED it still read 1.0 and the gate
+    # passed. Defaults to 1.0 so older reports still load.
+    redaction_applied_recall_mean: float = 1.0
     judge_qwk: float | None = None
     calls: list[CallMetrics] = Field(default_factory=list)
     fingerprint: dict = Field(default_factory=dict)
@@ -173,7 +183,8 @@ def _evaluate_in(work: Path, config: Config, golden_dir: Path | None) -> EvalRep
             wer=wer(ref["transcript"], produced_text),
             cer=cer(ref["transcript"], produced_text),
             role_accuracy=role_accuracy(ref.get("speakers", []), produced_turns),
-            redaction=redaction_prf(ref["transcript"], ref.get("pii", [])),
+            redaction={**redaction_prf(ref["transcript"], ref.get("pii", [])),
+                       "applied_recall": _applied_recall(out_dir, cid, ref.get("pii", []))},
         ))
 
     seconds_total = round(time.time() - started, 3)
@@ -192,6 +203,8 @@ def _evaluate_in(work: Path, config: Config, golden_dir: Path | None) -> EvalRep
         redaction_recall_mean=mean([c.redaction["recall"] for c in call_metrics]),
         redaction_precision_mean=mean([c.redaction["precision"] for c in call_metrics]),
         redaction_f1_mean=mean([c.redaction["f1"] for c in call_metrics]),
+        redaction_applied_recall_mean=mean(
+            [c.redaction.get("applied_recall", 1.0) for c in call_metrics]),
         judge_qwk=judge_qwk,
         calls=call_metrics,
         fingerprint=fingerprint(eval_config, rubric.sha256),
@@ -201,6 +214,20 @@ def _evaluate_in(work: Path, config: Config, golden_dir: Path | None) -> EvalRep
             if is_real_golden_set else SYNTHETIC_SET_NOTE
         ),
     )
+
+
+def _applied_recall(out_dir: Path, call_id: str, gold: list[str]) -> float:
+    """Fraction of gold identifiers NOT present in the redacted transcript the
+    pipeline wrote for this call. 0.0 if that artifact is missing entirely."""
+    if not gold:
+        return 1.0
+    path = out_dir / "redacted" / f"{call_id}.json"
+    if not path.exists():
+        return 0.0
+    text = "\n".join(t.get("text", "") for t in
+                     json.loads(path.read_text(encoding="utf-8")).get("turns", []))
+    survived = sum(1 for lit in gold if gold_spans(text, [lit]))
+    return round(1 - survived / len(gold), 4)
 
 
 def _judge_qwk(scorecards, gold_ratings, rubric):  # noqa: ANN001
@@ -225,6 +252,7 @@ _METRICS = {
     "redaction_recall_mean": (True, "rate"),
     "redaction_precision_mean": (True, "rate"),
     "redaction_f1_mean": (True, "rate"),
+    "redaction_applied_recall_mean": (True, "leak"),
     "judge_qwk": (True, "qwk"),
 }
 

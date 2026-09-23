@@ -98,3 +98,25 @@ def test_evaluation_leaves_no_raw_transcripts_behind(tmp_path, monkeypatch) -> N
     evaluate(config)
     leftovers = [p for p in tmp_path.iterdir() if p.name.startswith("callqa-eval-")]
     assert not leftovers, f"raw evaluation tree left behind: {leftovers}"
+
+
+def test_the_gate_notices_redaction_that_was_never_applied(monkeypatch) -> None:
+    """Recall scores the DETECTOR over the reference text, so with redaction
+    switched off it still read 1.0 and the gate passed. Applied recall scores
+    the transcript the pipeline actually wrote, and one surviving identifier
+    is a regression with zero tolerance."""
+    from callqa.config import Config
+
+    config = Config()
+    config.run.mock = True
+    config.audio.vad = "energy"
+    config.asr.engine = "mock"
+    config.judge.engine = "mock"
+    good = evaluate(config)
+    assert good.redaction_applied_recall_mean == 1.0
+
+    config.redaction.enabled = False
+    leaking = evaluate(config)
+    assert leaking.redaction_recall_mean == 1.0             # the detector is still fine
+    assert leaking.redaction_applied_recall_mean == 0.0     # the artifact is not
+    assert {r["metric"] for r in compare(leaking, good)} == {"redaction_applied_recall_mean"}

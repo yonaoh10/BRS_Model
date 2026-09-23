@@ -32,6 +32,14 @@ logger = logging.getLogger(__name__)
 # ".<call>.dialog.json.<random>.tmp", holds the complete unredacted transcript,
 # and survived every retention run because of its suffix.
 RAW_GLOBS = ["transcripts/*", "audio/wav/*"]
+# The ORIGINAL recordings the `watch` driver moved out of the drop directory
+# once it had processed them. These are the rawest customer data in the whole
+# system - the voice itself, unredacted - and retention used to sweep only the
+# output tree, so every recording `watch` had ever handled was kept forever.
+# Only the two folders the pipeline itself creates are touched: never
+# input/calls/, which belongs to the bank's recording system and its own
+# retention policy.
+RAW_INPUT_GLOBS = ["processed/*", "failed/*"]
 RETENTION_DIR = "retention"
 
 
@@ -42,12 +50,20 @@ class Expired:
     bytes: int
 
 
-def find_expired(output_dir: Path, raw_days: int, now: float | None = None) -> list[Expired]:
+def _sweep_roots(output_dir: Path, input_dir: Path | None) -> list[tuple[Path, str]]:
+    roots = [(output_dir, g) for g in RAW_GLOBS]
+    if input_dir is not None:
+        roots += [(input_dir, g) for g in RAW_INPUT_GLOBS]
+    return roots
+
+
+def find_expired(output_dir: Path, raw_days: int, now: float | None = None,
+                 input_dir: Path | None = None) -> list[Expired]:
     now = now if now is not None else time.time()
     cutoff = raw_days * 86400
     out: list[Expired] = []
-    for glob in RAW_GLOBS:
-        for f in sorted(output_dir.glob(glob)):
+    for root, glob in _sweep_roots(output_dir, input_dir):
+        for f in sorted(root.glob(glob)):
             if not f.is_file():
                 continue
             age = now - f.stat().st_mtime
@@ -56,9 +72,20 @@ def find_expired(output_dir: Path, raw_days: int, now: float | None = None) -> l
     return out
 
 
-def apply_retention(output_dir: Path, raw_days: int, now: float | None = None) -> list[dict]:
+def _label(path: Path, output_dir: Path, input_dir: Path | None) -> str:
+    for root, prefix in ((output_dir, ""), (input_dir, "input/")):
+        if root is not None:
+            try:
+                return prefix + str(path.relative_to(root))
+            except ValueError:
+                continue
+    return str(path)                                  # pragma: no cover
+
+
+def apply_retention(output_dir: Path, raw_days: int, now: float | None = None,
+                    input_dir: Path | None = None) -> list[dict]:
     """Destroy expired RAW artifacts; append each to retention/log.jsonl."""
-    expired = find_expired(output_dir, raw_days, now)
+    expired = find_expired(output_dir, raw_days, now, input_dir)
     log_path = output_dir / RETENTION_DIR / "log.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     destroyed: list[dict] = []
@@ -66,7 +93,7 @@ def apply_retention(output_dir: Path, raw_days: int, now: float | None = None) -
     with log_path.open("a", encoding="utf-8") as fh:
         for e in expired:
             try:
-                rel = str(e.path.relative_to(output_dir))
+                rel = _label(e.path, output_dir, input_dir)
                 e.path.unlink()
             except OSError as exc:  # pragma: no cover - defensive
                 logger.warning("could not destroy %s: %s", e.path, exc)

@@ -226,10 +226,13 @@ an answer to how long they live and how they are destroyed.
 
 The policy ships as configuration — `retention.raw_days` (default **90**) — so
 each deployment can set its own window. `callqa retention` (no flag) lists the raw,
-PII-bearing artifacts older than the window (`transcripts/*.json`,
-`transcripts/*.dialog.json`, `audio/wav/*`, `redacted_audio/*`). `callqa retention
---apply` destroys them and **keeps** the derived, non-PII outputs — redacted
-transcripts, scores, reports, calibration — writing every deletion to
+PII-bearing artifacts older than the window: everything in `transcripts/` and
+`audio/wav/` (including the temp file an interrupted write leaves behind), plus
+the original recordings the `watch` driver moved into `input/processed/` and
+`input/failed/`. It never touches `input/calls/`, which belongs to the bank's
+recording system and its own policy. `callqa retention --apply` destroys them
+and **keeps** the derived, non-PII outputs — redacted transcripts, redacted
+audio, scores, reports, calibration — writing every deletion to
 `data/output/retention/log.jsonl` as the audit trail. (On an SSD an unlink does
 not guarantee the bytes are overwritten; the policy documents this and the bank's
 storage layer, e.g. full-disk encryption, is the backstop.)

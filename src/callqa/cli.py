@@ -441,12 +441,12 @@ def cmd_retention(args: argparse.Namespace) -> int:
     raw_days = config.retention.raw_days
     out = config.paths.output_dir
     if args.apply:
-        destroyed = apply_retention(out, raw_days)
+        destroyed = apply_retention(out, raw_days, input_dir=config.paths.input_dir)
         total = sum(d["bytes"] for d in destroyed)
         print(f"destroyed {len(destroyed)} raw artifact(s) older than {raw_days} days "
               f"({total // (1024*1024)} MiB); log: {out / 'retention' / 'log.jsonl'}")
         return EXIT_SUCCESS
-    expired = find_expired(out, raw_days)
+    expired = find_expired(out, raw_days, input_dir=config.paths.input_dir)
     if not expired:
         print(f"nothing older than {raw_days} days")
         return EXIT_SUCCESS
@@ -512,13 +512,23 @@ def cmd_drift(args: argparse.Namespace) -> int:
     """Compare the current output window to a known-good baseline and flag drift."""
     import json
 
-    from callqa.ops.drift import DRIFT_DIR, append_history, build_baseline, check_drift
+    from callqa.ops.drift import (
+        DRIFT_DIR,
+        DriftBaselineError,
+        append_history,
+        build_baseline,
+        check_drift,
+    )
 
     config = _load_config(args)
     baseline_path = config.paths.output_dir / DRIFT_DIR / "baseline.json"
 
     if args.set_baseline:
-        baseline = build_baseline(config.paths.output_dir)
+        try:
+            baseline = build_baseline(config.paths.output_dir, force=args.force)
+        except DriftBaselineError as exc:
+            print(str(exc), file=sys.stderr)
+            return EXIT_FAILED
         baseline_path.parent.mkdir(parents=True, exist_ok=True)
         baseline_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2),
                                  encoding="utf-8")
@@ -562,6 +572,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
           f"role-acc {report.role_accuracy_mean}")
     print(f"  redaction recall {report.redaction_recall_mean}  "
           f"precision {report.redaction_precision_mean}  F1 {report.redaction_f1_mean}")
+    print(f"  redaction applied to the written transcripts {report.redaction_applied_recall_mean}")
     print(f"  judge QWK {report.judge_qwk}")
     print(f"  report: {report_path}")
     if report.golden_set == "synthetic":
