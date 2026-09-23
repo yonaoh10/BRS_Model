@@ -63,6 +63,12 @@ ENTITY_LABELS_HE = {
 }
 
 MASK = "████"
+# A replacement token as it appears in redacted text, e.g. <ת"ז:████>.
+_MASK_TOKEN_RE = re.compile(r"<[^<>:]{1,20}:" + MASK + ">")
+
+
+class RedactionConfigError(RuntimeError):
+    """Redaction is configured in a way this machine cannot honour."""
 
 
 def replacement_token(entity_type: str) -> str:
@@ -339,6 +345,32 @@ def _looks_like_amount(text: str, end: int) -> bool:
     return any(word in window for word in AMOUNT_AFTER)
 
 
+# "The account" / "to the account" names an identifier; "IN the account"
+# introduces an amount. Hebrew marks the difference with one letter:
+#     "יש לך בחשבון 150000 שקל"          -> a balance, a real amount
+#     "העברתי לחשבון 481902 עוד אלף שקל" -> account 481902, then an amount
+#     "החשבון שלי 481902 שקלים"          -> my account is 481902
+# Excluding bare "חשבון" from STRONG_ID_PHRASES protected the first sentence
+# and leaked the other two - and 6-8 digits is the ordinary length of an
+# Israeli bank account number, so the leak was in the most common phrasing a
+# bank call has. Only the fillers below may sit between the word and the digits.
+_ACCOUNT_WORD_RE = re.compile(r"(?<![\u0590-\u05FF])([הלו]{0,2})חשבון(?![\u0590-\u05FF])")
+_ACCOUNT_FILLERS = frozenset("שלי שלך שלו שלה שלנו הוא זה מספר הנה".split())
+
+
+def _account_named_just_before(text: str, start: int) -> bool:
+    before = text[max(0, start - CONTEXT_BEFORE):start]
+    last = None
+    for m in _ACCOUNT_WORD_RE.finditer(before):
+        last = m
+    if last is None or "ב" in last.group(1):
+        return False
+    between = before[last.end():]
+    words = re.findall(r"[\u0590-\u05FF]+", between)
+    return len(words) <= 2 and all(w in _ACCOUNT_FILLERS for w in words) \
+        and not re.search(r"[.?!]", between)
+
+
 def _has_strong_id_phrase(before: str) -> bool:
     return any(phrase in before for phrase in STRONG_ID_PHRASES)
 
@@ -386,7 +418,8 @@ def _classify_run(text: str, start: int, end: int) -> str | None:
     # currency word is treated as an amount so balances/fees stay scoreable.
     if (_looks_like_amount(text, end)
             and len(digits) < 9
-            and not _has_strong_id_phrase(before)):
+            and not _has_strong_id_phrase(before)
+            and not (len(digits) >= 6 and _account_named_just_before(text, start))):
         return None
     if len(digits) >= 6 and structural_only:
         return "ACCOUNT_LIKE"
@@ -754,8 +787,26 @@ _STREET_ANCHOR_RE = re.compile(rf"(?<![\w֐-׿])[{_PROCLITICS}]?"
                                rf"(?![\w֐-׿])")
 
 
+# A caller naming themselves. The verification rules only catch a name that
+# answers a question, and a customer usually says who they are before anyone
+# asks: "שלום, קוראים לי מיכל אברמוביץ". Only EXPLICIT naming phrases count -
+# "מדבר/מדברת X" is how a banker opens ("מדבר יועץ מהמוקד") and what follows it
+# is as often a role as a name, so masking it would erase the opening the
+# rubric scores while protecting nobody.
+_SELF_NAMING_RE = re.compile(
+    r"(?<![\u0590-\u05FF])(?:קוראים\s+לי|שמי|השם\s+שלי(?:\s+הוא|\s+היא)?|שמי\s+הוא)"
+    r"(?![\u0590-\u05FF])"
+)
+
+
 def _volunteered_spans(text: str) -> list[PIIMatch]:
     found: list[PIIMatch] = []
+
+    for m in _SELF_NAMING_RE.finditer(text):
+        clause = _CLAUSE_END_RE.search(text, m.end())
+        span = _extract_person(text, m.end(), clause.start() if clause else len(text))
+        if span and span[1] > span[0]:
+            found.append(PIIMatch("PERSON", span[0], span[1]))
 
     # A date spoken in words next to a birth word. The numeric form of this is
     # already covered by DATE_RE + BIRTH_CONTEXT in the shape pass; this is the
@@ -918,6 +969,56 @@ class RegexRedactor:
                  models_dir: Path | None = None) -> None:
         self.config = config or RedactionConfig()
         self.models_dir = Path(models_dir) if models_dir else Path("models")
+        # NER used to live only inside PresidioRedactor, so once presidio became
+        # opt-in `redaction.ner: true` silently did nothing - a privacy control
+        # the operator switched on, switched off behind their back. It belongs
+        # here, independent of presidio.
+        self._ner = self._load_ner() if self.config.ner else None
+
+    def _load_ner(self):  # noqa: ANN202
+        """DictaBERT-NER from paths.models_dir, or a hard stop.
+
+        Not a warning and a quiet fallback. An operator who set
+        `redaction.ner: true` believes names nobody asked for are being masked;
+        running on without the model leaks exactly those names while every
+        artifact still claims to be redacted. It fails once, at engine build,
+        before a single call is touched - with what to do about it.
+        """
+        # Under paths.models_dir, not a hardcoded "models/": weights on another
+        # volume - the normal case on a server - disabled NER with a warning
+        # that read as though the model itself were broken.
+        model_path = self.models_dir / "dictabert-ner"
+        try:
+            from transformers import pipeline as hf_pipeline  # lazy import
+
+            return hf_pipeline("ner", model=str(model_path), aggregation_strategy="simple")
+        except Exception as exc:  # noqa: BLE001 - re-raised with guidance
+            raise RedactionConfigError(
+                f"redaction.ner is on, but DictaBERT-NER could not be loaded from "
+                f"{model_path} ({type(exc).__name__}: {exc}).\n"
+                "Download it with `python scripts/download_models.py --ner`, or set "
+                "redaction.ner: false to run on the built-in rules alone."
+            ) from exc
+
+    def _apply_ner(self, text: str, counts: dict[str, int]) -> str:
+        """Mask the PERSON entities the NER model finds, around existing masks.
+
+        An entity that overlaps a mask already written is skipped: masking over
+        a replacement token would corrupt it into something neither the judge
+        nor the reviewer can read.
+        """
+        if self._ner is None:
+            return text
+        existing = [(m.start(), m.end()) for m in _MASK_TOKEN_RE.finditer(text)]
+        for ent in sorted(self._ner(text), key=lambda e: e["start"], reverse=True):
+            if ent.get("entity_group") not in ("PER", "PERSON"):
+                continue
+            start, end = int(ent["start"]), int(ent["end"])
+            if any(start < b and a < end for a, b in existing):
+                continue
+            text = text[:start] + replacement_token("PERSON") + text[end:]
+            counts["PERSON"] = counts.get("PERSON", 0) + 1
+        return text
 
     def redact_dialog(
         self, dialog: DialogTranscript, extra_names: list[str] | None = None
@@ -980,6 +1081,7 @@ class RegexRedactor:
             text, n_names = redact_names(text, extra_names)
             if n_names:
                 counts["PERSON"] = counts.get("PERSON", 0) + n_names
+            text = self._apply_ner(text, counts)
             for k, v in counts.items():
                 totals[k] = totals.get(k, 0) + v
             turns.append(
@@ -1036,24 +1138,8 @@ class PresidioRedactor(RegexRedactor):
     def __init__(self, config: RedactionConfig, models_dir: Path | None = None) -> None:
         from presidio_analyzer import AnalyzerEngine
 
-        super().__init__(config, models_dir)
+        super().__init__(config, models_dir)       # includes NER, when enabled
         self.analyzer = AnalyzerEngine()
-        self._ner = self._load_ner() if config.ner else None
-
-    def _load_ner(self):  # noqa: ANN202
-        # Under paths.models_dir, not a hardcoded "models/": an operator who
-        # put the weights on a different volume - the normal case on a server,
-        # where models do not live beside the code - got NER silently disabled
-        # with a warning that read like the model was broken.
-        model_path = self.models_dir / "dictabert-ner"
-        try:
-            from transformers import pipeline as hf_pipeline  # lazy import
-
-            return hf_pipeline("ner", model=str(model_path), aggregation_strategy="simple")
-        except Exception as exc:  # pragma: no cover - server-only path
-            logger.warning("DictaBERT-NER unavailable at %s (%s); NER redaction disabled",
-                           model_path, exc)
-            return None
 
     def _redact(self, dialog: DialogTranscript, extra_names: list[str]) -> RedactedTranscript:
         base = super()._redact(dialog, extra_names)
@@ -1069,12 +1155,6 @@ class PresidioRedactor(RegexRedactor):
                 entity = self.ENTITY_MAP.get(res.entity_type, res.entity_type)
                 text = text[:res.start] + replacement_token(entity) + text[res.end:]
                 totals[entity] = totals.get(entity, 0) + 1
-            if self._ner is not None:
-                for ent in sorted(self._ner(text), key=lambda e: e["start"], reverse=True):
-                    if ent.get("entity_group") in ("PER", "PERSON"):
-                        text = (text[:ent["start"]] + replacement_token("PERSON")
-                                + text[ent["end"]:])
-                        totals["PERSON"] = totals.get("PERSON", 0) + 1
             turns.append(RedactedTurn(speaker=turn.speaker, start=turn.start,
                                       end=turn.end, text=text))
         return RedactedTranscript(call_id=dialog.call_id, engine=self.name, turns=turns,
@@ -1097,10 +1177,16 @@ def build_redactor(config: RedactionConfig, mock: bool,
     cards by Luhn, e-mail and IBAN directly, so presidio's contribution on
     Hebrew text is IP addresses and very little else.
     """
-    if mock or not config.presidio:
+    if mock:
+        # Mock mode runs with no models by definition; a config that enables
+        # NER must not make the models-free smoke test demand one.
+        return RegexRedactor(config.model_copy(update={"ner": False}), models_dir)
+    if not config.presidio:
         return RegexRedactor(config, models_dir)
     try:
         return PresidioRedactor(config, models_dir)
+    except RedactionConfigError:
+        raise                       # NER was asked for and is missing: never swallow
     except ImportError:
         logger.warning("redaction.presidio is on but presidio is not installed; "
                        "using the built-in regex redactor")

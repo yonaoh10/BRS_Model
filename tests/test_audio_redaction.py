@@ -302,3 +302,84 @@ def test_recomputed_redaction_regenerates_stale_audio(processed) -> None:  # noq
     (workspace.paths.output_dir / "redacted" / f"{call.call_id}.json").unlink()  # force recompute
     process_call(call, engines, StateDB(workspace.paths.state_db))
     assert wav.read_bytes()[:4] == b"RIFF", "recomputed redaction must rewrite the audio"
+
+
+# -- coverage is accounted per TURN, never by time ----------------------------
+#
+# The safety net used to ask "does any silenced word overlap this turn's time
+# span?". That leaks on the most ordinary recording there is: stereo turns
+# overlap in time, so an identifier silenced in one speaker's turn marked the
+# other speaker's overlapping turn as covered. Found by an adversarial review,
+# reproduced, fixed; these pin every shape of it.
+
+def _silenced(ranges: list[tuple[float, float]], start: float, end: float) -> bool:
+    return any(a <= start and b >= end for a, b in ranges)
+
+
+def test_an_overlapping_turn_of_the_other_speaker_is_not_covered_by_time() -> None:
+    from callqa.audio_redaction import masked_time_ranges
+    from callqa.redaction import RegexRedactor
+
+    banker = DialogTurn(speaker="banker", start=0.0, end=10.0,
+                        text="אפשר לחזור אליך לטלפון 052-1234567 תודה",
+                        words=_words("אפשר לחזור אליך לטלפון 052-1234567 תודה", 0.5, 1.5))
+    # The customer speaks over the banker, and the ASR produced no word timings.
+    customer = DialogTurn(speaker="customer", start=2.0, end=8.0,
+                          text="תעודת זהות 123456782", words=[])
+    dialog = DialogTranscript(call_id="OV", attribution_mode="stereo",
+                              turns=[banker, customer])
+    redacted = RegexRedactor().redact_dialog(dialog)
+
+    ranges = masked_time_ranges(dialog, [], redacted)
+    assert _silenced(ranges, 2.0, 8.0), f"the customer's national ID stays audible: {ranges}"
+
+
+def test_a_second_identifier_in_a_partially_timed_turn_is_not_hidden_by_the_first() -> None:
+    """Locating identifier A in a turn used to mark the whole turn covered, so
+    identifier B - present in the text, absent from a partial word list -
+    played in the clear. Counting, not overlap, is what closes it."""
+    from callqa.audio_redaction import masked_time_ranges
+    from callqa.redaction import RegexRedactor
+
+    text = "הטלפון 052-1234567 ותעודת הזהות 123456782"
+    turn = DialogTurn(speaker="customer", start=0.0, end=12.0, text=text,
+                      # the word list stops before the national ID
+                      words=_words("הטלפון 052-1234567", 0.0, 1.0))
+    dialog = DialogTranscript(call_id="PART", attribution_mode="stereo", turns=[turn])
+    redacted = RegexRedactor().redact_dialog(dialog)
+
+    ranges = masked_time_ranges(dialog, [], redacted)
+    assert _silenced(ranges, 0.0, 12.0), f"the second identifier stays audible: {ranges}"
+
+
+def test_whatever_the_text_masked_is_silent_even_if_audio_detection_cannot_see_it() -> None:
+    """The redacted transcript is the ground truth. A mask written by a rule or
+    model the audio stage does not re-run - NER, presidio, anything added
+    later - must still silence that turn."""
+    from callqa.audio_redaction import masked_time_ranges
+    from callqa.models import RedactedTranscript, RedactedTurn
+
+    # A third party named in passing: no rule in find_pii recognises it (no
+    # question, no self-naming phrase), only a model would.
+    spoken = "תמסור בבקשה למיכל אברמוביץ שהתקשרתי"
+    turn = DialogTurn(speaker="customer", start=3.0, end=7.0,
+                      text=spoken, words=_words(spoken, 3.0, 0.8))
+    dialog = DialogTranscript(call_id="NER", attribution_mode="stereo", turns=[turn])
+    # As if an NER model had masked the name; nothing in find_pii knows it.
+    redacted = RedactedTranscript(
+        call_id="NER", engine="ner", enabled=True, redaction_counts={"PERSON": 1},
+        turns=[RedactedTurn(speaker="customer", start=3.0, end=7.0,
+                            text="תמסור בבקשה ל<שם:████> שהתקשרתי")])
+
+    assert _silenced(masked_time_ranges(dialog, [], redacted), 3.0, 7.0)
+
+
+def test_a_clean_turn_is_not_silenced() -> None:
+    """The other direction: accounting must not turn into silencing everything."""
+    from callqa.audio_redaction import masked_time_ranges
+    from callqa.redaction import RegexRedactor
+
+    turn = DialogTurn(speaker="banker", start=0.0, end=5.0, text="בוקר טוב, איך אפשר לעזור?",
+                      words=_words("בוקר טוב, איך אפשר לעזור?", 0.0, 1.0))
+    dialog = DialogTranscript(call_id="CLEAN", attribution_mode="stereo", turns=[turn])
+    assert masked_time_ranges(dialog, [], RegexRedactor().redact_dialog(dialog)) == []

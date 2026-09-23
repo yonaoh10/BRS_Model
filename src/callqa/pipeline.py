@@ -427,8 +427,13 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                     from callqa.audio_redaction import produce_redacted_audio
 
                     names = [call.banker_name] if call.banker_name else []
+                    # The redacted transcript is the ground truth for what
+                    # must be silent: the audio re-detects to place silences
+                    # precisely, but whatever the TEXT masked - by any rule or
+                    # model - is never allowed to remain audible.
                     produce_redacted_audio(dialog=dialog, audio_art=audio_art,
-                                           extra_names=names, out_wav=audio_out)
+                                           extra_names=names, out_wav=audio_out,
+                                           redacted=redacted)
                 except Exception as exc:  # noqa: BLE001 - never fail a call on audio
                     logger.warning("redacted audio not produced for %s: %s",
                                    call_id, sanitize_error(exc))

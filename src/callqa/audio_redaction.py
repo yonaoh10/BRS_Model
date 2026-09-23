@@ -34,8 +34,8 @@ from pathlib import Path
 import numpy as np
 
 from callqa.audio import _read_wav, _write_wav
-from callqa.models import AudioArtifact, DialogTranscript
-from callqa.redaction import TURN_SEPARATOR, TurnSpan, _name_pattern, find_pii
+from callqa.models import AudioArtifact, DialogTranscript, RedactedTranscript
+from callqa.redaction import MASK, TURN_SEPARATOR, TurnSpan, _name_pattern, find_pii
 
 logger = logging.getLogger(__name__)
 
@@ -132,57 +132,74 @@ def _merge(ranges: list[tuple[float, float]]) -> list[tuple[float, float]]:
 
 
 def masked_time_ranges(
-    dialog: DialogTranscript, extra_names: list[str] | None = None
+    dialog: DialogTranscript,
+    extra_names: list[str] | None = None,
+    redacted: RedactedTranscript | None = None,
 ) -> list[tuple[float, float]]:
     """Second-ranges of the audio to silence: every masked identifier + name.
 
-    Two passes, so the audio mirrors the text mask exactly:
+    Two passes, so the audio is never LESS silenced than the text is masked:
 
     1. **Word pass** - detect over a document rebuilt from ``turn.words`` and
-       map each masked span to its words' precise (start, end). This gives tight
-       silence where the ASR gave us word timings, which is the common case.
-    2. **Text safety net** - detect over the SAME joined-text document the
-       redactor masks (cross-turn), and for every masked span silence the WHOLE
-       of each overlapping turn that the word pass did not already cover. This
-       closes the gap when a turn's ``words`` do not faithfully reproduce its
-       ``text`` (empty or partial word timings, or a number split across a
-       wordless turn boundary): without it, such an identifier would play in the
-       clear even though the transcript masks it.
+       map each detected span to its words' precise (start, end). Tight
+       silence wherever the ASR gave word timings, which is the common case.
+    2. **Per-turn accounting** - for every turn, how many identifiers MUST be
+       silent there, against how many the word pass actually located there.
+       Any shortfall silences the whole turn.
+
+    "Must be silent" is the larger of two counts: the masks the text redactor
+    actually wrote into that turn (`redacted`, when given - the ground truth,
+    whatever produced it: shape rules, question-and-answer rules, NER, or a
+    detector added later), and the identifiers a detection over the joined turn
+    text finds touching that turn (which catches the tail of a number split
+    across a turn boundary - the text redactor removes that tail without
+    writing a mask, so it does not show up in the first count).
+
+    Accounting is by TURN INDEX, never by time. It used to be by time - "does
+    any silenced word overlap this turn's span?" - and that is a leak on the
+    most ordinary recording there is: stereo turns overlap in time, so a phone
+    number silenced in the banker's turn marked the customer's overlapping turn
+    as covered, and the national ID spoken in it played in the clear. The same
+    rule leaked a second identifier in any single turn whose word list was
+    partial, because locating the first one "covered" the turn.
     """
     names = extra_names or []
 
-    # Pass 1: precise word-level ranges. word_hits keeps the UNPADDED spans for
-    # the coverage test below, so a neighbouring turn's padding cannot make a
-    # turn look covered when it is not.
+    # Pass 1: precise word-level ranges, and which turn each one landed in.
     word_doc, word_spans, word_turns = _spoken_document(dialog)
     ranges: list[tuple[float, float]] = []
-    word_hits: list[tuple[float, float]] = []
+    located = [0] * len(dialog.turns)
     for s0, s1 in _all_pii_spans(word_doc, names, word_turns):
         hits = [(ts, te) for (c0, c1, ts, te) in word_spans if c0 < s1 and s0 < c1]
-        if hits:
-            lo, hi = min(t for t, _ in hits), max(t for _, t in hits)
-            word_hits.append((lo, hi))
-            ranges.append((lo - AUDIO_PAD_SEC, hi + AUDIO_PAD_SEC))
+        if not hits:
+            continue
+        lo, hi = min(t for t, _ in hits), max(t for _, t in hits)
+        ranges.append((lo - AUDIO_PAD_SEC, hi + AUDIO_PAD_SEC))
+        for i, t in enumerate(word_turns):
+            if t.start < s1 and s0 < t.end:
+                located[i] += 1
 
-    # Pass 2: the cross-turn safety net over the redactor's own document.
-    turn_spans = _text_document(dialog)
-    text_turns = [TurnSpan(c0, c1, turn.speaker) for c0, c1, turn in turn_spans]
+    # Pass 2: what must be silent in each turn.
+    required = [0] * len(dialog.turns)
+    text_spans = _text_document(dialog)
+    text_turns = [TurnSpan(c0, c1, turn.speaker) for c0, c1, turn in text_spans]
     for s0, s1 in _all_pii_spans(_joined_text(dialog), names, text_turns):
-        for c0, c1, turn in turn_spans:
-            if c0 < s1 and s0 < c1 and not _covered(turn, word_hits):
-                ranges.append((turn.start - AUDIO_PAD_SEC, turn.end + AUDIO_PAD_SEC))
+        for i, (c0, c1, _turn) in enumerate(text_spans):
+            if c0 < s1 and s0 < c1:
+                required[i] += 1
+    if redacted is not None and len(redacted.turns) == len(dialog.turns):
+        for i, turn in enumerate(redacted.turns):
+            required[i] = max(required[i], turn.text.count(MASK))
+
+    for i, turn in enumerate(dialog.turns):
+        if required[i] > located[i]:
+            ranges.append((turn.start - AUDIO_PAD_SEC, turn.end + AUDIO_PAD_SEC))
 
     return _merge(ranges)
 
 
 def _joined_text(dialog: DialogTranscript) -> str:
     return TURN_SEPARATOR.join(turn.text for turn in dialog.turns)
-
-
-def _covered(turn: object, word_hits: list[tuple[float, float]]) -> bool:
-    """True if a precise word-range already lands inside this turn's time span."""
-    start, end = turn.start, turn.end  # type: ignore[attr-defined]
-    return any(a < end and start < b for a, b in word_hits)
 
 
 def _load_source(audio_art: AudioArtifact) -> tuple[np.ndarray, int]:
@@ -264,13 +281,14 @@ def produce_redacted_audio(
     dialog: DialogTranscript,
     extra_names: list[str] | None,
     out_wav: Path,
+    redacted: RedactedTranscript | None = None,
 ) -> list[tuple[float, float]]:
     """Write the redacted WAV and its sidecar metadata. Returns the silences.
 
     The sidecar ``<id>.json`` next to the WAV carries the duration, sample rate
     and silence ranges the dashboard draws on the timeline.
     """
-    ranges = masked_time_ranges(dialog, extra_names)
+    ranges = masked_time_ranges(dialog, extra_names, redacted)
     duration, rate = write_redacted_wav(audio_art, ranges, out_wav)
     meta = {
         "duration": round(duration, 3),

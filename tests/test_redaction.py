@@ -198,3 +198,101 @@ def test_a_landmark_without_a_house_number_is_not_an_address() -> None:
     the customer lives. The house number is what separates them."""
     assert "████" not in redact_text("הסניף ברחוב דיזנגוף פתוח היום.")[0]
     assert "<כתובת:████>" in redact_text("רחוב הרצל 15 בחיפה.")[0]
+
+
+# -- NER is a privacy control: on means on -----------------------------------
+
+def test_ner_on_without_the_model_stops_instead_of_silently_running_without_it(
+    tmp_path, monkeypatch,
+) -> None:
+    """NER used to live only inside the presidio redactor, so once presidio was
+    made opt-in, `redaction.ner: true` did nothing at all - and before that, a
+    missing model degraded to a warning. Either way names the operator believed
+    were covered went through. Enabled-but-unavailable must be a hard stop at
+    engine build, before a single call is processed."""
+    from callqa.config import RedactionConfig
+    from callqa.redaction import RedactionConfigError, build_redactor
+
+    with pytest.raises(RedactionConfigError, match="download_models.py --ner"):
+        build_redactor(RedactionConfig(ner=True), mock=False, models_dir=tmp_path)
+
+
+def test_ner_masks_names_without_presidio_and_around_existing_masks(monkeypatch) -> None:
+    """NER must work on the default (presidio-off) path, and must never write a
+    mask over an existing one - that corrupts the token into something neither
+    the judge nor the reviewer can read."""
+    from callqa.config import RedactionConfig
+
+    def fake_ner(text: str) -> list[dict]:
+        out = []
+        for name in ("מיכל אברמוביץ", "████"):
+            i = text.find(name)
+            if i >= 0:
+                out.append({"entity_group": "PER", "start": i, "end": i + len(name)})
+        return out
+
+    monkeypatch.setattr(RegexRedactor, "_load_ner", lambda self: fake_ner)
+    redactor = RegexRedactor(RedactionConfig(ner=True))
+    dialog = DialogTranscript(call_id="N", attribution_mode="stereo", turns=[
+        DialogTurn(speaker="customer", start=0, end=5,
+                   text="שלום, מדברת מיכל אברמוביץ, ת.ז 123456782")])
+    text = redactor.redact_dialog(dialog).turns[0].text
+    assert "מיכל אברמוביץ" not in text
+    assert "<שם:████>" in text
+    assert '<ת"ז:████>' in text                  # the existing mask survived intact
+
+
+# -- "the account" names an identifier; "in the account" introduces an amount -
+
+@pytest.mark.parametrize("line", [
+    "החשבון שלי 481902 שקלים",
+    "החשבון 481902 אלף",
+    "העברתי לחשבון 481902 עוד אלף שקל",
+    "והחשבון הוא 7654321 שקל",
+])
+def test_an_account_number_next_to_a_currency_word_is_masked(line: str) -> None:
+    """6-8 digits is the ordinary length of an Israeli account number, and the
+    amount exception let every one of these through because a currency word
+    followed. Found by adversarial review after being wrongly dismissed here -
+    the dismissal tested sentences that really were amounts."""
+    redacted, counts = redact_text(line)
+    assert "████" in redacted, redacted
+    assert counts.get("ACCOUNT_LIKE") == 1
+
+
+@pytest.mark.parametrize("line", [
+    "יש לך בחשבון 150000 שקל",
+    "בחשבון החיסכון 250000 שקל",
+    "הלוואה של 150000 שקל",
+    "החשבון נסגר. 150000 שקל הועברו",
+])
+def test_a_balance_or_loan_amount_is_still_an_amount(line: str) -> None:
+    """The other direction. "בחשבון" - IN the account - introduces a balance,
+    and the compliance and clarity dimensions are scored on the amounts a
+    banker quotes. A sentence boundary also breaks the link to the account."""
+    redacted, counts = redact_text(line)
+    assert "████" not in redacted, redacted
+
+
+@pytest.mark.parametrize(("line", "name"), [
+    ("שלום, קוראים לי מיכל אברמוביץ, אני מתקשרת בקשר לחשבון", "מיכל אברמוביץ"),
+    ("שמי דוד כהן.", "דוד כהן"),
+    ("השם שלי הוא רונית לוי", "רונית לוי"),
+])
+def test_a_customer_who_names_themselves_is_masked(line: str, name: str) -> None:
+    """Only the banker's name reached the redactor (from metadata), and the
+    question-driven rules need a question. A customer usually says who they are
+    before anyone asks."""
+    redacted, _ = redact_text(line)
+    assert name not in redacted and "<שם:████>" in redacted, redacted
+
+
+@pytest.mark.parametrize("line", [
+    "שלום, הגעת לבנק, מדבר יועץ מהמוקד. במה אפשר לעזור?",
+    "בוקר טוב, מדבר בנקאי מצוות ההלוואות.",
+    "קוראים לזה מסלול חודשי",
+])
+def test_a_banker_opening_is_not_mistaken_for_a_name(line: str) -> None:
+    """"מדבר X" is how a banker opens, and X is as often a role as a name.
+    Masking it erases the opening the rubric scores and protects nobody."""
+    assert "████" not in redact_text(line)[0]
