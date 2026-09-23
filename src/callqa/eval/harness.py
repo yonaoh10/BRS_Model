@@ -60,7 +60,8 @@ SYNTHETIC_SET_NOTE = (
     "so these are 0.0/1.0 by construction and only move when behaviour changes. "
     "redaction_recall and redaction_precision ARE real measurements - the gold "
     "identifiers are hand-labelled independently of the detector. Point "
-    "eval.golden_dir at a human-labelled set of real calls to measure accuracy."
+    "`callqa eval --golden-dir` at a human-labelled set of real calls to measure "
+    "accuracy."
 )
 
 

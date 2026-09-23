@@ -108,10 +108,13 @@ dialogs in `asr/fixtures.py`, which carry known speaker labels and text (⇒
 transcription and speaker-separation references) and a seeded, checksum-valid ID
 and phone (⇒ redaction span references), together with the seeded human ratings
 (⇒ judge-agreement references). A bank that wants real-world fidelity points
-`eval.golden_dir` at its own labelled set, kept out of the repo because it holds
+`callqa eval --golden-dir` at its own labelled set, kept out of the repo because it holds
 customer data.
 
-**Metrics** (`eval/metrics.py`, `eval/diarization.py`):
+**Metrics** (`eval/metrics.py`; the DER scorer stayed in
+`scripts/eval_diarization.py`, which the harness shells out to rather than
+importing — moving it into the package was considered and not done, because it
+needs an RTTM reference the synthetic set does not have):
 - **Transcription** — WER and CER via a small standard-library Levenshtein
   (≈30 lines; adding `jiwer` for that is not justified air-gapped).
 - **Speaker separation** — DER, best-pairing separation, role accuracy, reused

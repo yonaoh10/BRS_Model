@@ -106,6 +106,37 @@ def _update_manifest(models_dir: Path, entry: dict) -> None:
     print(f"   manifest updated: {manifest_path}")
 
 
+def _licence_of(model_id: str, local_path: Path) -> str:
+    """The licence the model's own card declares, recorded at download time.
+
+    A bank's compliance review asks what every model is licensed under, and the
+    honest answer is whatever the publisher says TODAY - not whatever a table in
+    a document said when it was written. Model cards get relicensed, and a
+    judge model is chosen at deployment time and cannot be listed in advance at
+    all. So this reads it from the card that came with the weights.
+
+    Best-effort by design: an unreadable card records "unknown" rather than
+    failing the download, and "unknown" is itself the useful answer - it tells
+    the reviewer to go and look.
+    """
+    for name in ("README.md", "LICENSE", "LICENSE.txt"):
+        card = local_path / name
+        if not card.exists():
+            continue
+        try:
+            head = card.read_text(encoding="utf-8", errors="replace")[:4000]
+        except OSError:                               # pragma: no cover - defensive
+            continue
+        # YAML front matter on a HF model card: `license: apache-2.0`
+        for line in head.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("license:"):
+                value = stripped.split(":", 1)[1].strip().strip("\"'")
+                if value:
+                    return value
+    return "unknown - read the model card at https://huggingface.co/" + model_id
+
+
 def _record(models_dir: Path, role: str, model_id: str, local_path: Path) -> None:
     # Content hash of the weights, computed once here at download time. Preflight
     # re-hashes with --deep to verify the loaded weights are the ones that
@@ -125,6 +156,7 @@ def _record(models_dir: Path, role: str, model_id: str, local_path: Path) -> Non
             "local_path": str(local_path),
             "size_bytes": _dir_size(local_path),
             "sha256": weight_sha256,
+            "license": _licence_of(model_id, local_path),
             "downloaded_at": datetime.now(UTC).isoformat(timespec="seconds"),
         },
     )

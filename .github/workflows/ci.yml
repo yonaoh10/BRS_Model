@@ -1,7 +1,11 @@
 name: CI
 
 # Runs in the DEVELOPMENT environment to validate a release before it is handed
-# to the air-gapped bank. The bank never runs CI.
+# to the bank. The bank never runs CI.
+#
+# Every step here runs with the CORE dependencies alone - no GPU, no models, no
+# network - which is the point: the whole pipeline is exercised end to end by a
+# runner that has none of those things.
 
 on:
   push:
@@ -12,6 +16,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # Both versions the project claims to support, and neither is allowed to
+      # hide the other's failure.
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
@@ -22,10 +29,30 @@ jobs:
       - name: Install
         run: pip install -e . ruff pytest
       - name: Lint
-        run: ruff check src tests scripts dashboard cloud
+        run: ruff check src tests scripts dashboard
       - name: Tests
         run: python -m pytest -q
+      # `if: always()` on the steps below because a test failure used to skip
+      # them: the evaluation gate - the whole point of the MLOps layer - had
+      # therefore never once executed in CI. A red suite must not be able to
+      # hide a second, different regression behind it.
       - name: Mock end-to-end
+        if: always()
         run: make mock-e2e
       - name: Evaluation gate (no regression vs baseline)
+        if: always()
         run: python -m callqa eval --mock --baseline eval/baseline.json
+      - name: Deployability of a bare archive
+        if: always()
+        # What a reviewer downloads from GitHub is `git archive`, not the
+        # working tree: git-ignored paths and empty directories are simply not
+        # there. This proves the thing they actually receive runs.
+        run: |
+          set -eux
+          git archive --format=tar --prefix=extract/ HEAD | tar -x -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/extract"
+          pip install -e .
+          python scripts/generate_sample_data.py
+          python -m callqa run --mock
+          python -m callqa report --mock
+          test -s data/output/reports/index.html
