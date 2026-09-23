@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from callqa.config import Config
+from callqa.ingestion import shown_name
 from callqa.models import AudioArtifact, CallInput, CallMeta, VADSegment
 from callqa.portable import CHILD_FLAGS, find_executable, make_private_dir, run_text
 
@@ -212,7 +213,7 @@ def _decode_stereo_window(
             # and the call. "Present" and "runnable" are different questions,
             # and the fail-closed promise has to survive the gap between them.
             logger.warning("ffmpeg could not be run for channel probing (%s); "
-                           "treating %s as one recording", exc, src.name)
+                           "treating %s as one recording", type(exc).__name__, shown_name(src))
             return None
         if proc.returncode != 0 or not proc.stdout:
             return None
@@ -227,13 +228,13 @@ def _decode_stereo_window(
     except _UNDECODABLE as exc:
         if not have_pyav():
             logger.warning("could not decode %s for channel probing (%s: %s)",
-                           src.name, type(exc).__name__, exc)
+                           shown_name(src), type(exc).__name__, exc)
             return None
         try:
             data, src_rate = decode_with_pyav(src, rate), rate
         except Exception as av_exc:  # noqa: BLE001 - fail closed, as for ffmpeg
             logger.warning("could not decode %s for channel probing (%s)",
-                           src.name, type(av_exc).__name__)
+                           shown_name(src), type(av_exc).__name__)
             return None
     if data.shape[1] < 2:
         return None
@@ -277,7 +278,7 @@ def probe_channels(src: Path, duration: float = 0.0) -> str:
     samples = _decode_stereo(src, duration)
     if samples is None or len(samples) == 0:
         logger.warning("could not sample the channels of %s; treating it as one "
-                       "recording", src.name)
+                       "recording", shown_name(src))
         return "dual_mono"
     left, right = samples[:, 0], samples[:, 1]
     left = left - left.mean()                  # a DC offset is not a speaker
@@ -461,7 +462,7 @@ def prepare_audio(
     elif config.speakers.mode == "stereo":
         if meta.channels < 2:
             raise AudioError(
-                f"speakers.mode='stereo' but {call.audio_path.name} has "
+                f"speakers.mode='stereo' but {shown_name(call.audio_path)} has "
                 f"{meta.channels} channel(s). Set speakers.mode to auto or mono."
             )
         layout = "stereo"

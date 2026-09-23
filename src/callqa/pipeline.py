@@ -440,7 +440,7 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             # on this feature, or a crash between the WAV and its sidecar).
             if redaction_recomputed or not audio_out.exists() or not audio_sidecar.exists():
                 try:
-                    from callqa.audio_redaction import produce_redacted_audio
+                    from callqa.audio_redaction import mask_fingerprint, produce_redacted_audio
 
                     names = [call.banker_name] if call.banker_name else []
                     # The redacted transcript is the ground truth for what
@@ -449,7 +449,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                     # model - is never allowed to remain audible.
                     produce_redacted_audio(dialog=dialog, audio_art=audio_art,
                                            extra_names=names, out_wav=audio_out,
-                                           redacted=redacted)
+                                           redacted=redacted,
+                                           mask_sha256=mask_fingerprint(redacted_path))
                 except Exception as exc:  # noqa: BLE001 - never fail a call on audio
                     logger.warning("redacted audio not produced for %s: %s",
                                    call_id, sanitize_error(exc))

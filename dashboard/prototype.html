@@ -724,7 +724,7 @@ function renderAll(){
   renderOverview(); renderCalls(); renderBankers(); renderCalibration(); go('overview');
 }
 async function boot(){
-  if(!TOKEN){ showEmpty('פועל רק מול השרת המקומי','הפעילו את השרת עם <code>python dashboard/server.py</code> ופתחו את הקישור שהוא מדפיס.'); return; }
+  if(!TOKEN){ showEmpty('פועל רק מול השרת המקומי','הפעילו את השרת עם <code>.venv\\Scripts\\python dashboard\\server.py</code> (ב־Linux: <code>.venv/bin/python dashboard/server.py</code>) ופתחו את הקישור שהוא מדפיס.'); return; }
   try{ const r=await fetch('/api/state?t='+encodeURIComponent(TOKEN)); if(!r.ok) throw 0; STATE=await r.json(); }
   catch(e){ showEmpty('לא ניתן לטעון את נתוני הצנרת','ודאו שהשרת פועל ונסו לרענן.'); return; }
   if(!STATE.calls||!STATE.calls.length){ renderProvenance(); showEmpty('עדיין לא נותחו שיחות','כשהצנרת תסיים לעבד שיחות, הן יופיעו כאן עם הציונים, הממדים והתמלילים.'); return; }

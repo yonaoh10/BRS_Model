@@ -32,18 +32,24 @@ def _find_chrome() -> str | None:
     override = os.environ.get("CALLQA_CHROME")
     if override and Path(override).exists():
         return override
+    local = os.environ.get("LOCALAPPDATA", "")
     for pattern in ("/opt/pw-browsers/chromium*/chrome-linux/chrome",
-                    str(Path.home() / ".cache/ms-playwright/chromium*/chrome-linux/chrome")):
+                    str(Path.home() / ".cache/ms-playwright/chromium*/chrome-linux/chrome"),
+                    str(Path(local) / "ms-playwright/chromium*/chrome-win/chrome.exe")):
         matches = sorted(glob.glob(pattern))
         if matches:
             return matches[-1]
-    return shutil.which("chromium") or shutil.which("google-chrome")
+    # Edge is on every Windows 10/11 machine and Playwright drives it - an
+    # offline VDI cannot `playwright install` a browser.
+    edge = [Path(os.environ.get(v, "")) / "Microsoft/Edge/Application/msedge.exe"
+            for v in ("ProgramFiles(x86)", "ProgramFiles")]
+    return (shutil.which("chromium") or shutil.which("google-chrome")
+            or next((str(e) for e in edge if e.is_file()), None))
 
 
 CHROME = _find_chrome()
 PAGE = Path(__file__).parent / "prototype.html"
-OUT = Path(__file__).parent / "qa-output"
-OUT.mkdir(exist_ok=True)
+OUT = Path(__file__).parent / "qa-output"      # the default; --out-dir overrides
 
 # Computes contrast against the nearest opaque painted ancestor background,
 # which is what the eye actually sees (a transparent card over a page colour).
@@ -200,6 +206,14 @@ def main() -> int:
     parser.add_argument("--chrome", default=None,
                         help="path to a Chromium binary (default: auto-detect)")
     args = parser.parse_args()
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+    from callqa.portable import configure_stdio
+
+    configure_stdio()
+    global OUT, PAGE
+    OUT = args.out_dir or OUT
+    PAGE = args.page or PAGE
+    OUT.mkdir(parents=True, exist_ok=True)
 
     try:
         from playwright.sync_api import sync_playwright
@@ -218,16 +232,22 @@ def main() -> int:
     # does) so every view renders real data.
     import sys as _sys
     import threading
-    from http.server import ThreadingHTTPServer
 
     _sys.path.insert(0, str(Path(__file__).parent))
-    from server import Handler  # noqa: E402
+    import secrets
 
-    Handler.token = "qa-token"
-    Handler.output_dir = Path(__file__).parent.parent / "data" / "output"
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    from server import Handler, _ExclusiveServer  # noqa: E402
+
+    # A fresh token and an exclusive port: on a shared host a fixed token in
+    # the repository and a reusable port let anyone else read what it serves.
+    # The demo tree (scripts/first_run.py) unless told otherwise - never the
+    # production output by default.
+    Handler.token = secrets.token_urlsafe(24)
+    demo = Path(__file__).parent.parent / "data" / "demo" / "output"
+    Handler.output_dir = demo if demo.is_dir() else Path(__file__).parent.parent / "data" / "output"
+    srv = _ExclusiveServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{srv.server_port}/?t=qa-token"
+    base = f"http://127.0.0.1:{srv.server_port}/?t={Handler.token}"
 
     findings: dict[str, list] = {}
     try:

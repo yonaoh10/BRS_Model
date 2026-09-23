@@ -75,13 +75,24 @@ def find_expired(output_dir: Path, raw_days: int, now: float | None = None,
 
 
 def _label(path: Path, output_dir: Path, input_dir: Path | None) -> str:
+    """Where a destroyed file was, for the permanent audit log.
+
+    Output artifacts are named by call id. Recordings in the input folder keep
+    the name the recorder gave them - often the caller's number or name - so
+    they are logged by that name's safe form, never the name itself.
+    """
+    from callqa.ingestion import shown_name
+
     for root, prefix in ((output_dir, ""), (input_dir, "input/")):
         if root is not None:
             try:
-                return prefix + path.relative_to(root).as_posix()
+                rel = path.relative_to(root)
             except ValueError:
                 continue
-    return str(path)                                  # pragma: no cover
+            if prefix:
+                rel = rel.with_name(shown_name(path))
+            return prefix + rel.as_posix()
+    return shown_name(path)                          # pragma: no cover
 
 
 def apply_retention(output_dir: Path, raw_days: int, now: float | None = None,

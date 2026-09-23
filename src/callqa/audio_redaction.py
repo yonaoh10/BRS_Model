@@ -26,6 +26,7 @@ something, the audio misses it too.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -273,12 +274,22 @@ def write_redacted_wav(
     return duration, rate
 
 
+def mask_fingerprint(redacted_json: Path) -> str:
+    """Which mask a silenced WAV was made for: the redacted transcript's content
+    hash (line endings normalised). The dashboard serves a WAV only while this
+    still matches - a comparison no clock step can fool, unlike file times on a
+    VDI restored from a snapshot."""
+    data = redacted_json.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
+
+
 def produce_redacted_audio(
     audio_art: AudioArtifact,
     dialog: DialogTranscript,
     extra_names: list[str] | None,
     out_wav: Path,
     redacted: RedactedTranscript | None = None,
+    mask_sha256: str | None = None,
 ) -> list[tuple[float, float]]:
     """Write the redacted WAV and its sidecar metadata. Returns the silences.
 
@@ -292,6 +303,8 @@ def produce_redacted_audio(
         "sample_rate": rate,
         "silences": [[round(a, 3), round(b, 3)] for a, b in ranges],
     }
+    if mask_sha256:
+        meta["mask_sha256"] = mask_sha256
     _atomic_write_json(out_wav.with_suffix(".json"), meta)
     logger.info("redacted audio: call_id=%s silences=%d duration=%.1fs",
                 dialog.call_id, len(ranges), duration)

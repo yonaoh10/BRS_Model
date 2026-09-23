@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import hmac
 import io
 import json
 import logging
+import os
 import re
+import secrets
 import subprocess
 import unicodedata
 import wave
@@ -51,6 +54,62 @@ def is_windows_reserved(name: str) -> bool:
     return name.split(".", 1)[0].strip().casefold() in WINDOWS_RESERVED_NAMES
 
 
+# Separators people put inside phone and ID numbers: "050-123-4567".
+_NUMBER_SEPARATORS = re.compile(r"[\s\-_.()+/]")
+
+
+def _looks_like_an_identifier(text: str) -> bool:
+    """Seven or more digits once the separators are gone: a phone, national ID
+    or account number, however the recorder punctuated it."""
+    return bool(_LONG_DIGIT_RUN.search(_NUMBER_SEPARATORS.sub("", text)))
+
+
+_ID_KEY: bytes | None = None
+
+
+def _install_key() -> bytes:
+    """A random per-installation key for naming recordings by digest.
+
+    A plain SHA-256 of a ten-digit phone number is reversed by trying all ten
+    billion numbers; keyed with a secret that never leaves this machine it
+    cannot be. Created once, beside the pipeline's data, readable by its owner.
+    """
+    global _ID_KEY
+    if _ID_KEY is None:
+        from callqa.portable import make_private_root, project_root
+
+        folder = project_root() / "data"
+        make_private_root(folder)
+        path = folder / ".callqa-id-key"
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                         0o600)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(secrets.token_bytes(32))
+        except FileExistsError:
+            pass
+        _ID_KEY = path.read_bytes()
+    return _ID_KEY
+
+
+def _digest(text: str) -> str:
+    return hmac.new(_install_key(), text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def shown_name(path: Path) -> str:
+    """A recording's name as it may appear in a log, a message or an artifact.
+
+    Recorders name files after the caller ("050-1234567.wav", a customer's
+    name in Hebrew), and those names used to reach every log line, error and
+    the ingestion record. Such a name is shown as the call id derived from it;
+    a plain safe name ("C0001.wav") is shown as itself.
+    """
+    stem = path.stem
+    if CALL_ID_RE.match(stem) and not _looks_like_an_identifier(stem):
+        return path.name
+    return sanitize_call_id(stem, warn=False) + path.suffix.lower()
+
+
 def sanitize_call_id(raw: str, *, warn: bool = True) -> str:
     """Turn an arbitrary filename stem into a safe call_id.
 
@@ -63,14 +122,17 @@ def sanitize_call_id(raw: str, *, warn: bool = True) -> str:
     stay distinct and the same name always gives the same id.
     """
     original = (raw or "").strip()
+    if original and _looks_like_an_identifier(original):
+        # A number in the name is the customer's, not the call's: none of it
+        # survives into the id, which appears in every path, log and report.
+        return f"call-{_digest(original)[:12]}"
     cleaned = _UNSAFE_CALL_ID_CHARS.sub("_", original).strip("._-")
     if not cleaned:
         cleaned = "call"
     if not cleaned[0].isalnum():
         cleaned = "c" + cleaned
     if cleaned != original and original:
-        digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:8]
-        cleaned = f"{cleaned[:55]}-{digest}"
+        cleaned = f"{cleaned[:55]}-{_digest(original)[:8]}"
     if is_windows_reserved(cleaned):
         cleaned = "c_" + cleaned
     cleaned = cleaned[:64]
@@ -376,17 +438,19 @@ def probe_audio(call: CallInput) -> CallMeta:
     info = (_probe_with_ffprobe(call.audio_path) or _probe_with_wave(call.audio_path)
             or _probe_with_pyav(call.audio_path))
     if info is None or not info.get("streams"):
-        raise IngestionError(f"could not probe audio file: {call.audio_path.name}")
+        raise IngestionError(f"could not probe audio file: {shown_name(call.audio_path)}")
     stream = info["streams"][0]
     duration = _as_float(stream.get("duration")) or _as_float(
         info.get("format", {}).get("duration")
     )
     if duration <= 0:
-        raise IngestionError(f"audio has zero duration: {call.audio_path.name}")
+        raise IngestionError(f"audio has zero duration: {shown_name(call.audio_path)}")
     meta = CallMeta(
         call_id=call.call_id,
         banker_id=call.banker_id,
-        file_name=call.audio_path.name,
+        # Kept for the record, so kept safe: this file outlives the raw
+        # transcript that retention deletes.
+        file_name=shown_name(call.audio_path),
         duration_sec=round(duration, 3),
         channels=int(stream.get("channels") or 1),
         sample_rate=int(stream.get("sample_rate") or 0),

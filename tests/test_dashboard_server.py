@@ -463,3 +463,40 @@ def test_transcript_endpoint_bounds_a_pathological_artifact(live_server: str,
         assert all(len(t["text"]) <= 4000 for t in body["turns"])
     finally:
         path.unlink()
+
+
+# ------------------------------------------------------ Windows-shaped requests
+
+def test_report_paths_are_checked_by_shape_before_touching_the_disk(live_server: str) -> None:
+    """On Windows resolve() of a UNC path opens an SMB connection to that host
+    and offers the user's credentials - so such a path must never reach it."""
+    for rel in ("%5C%5Cattacker.example%5Cs%5Cx.html", "C:%5CWindows%5Cwin.ini",
+                "calls%5C..%5C..%5Csecret.html", "calls/CON.html", "calls/x.htm"):
+        assert _status(f"{live_server}/reports/{rel}?t=test-token-value") == 404, rel
+
+
+def test_a_device_name_is_not_a_call(live_server: str) -> None:
+    """/api/transcript/CON opened the console on Windows and hung the handler."""
+    for route in ("transcript", "audio"):
+        assert _status(f"{live_server}/api/{route}/CON?t=test-token-value") == 404
+
+
+def test_a_call_processed_without_redaction_shows_no_text(live_server: str,
+                                                          pipeline_output: Path) -> None:
+    """The overview must not deliver, as quotes and summary, what the transcript
+    endpoint refuses to deliver as turns."""
+    card_path = next((pipeline_output / "scores").glob("*.json"))
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    call_id = card["call_id"]
+    redacted = pipeline_output / "redacted" / f"{call_id}.json"
+    original = redacted.read_text(encoding="utf-8")
+    artifact = json.loads(original)
+    artifact["enabled"] = False
+    redacted.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+    try:
+        state = collect_state(pipeline_output)
+        call = next(c for c in state["calls"] if c["id"] == call_id)
+        assert call["summary"] == "" and call["evidence"] == [] and call["report"] is None
+        assert _status(f"{live_server}/reports/calls/{call_id}.html?t=test-token-value") == 404
+    finally:
+        redacted.write_text(original, encoding="utf-8")

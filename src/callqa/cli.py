@@ -16,6 +16,7 @@ from pathlib import Path
 
 from callqa.config import Config, load_config
 from callqa.dotenv import load_dotenv
+from callqa.ingestion import shown_name
 from callqa.models import (
     EXIT_FAILED,
     EXIT_NEEDS_HUMAN_REVIEW,
@@ -142,6 +143,23 @@ def _metadata_lookup(config: Config) -> dict[str, dict[str, str]]:
     return validation.rows
 
 
+def _distinct_from_case_twins(call_id: str, stem: str, config: Config) -> str:
+    """An id derived from a file name must not differ from an earlier call's
+    only in letter case: on Windows (and macOS) "CALL7" and "call7" name the
+    same artifact files, so a second recording would overwrite the first
+    one's transcript, scores and report. Such an id gets a digest suffix."""
+    from callqa.state import StateDB
+
+    if not config.paths.state_db.exists():
+        return call_id
+    twins = StateDB(config.paths.state_db).ids_differing_only_in_case(call_id)
+    if not twins:
+        return call_id
+    from callqa.ingestion import _digest
+
+    return f"{call_id[:50]}-{_digest('case:' + stem)[:8]}"
+
+
 def _call_input(
     audio_path: Path, config: Config, args: argparse.Namespace | None = None
 ) -> CallInput:
@@ -175,7 +193,8 @@ def _call_input(
     if row is None:
         stem = os.path.normcase(audio_path.stem)
         row = next((r for cid, r in rows.items() if os.path.normcase(cid) == stem), None)
-    call_id = explicit_id or (row or {}).get("call_id") or sanitize_call_id(audio_path.stem)
+    call_id = explicit_id or (row or {}).get("call_id") or _distinct_from_case_twins(
+        sanitize_call_id(audio_path.stem), audio_path.stem, config)
     if row is not None:
         call = call_input_from_metadata(row, audio_path.parent)
         call = call.model_copy(update={"audio_path": audio_path, "call_id": call_id})
@@ -183,7 +202,7 @@ def _call_input(
         if rows:
             logger.warning(
                 "%s has no row in metadata.csv; processing with defaults "
-                "(banker unknown, channel L, banker name not redacted)", audio_path.name,
+                "(banker unknown, channel L, banker name not redacted)", shown_name(audio_path),
             )
         call = CallInput(call_id=call_id, audio_path=audio_path)
     if args is not None:
@@ -352,7 +371,7 @@ def watch_loop(
                 if path not in skipped:
                     skipped.add(path)
                     logger.warning("ignoring %s: %s is not an audio extension this "
-                                   "pipeline reads", path.name, path.suffix or "(none)")
+                                   "pipeline reads", shown_name(path), path.suffix or "(none)")
                 continue
             try:
                 stat = path.stat()
@@ -373,7 +392,7 @@ def watch_loop(
                     # `cp -p` and `rsync -t` give a file the SOURCE's mtime, so
                     # a copy that is still running can look hours old. The
                     # mtime shortcut is only safe if the size also holds still.
-                    logger.info("%s is still being written; waiting", path.name)
+                    logger.info("%s is still being written; waiting", shown_name(path))
                     sizes[path] = (size, now)
                     continue
             elif prev[0] != size:
@@ -383,7 +402,7 @@ def watch_loop(
                 continue
             if held_open_for_writing(path) or stat.st_mtime < _ROBOCOPY_IN_PROGRESS:
                 # robocopy stamps a file 1980-01-01 until its copy completes.
-                logger.info("%s is still being written; waiting", path.name)
+                logger.info("%s is still being written; waiting", shown_name(path))
                 continue
             # Stable: process it (sequential, one call at a time).
             call = _call_input(path, config)
@@ -399,15 +418,23 @@ def watch_loop(
                 # is; quarantining a healthy call into failed/ loses it, since
                 # nothing ever rescans that directory.
                 logger.info("%s is locked by another process; leaving it in place",
-                            path.name)
+                            shown_name(path))
                 continue
             if config.watch.move_processed:
                 target_dir = processed_dir if result.status != "failed" else failed_dir
                 target_dir.mkdir(parents=True, exist_ok=True)
+                target = target_dir / path.name
+                if target.exists():
+                    # Never over an earlier recording of the same name (a
+                    # recorder that reuses names, or one differing only in
+                    # case on Windows): that deleted the earlier original.
+                    target = target_dir / f"{path.stem}.{int(time.time())}{path.suffix}"
                 try:
-                    move(path, target_dir / path.name)
+                    move(path, target)
                 except OSError as exc:
-                    logger.error("could not move %s: %s", path.name, exc)
+                    # Not str(exc): on Windows it repeats both full paths.
+                    logger.error("could not move %s: %s", shown_name(path),
+                                 type(exc).__name__)
         if max_cycles is not None and cycles >= max_cycles:
             break
         if stop_event is not None:
@@ -541,7 +568,7 @@ def cmd_retention(args: argparse.Namespace) -> int:
     print(f"{len(expired)} raw artifact(s) older than {raw_days} days "
           f"({total // (1024*1024)} MiB) — run with --apply to destroy:")
     for e in expired[:50]:
-        print(f"  {e.path.name}  ({e.age_days}d, {e.bytes // 1024} KiB)")
+        print(f"  {shown_name(e.path)}  ({e.age_days}d, {e.bytes // 1024} KiB)")
     if len(expired) > 50:
         print(f"  ... and {len(expired) - 50} more")
     return EXIT_SUCCESS

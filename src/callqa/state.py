@@ -55,7 +55,9 @@ def atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        # newline="": no "\r\n" translation on Windows, so an artifact is the
+        # same bytes on every OS (hashes and diffs agree across machines).
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(content)
         replace(tmp_name, path)
     except BaseException:
@@ -161,6 +163,13 @@ class StateDB:
     def clear_call(self, call_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM stages WHERE call_id=?", (call_id,))
+
+    def ids_differing_only_in_case(self, call_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT call_id FROM stages WHERE lower(call_id)=lower(?) "
+                "AND call_id<>?", (call_id, call_id)).fetchall()
+        return [r[0] for r in rows]
 
     def completed_stages(self, call_id: str) -> list[str]:
         with self._connect() as conn:

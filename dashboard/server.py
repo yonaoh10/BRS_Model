@@ -4,7 +4,8 @@
 Runs on the operator's own machine and reads the artifacts the pipeline has
 already written. Start it with:
 
-    python dashboard/server.py
+    .venv\\Scripts\\python dashboard\\server.py      (Windows)
+    .venv/bin/python dashboard/server.py        (Linux)
 
 Deliberately NOT wired into `python -m callqa`: keeping it out of the core CLI
 is what lets `rm -rf dashboard/` remove this feature without touching the
@@ -41,6 +42,7 @@ import socket
 import statistics
 import sys
 import threading
+import time
 import webbrowser
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,14 +52,23 @@ from urllib.parse import parse_qs, unquote, urlparse
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from callqa.audio_redaction import mask_fingerprint  # noqa: E402
 from callqa.dotenv import load_dotenv  # noqa: E402
-from callqa.ingestion import CALL_ID_RE  # noqa: E402
-from callqa.portable import configure_stdio  # noqa: E402
+from callqa.ingestion import CALL_ID_RE, is_windows_reserved  # noqa: E402
+from callqa.portable import (  # noqa: E402
+    IS_WINDOWS,
+    configure_stdio,
+    disable_console_quick_edit,
+)
 
 logger = logging.getLogger("callqa.dashboard")
 
 PAGE = Path(__file__).parent / "prototype.html"
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+# Everything the report tree contains, as a pattern: index and calibration
+# pages at the top, one page per call and per banker below.
+_REPORT_PATH_RE = re.compile(
+    r"(index|calibration)\.html|(calls|bankers)/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.html")
 # Bounds on one /api/transcript response - a real call is far under these; the
 # caps stop a corrupt or pathological artifact from serving an unbounded body.
 MAX_TRANSCRIPT_TURNS = 5000
@@ -100,6 +111,11 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
     calls = []
     for c in cards:
         res = result_by_id.get(c["call_id"], {})
+        # A call processed with redaction OFF has raw identifiers in its judge
+        # quotes and summary. /api/transcript already refuses such a call; the
+        # overview must not hand the same text to the browser another way.
+        redacted = _load_json(output_dir / "redacted" / f"{c['call_id']}.json")
+        raw = isinstance(redacted, dict) and redacted.get("enabled") is False
         calls.append({
             "id": c["call_id"],
             "banker": c.get("banker_id", "—"),
@@ -108,14 +124,15 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
             "failed_gates": c.get("failed_gates", []),
             "status": res.get("status", "success"),
             "date": (c.get("timestamp") or "")[:10],
-            "summary": c.get("summary_he", ""),
+            "summary": "" if raw else c.get("summary_he", ""),
+            "rawRedactionDisabled": raw,
             "scores": {k: v.get("score") for k, v in (c.get("scores") or {}).items()},
             "evidence": [
                 {"dim": k, "t": e.get("timestamp"), "sp": e.get("speaker"), "q": e.get("quote")}
                 for k, v in (c.get("scores") or {}).items()
                 for e in (v.get("evidence") or [])[:1]
-            ][:4],
-            "report": f"reports/calls/{c['call_id']}.html",
+            ][:4] if not raw else [],
+            "report": None if raw else f"reports/calls/{c['call_id']}.html",
         })
     calls.sort(key=lambda x: x["total"], reverse=True)
 
@@ -241,8 +258,15 @@ def _audio_is_current(output_dir: Path, call_id: str) -> bool:
     """
     wav = output_dir / "redacted_audio" / f"{call_id}.wav"
     transcript = output_dir / "redacted" / f"{call_id}.json"
+    sidecar = _load_json(wav.with_suffix(".json"))
     try:
-        return wav.is_file() and wav.stat().st_mtime >= transcript.stat().st_mtime
+        if not wav.is_file():
+            return False
+        if isinstance(sidecar, dict) and sidecar.get("mask_sha256"):
+            # The mask it was silenced for, by content: a clock step on a VDI
+            # restored from a snapshot cannot make an old WAV look current.
+            return sidecar["mask_sha256"] == mask_fingerprint(transcript)
+        return wav.stat().st_mtime >= transcript.stat().st_mtime   # older sidecars
     except OSError:
         return False
 
@@ -270,7 +294,9 @@ class Handler(BaseHTTPRequestHandler):
             if origin_host not in ALLOWED_HOSTS:
                 return False
         supplied = parse_qs(urlparse(self.path).query).get("t", [""])[0]
-        return hmac.compare_digest(supplied, type(self).token)
+        # Bytes: comparing str raises TypeError on any non-ASCII character,
+        # which killed the handler instead of answering 403.
+        return hmac.compare_digest(supplied.encode("utf-8"), type(self).token.encode("utf-8"))
 
     def _send(self, code: int, body: bytes, ctype: str) -> None:
         self.send_response(code)
@@ -394,7 +420,9 @@ class Handler(BaseHTTPRequestHandler):
             # call_id charset check (no separators beyond ._-, first char
             # alphanumeric) means the id cannot traverse out of the directory.
             call_id = unquote(route[len("/api/transcript/"):])
-            if not CALL_ID_RE.fullmatch(call_id):
+            # A Windows device name ("CON") opened as a file is the console:
+            # the read blocked the handler waiting for keyboard input.
+            if not CALL_ID_RE.fullmatch(call_id) or is_windows_reserved(call_id):
                 self._send(404, b'{"error":"not found"}', "application/json")
                 return
             redacted = _load_json(type(self).output_dir / "redacted" / f"{call_id}.json")
@@ -457,7 +485,7 @@ class Handler(BaseHTTPRequestHandler):
             # to the browser. The call_id charset check plus the containment
             # check below are the traversal guards, exactly as for transcripts.
             call_id = unquote(route[len("/api/audio/"):])
-            if not CALL_ID_RE.fullmatch(call_id):
+            if not CALL_ID_RE.fullmatch(call_id) or is_windows_reserved(call_id):
                 self._send(404, b'{"error":"not found"}', "application/json")
                 return
             audio_root = (type(self).output_dir / "redacted_audio").resolve()
@@ -482,6 +510,17 @@ class Handler(BaseHTTPRequestHandler):
             # non-ASCII character is reachable; the containment check below is
             # what keeps that safe.
             rel = unquote(route[len("/reports/"):])
+            # Checked by its SHAPE before any filesystem call: resolve() on a
+            # UNC path ("\\\\host\\share\\x.html") makes Windows connect to
+            # that host over SMB and offer the user's credentials to it.
+            if not _REPORT_PATH_RE.fullmatch(rel) or is_windows_reserved(Path(rel).stem):
+                self._send(404, b'{"error":"not found"}', "application/json")
+                return
+            redacted = _load_json(type(self).output_dir / "redacted"
+                                  / f"{Path(rel).stem}.json") if rel.startswith("calls/") else None
+            if isinstance(redacted, dict) and redacted.get("enabled") is False:
+                self._send(404, b'{"error":"not found"}', "application/json")
+                return
             target = (type(self).output_dir / "reports" / rel).resolve()
             root = (type(self).output_dir / "reports").resolve()
             # is_relative_to, not startswith: a string prefix also accepts a
@@ -508,14 +547,30 @@ def main() -> int:
                              "container whose port is published to 127.0.0.1 on the host.")
     args = parser.parse_args()
     configure_stdio()
-    load_dotenv()
+    disable_console_quick_edit()     # one stray click must not freeze every request
+    # The project's own .env only - not one that happens to sit in the folder
+    # the dashboard was started from, which could set its token.
+    load_dotenv(REPO_ROOT / ".env")
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     # A fixed token from .env keeps the URL stable across restarts, which is
     # what makes the dashboard usable from a container; otherwise a fresh one.
-    Handler.token = os.environ.get("CALLQA_DASHBOARD_TOKEN") or secrets.token_urlsafe(24)
+    fixed = os.environ.get("CALLQA_DASHBOARD_TOKEN", "")
+    if fixed and IS_WINDOWS and args.bind == "127.0.0.1":
+        # On a shared (multi-session) host a bookmarked, never-changing token
+        # is one another user can collect by listening on the port while this
+        # dashboard is stopped. A fresh token per run leaves nothing to collect.
+        logger.warning("CALLQA_DASHBOARD_TOKEN is ignored on Windows; using a new "
+                       "token for this run")
+        fixed = ""
+    if fixed and not re.fullmatch(r"[A-Za-z0-9_-]{22,}", fixed):
+        print("CALLQA_DASHBOARD_TOKEN must be at least 22 characters of letters, digits, "
+              "'-' or '_' (generate one with python -c \"import secrets; "
+              "print(secrets.token_urlsafe(24))\").", file=sys.stderr)
+        return 2
+    Handler.token = fixed or secrets.token_urlsafe(24)
     Handler.output_dir = args.output_dir
     Handler.allow_actions = args.allow_actions
 
@@ -529,12 +584,25 @@ def main() -> int:
     if args.bind != "127.0.0.1":
         logger.warning("listening on %s: make sure this port is only reachable from "
                        "this machine", args.bind)
-    try:
-        server = _ExclusiveServer((args.bind, args.port), Handler)
-    except OSError as exc:
-        print(f"port {args.port} is already in use on this machine ({exc.strerror}). On a "
-              "shared (multi-session) host that may be another user's dashboard. Pick "
-              "another port with --port.", file=sys.stderr)
+    server = None
+    for attempt in range(24):
+        try:
+            server = _ExclusiveServer((args.bind, args.port), Handler)
+            break
+        except OSError as exc:
+            # Windows refuses an exclusive bind while the previous run's closed
+            # connections linger (about two minutes after a restart), which is
+            # the same error another user's dashboard on the port would give.
+            if attempt == 0:
+                print(f"port {args.port} is in use ({exc.strerror}): either this "
+                      "dashboard's previous run is still closing its connections, or "
+                      "another program - on a shared host, perhaps another user's "
+                      "dashboard - holds it. Retrying for two minutes; or start with "
+                      "--port <another>.", file=sys.stderr)
+            time.sleep(5)
+    if server is None:
+        print(f"port {args.port} stayed in use; start with --port <another>.",
+              file=sys.stderr)
         return 2
     url = f"http://127.0.0.1:{args.port}/?t={Handler.token}"
     print("\n  Call-QA dashboard is running.")

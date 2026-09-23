@@ -103,7 +103,10 @@ def upsert_metadata(path: Path, row: dict[str, str]) -> None:
         reader = csv.DictReader(io.StringIO(_read_text_any_encoding(path), newline=""))
         existing = [c for c in (reader.fieldnames or []) if c]
         fieldnames = existing + [c for c in COLUMNS if c not in existing]
-        rows = [r for r in reader if r.get("call_id") != row["call_id"]]
+        # Case-insensitively: on Windows "SIM1" and "sim1" are one recording
+        # file, and two rows for it made the whole sheet invalid.
+        rows = [r for r in reader
+                if (r.get("call_id") or "").strip().casefold() != row["call_id"].casefold()]
         backup = path.with_suffix(path.suffix + ".bak")
         backup.write_bytes(path.read_bytes())
     rows.append(row)
