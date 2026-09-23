@@ -142,11 +142,21 @@ def _decode_stereo_window(
     on a machine without ffmpeg it aborted on the stdlib WAV reader alone.
     """
     if _have_ffmpeg():
-        proc = subprocess.run(
-            ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
-             "-i", str(src), "-ac", "2", "-ar", str(rate), "-f", "s16le", "-"],
-            capture_output=True,
-        )
+        try:
+            proc = subprocess.run(
+                ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
+                 "-i", str(src), "-ac", "2", "-ar", str(rate), "-f", "s16le", "-"],
+                capture_output=True,
+            )
+        except OSError as exc:
+            # `shutil.which` found something; exec failed anyway. A broken
+            # symlink, a binary for the wrong architecture, a PATH entry on a
+            # filesystem mounted noexec, or an ffmpeg removed between the check
+            # and the call. "Present" and "runnable" are different questions,
+            # and the fail-closed promise has to survive the gap between them.
+            logger.warning("ffmpeg could not be run for channel probing (%s); "
+                           "treating %s as one recording", exc, src.name)
+            return None
         if proc.returncode != 0 or not proc.stdout:
             return None
         data = np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0

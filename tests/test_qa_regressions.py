@@ -223,7 +223,12 @@ class TestChannelDetection:
         EOFError straight out of probe_channels, so the documented fail-closed
         behaviour held on the developer's laptop and not in CI - or on a locked
         down bank server, where ffmpeg is exactly the thing that is missing.
-        Both branches are pinned here, and a missing file too."""
+        Both branches are pinned here, and a missing file too.
+
+        The have_ffmpeg=True case is run even where ffmpeg is NOT installed, on
+        purpose: it is the "present but not runnable" gap - a broken symlink, a
+        wrong-architecture binary, a noexec mount - and CI caught that the
+        subprocess call raised FileNotFoundError straight through the promise."""
         from callqa import audio as audio_mod
 
         monkeypatch.setattr(audio_mod, "_have_ffmpeg", lambda: have_ffmpeg)
