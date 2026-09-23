@@ -1,416 +1,491 @@
-# Call-QA PoC — Hebrew Conversation Intelligence for Banker Calls
+# callqa
 
-**🌐 [English](#english) · [עברית](#hebrew)**
-
-<a id="english"></a>
-
-A production-grade, single-call pipeline that takes one banker↔customer
-recording (Hebrew) and produces the complete per-call output:
-
-1. **Transcription** — ivrit.ai Whisper (faster-whisper CT2), Hebrew forced.
-2. **Speaker attribution** — stereo channel split (primary); pyannote
-   diarization fallback for mono recordings.
-3. **PII redaction** — Hebrew-aware, in two layers. *Shaped* identifiers are
-   recognised by form: Israeli ID (checksum), phones, payment cards (Luhn),
-   IBAN, e-mail, and any run of 6+ digits. *Shapeless* ones — a mother's name,
-   a date of birth, an address — have no form at all and are recognised by the
-   verification question that precedes them. A name nobody asked for is not
-   masked; see docs/DEPLOYMENT.md §9.
-4. **Objective features** — talk ratio, interruptions, patience, questions,
-   monologue length, dead air, speech rate.
-5. **LLM judge** — a weighted 8-dimension rubric scored by a locally served
-   vLLM model, with verbatim evidence quotes (verified, never fabricated).
-6. **Per-call HTML report** — Hebrew, RTL, fully offline (inline CSS).
-
-Around that core sit three thin layers: drivers (`process` / `watch` / `run`),
-per-banker aggregation (`report`), and judge calibration vs. human QA ratings
-(`calibrate`, QWK).
-
-**Everything runs end-to-end in mock mode on a machine with no GPU and no
-models** — deterministic fake engines behind the same interfaces, switched to
-real engines by config only. Emotion recognition is explicitly out of scope.
-
-## Quick start (any machine, mock mode)
-
-No GPU, no models, no network. This proves the software is installed and the
-whole chain works before anything is downloaded:
-
-```bash
-./scripts/first_run.sh            # mock pipeline on synthetic calls, then the dashboard
-```
-
-Deploying it for real? Read **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — it is
-the front door: prerequisites, models, serving, verification and licensing.
-
-Step by step:
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-
-python scripts/generate_sample_data.py          # 6 synthetic stereo WAVs + CSVs
-
-# The atomic unit of work - ONE call (primary acceptance test):
-python -m callqa process --mock --audio data/input/calls/CALL001.wav
-
-# PoC batch + aggregate reports + calibration:
-python -m callqa run --mock
-python -m callqa report --mock
-python -m callqa calibrate --mock
-# open data/output/reports/index.html
-
-make test                                        # pytest suite
-```
-
-Exit codes for `process`: `0` success · `1` needs_human_review · `2` failed —
-wire any external scheduler or recording-system hook straight into it.
-
-## CLI
-
-| Command | Purpose |
-|---|---|
-| `callqa process --audio F [--call-id --banker-id --banker-channel]` | one call, full pipeline |
-| `callqa watch` | production ingestion: poll input dir, process each stable file once, move to `processed/`/`failed/` |
-| `callqa run [--max-workers N]` | PoC driver over `data/input/metadata.csv` |
-| `callqa report` | per-banker reports + `reports/index.html` |
-| `callqa calibrate` | QWK vs `human_ratings.csv` → `reports/calibration.html` |
-| `callqa validate-inputs` | strict metadata / ratings validation |
-| `callqa preflight` | config, model hashes, endpoint, disk and inputs — before a batch starts |
-| `callqa verify <call>` | is a stored result still reproducible, and if not, which input changed |
-| `callqa eval` | score the whole system against a golden set (read docs/DEPLOYMENT.md §8 first) |
-| `callqa drift` | movement in scores, review rate and quality vs a known-good period |
-| `callqa review-queue` / `callqa review` | held calls awaiting a human, and recording the verdict |
-| `callqa retention` | delete raw PII-bearing artifacts past the window, with an audit log |
-
-All commands accept `--config`, `--mock`, `--force`. Any config field is
-env-overridable: `CALLQA_SECTION__FIELD` (e.g. `CALLQA_JUDGE__BASE_URL`).
-
-**Deploying this?** `docs/DEPLOYMENT.md` is the front door. Also:
-`docs/MLOPS.md` (running it for years), `docs/diarization_he.md`,
-`docs/performance_he.md` (measured timings), `dashboard/DESIGN.md`.
-
-## Input contract
-
-- `data/input/calls/*.{wav,mp3}` — file stem (or metadata) = `call_id`.
-- `data/input/metadata.csv` — required: `call_id, banker_id, file_name`;
-  optional: `call_date, call_type, banker_channel (L/R), banker_name`.
-- `data/input/human_ratings.csv` — `call_id, rater_id,` one column per rubric
-  dimension id, scores 1–5 (1–2 raters per call).
-
-## Design guarantees
-
-- **Idempotent + resumable**: per call×stage state in SQLite; re-runs skip
-  completed stages; `--force` reruns. Artifacts written atomically.
-- **Per-call atomicity**: an SQLite lock per `call_id` prevents double
-  processing; every call ends in an explicit status envelope; one bad call
-  never stops a driver.
-- **Privacy**: only redacted text reaches the judge, reports, and logs. Raw
-  transcripts live only under `data/output/transcripts/` (with a warning
-  README). Logs carry call_ids and stage names, never transcript content.
-- **Determinism/audit**: judge temperature 0.0; every scorecard stores model
-  id, prompt SHA-256, prompt version, retries, latency, timestamp.
-- **Evidence verification**: every judge quote must appear verbatim in the
-  redacted transcript or the response is rejected and retried; after final
-  failure the call is marked `needs_human_review` — never fabricated.
-- **Gate rule**: a gate dimension (identification, compliance) scored ≤2 caps
-  the total at 59 and flags the call.
-
----
-
-
----
-
-# Bank-server deployment runbook
-
-The developer machine never downloads models. All model files are fetched on
-the bank server by `scripts/download_models.py`.
-
-1. **Transfer** the repository plus the wheels bundle. Build the bundle on an
-   internet-connected machine first:
-   `./scripts/build_offline_bundle.sh` (creates `wheels/`).
-2. **Install offline** on the server:
-   `./scripts/install_offline.sh --server`
-   (installs `requirements.txt` + `requirements-server.txt` from `wheels/`,
-   then the `callqa` package — no network).
-3. **Install ffmpeg**: `apt/yum install ffmpeg`, or drop a static build of
-   `ffmpeg`/`ffprobe` into `$PATH` on a fully offline host.
-4. **Download models** per available VRAM (this step needs internet or
-   pre-staged files):
-
-   | VRAM | ASR | Judge LLM (`--llm-model`) | vLLM flags |
-   |---|---|---|---|
-   | 24 GB | `--asr` (ivrit CT2, ~1.6GB) | `dicta-il/dictalm2.0-instruct` (7B fp16), or a 12–27B AWQ/GPTQ build | `--quantization awq` for AWQ |
-   | ≥48 GB | `--asr` | `meta-llama/Llama-3.3-70B-Instruct` AWQ (gated) | `--quantization awq --tensor-parallel-size 2` |
-
-   ```bash
-   python scripts/download_models.py --asr
-   python scripts/download_models.py --llm --llm-model dicta-il/dictalm2.0-instruct
-   # only if recordings turn out to be mono (gated; accept terms + set HF_TOKEN):
-   python scripts/download_models.py --diarization
-   # optional NER-based person redaction:
-   python scripts/download_models.py --ner    # then set redaction.ner: true
-   ```
-   The script writes `models/MODELS_MANIFEST.json` and points `judge.model`
-   in `config/config.yaml` at the downloaded LLM.
-5. **Go offline**: `export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`. The
-   diarization model loads from the Hugging Face cache of the user who ran the
-   download, not from `models/`: on another machine, copy that cache across
-   and point `HF_HOME` at it. `callqa preflight` checks it.
-6. **Serve the judge** on any OpenAI-compatible server. With vLLM, the key is
-   mandatory - the script refuses to start without it:
-   ```bash
-   export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)      # the server's key
-   ./scripts/start_vllm.sh <model-id-or-path> 8000
-   export CALLQA_JUDGE__API_KEY=$CALLQA_JUDGE_API_KEY       # the pipeline's copy
-   ```
-   Note the double underscore in the second name: it is the config override
-   for `judge.api_key`. Without it the server answers 401. The pipeline only
-   checks connectivity to `judge.base_url`; it never launches a server.
-7. **Place inputs**: recordings under `data/input/calls/`, plus
-   `metadata.csv` and (for calibration) `human_ratings.csv`.
-8. **Validate**: `python -m callqa validate-inputs` — fails with a problem
-   table on any metadata issue.
-9. **Process the PoC batch**: `python -m callqa run` (add
-   `--max-workers 2` if the GPU has headroom). In ongoing production use
-   `python -m callqa watch` instead — it polls the input directory and
-   processes each new recording once its file size is stable.
-10. **Calibrate**: `python -m callqa calibrate` →
-    `data/output/reports/calibration.html`. PASS needs BOTH at least 20
-    human-rated calls AND overall QWK ≥ 0.70 — below 20 the result reads FAIL
-    however high the agreement, because the number means nothing yet;
-    dimensions with QWK < 0.60 are flagged "do not deploy without human
-    review").
-11. **Reports**: `python -m callqa report` →
-    `data/output/reports/index.html` linking every per-call and per-banker
-    report (all static HTML, no external assets).
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| CUDA OOM (ASR) | set `asr.compute_type: int8` in config |
-| CUDA OOM (vLLM) | use an AWQ/GPTQ model, lower `--max-model-len`, `--gpu-memory-utilization 0.9` |
-| "mono recording but no diarizer" / mono files detected | install server deps, `download_models.py --diarization` with `HF_TOKEN` (accept pyannote terms on HF) |
-| Judge endpoint *unreachable* | nothing is listening: start the model server; check the port in `judge.base_url` |
-| Judge endpoint *refused (401/403)* | the server is up; `CALLQA_JUDGE__API_KEY` is missing or differs from the server's key |
-| Low ASR confidence (`quality` block flags many segments) | check recording sample rate/noise; confirm `asr.language: he`; consider re-recording setup |
-| ASR model directory missing/empty | run `download_models.py --asr` and check `paths.models_dir` |
-| Call stuck as "already being processed" | previous process died mid-call: the lock is auto-stolen when the pid is dead; otherwise delete the row from the `locks` table in the state DB |
-
-## Repository layout
-
-See `src/callqa/` — `pipeline.py` (`process_call()`, the production core),
-`engines.py` (DI container built once per process), stage modules
-(`ingestion`, `audio`, `asr/`, `speakers/`, `redaction`, `features`,
-`judge/`), `aggregation.py`, `calibration.py`, `reporting/`, and `cli.py`.
-Config lives in `config/` (`config.yaml`, `rubric.yaml`,
-`recommendations_he.yaml`). Tests in `tests/` (`make test`).
+**🌐 [עברית](#hebrew) · [English](#english)**
 
 <a id="hebrew"></a>
 
+<div dir="rtl">
+
+## מה זה
+
+תוכנה שמקבלת הקלטה של שיחה טלפונית בעברית בין בנקאי ללקוח, ומפיקה דוח בקרת איכות על השיחה.
+היא מתמללת את השיחה, מפרידה בין הדוברים, מסתירה פרטים מזהים של הלקוח (ת"ז, טלפון, שם וכו'), ונותנת ציון לשיחה בעזרת מודל שפה שרץ אצלכם.
+
+- זו תוכנת שורת פקודה (terminal). אין בה אתר ואין בה שרת.
+- **היא לא פונה לאינטרנט בזמן ריצה.** יש לה רק שני חיבורי רשת: שרת מודל השיפוט שאתם מגדירים (שלב 5), והורדה חד־פעמית של המודלים (שלב 4).
+
+כל הפקודות במדריך מריצים ב־terminal, **מתוך תיקיית הפרויקט**.
+
 ---
+
+## מה צריך לפני שמתחילים
+
+| | דרישה | איך בודקים |
+|---|---|---|
+| מערכת הפעלה | Linux (מומלץ) או macOS | — |
+| Python | גרסה 3.11 או 3.12 | `python3 --version` |
+| ffmpeg | נדרש כדי לקרוא הקלטות אמיתיות | `ffmpeg -version` |
+| דיסק פנוי | 40GB לפחות | `df -h .` |
+| זיכרון | 16GB לפחות | — |
+| כרטיס מסך (GPU) של NVIDIA | נדרש **רק** למודל השיפוט (שלב 5) | `nvidia-smi` |
+
+אם ffmpeg חסר:
+- Ubuntu/Debian: `sudo apt install ffmpeg`
+- RHEL/Rocky: `sudo dnf install ffmpeg`
+- macOS: `brew install ffmpeg`
+
 ---
 
-# עברית — מערכת בקרת איכות שיחות בנקאיות
+## שלב 1 — הורדה ופתיחה
 
-**🌐 [English](#english) · [עברית](#hebrew)**
-
-מערכת ברמת ייצור שמקבלת הקלטה **אחת** של שיחה בין בנקאי ללקוח (בעברית)
-ומפיקה את מלוא התוצר עבור אותה שיחה:
-
-1. **תמלול** — מודל ivrit.ai Whisper (faster-whisper CT2), עברית כפויה.
-2. **שיוך דוברים** — פיצול ערוצי סטריאו (המסלול העיקרי); pyannote כגיבוי
-   להקלטות מונו.
-3. **הסרת פרטים מזהים (PII)** — מותאם לעברית, בשתי שכבות. מזהים *בעלי צורה*
-   מזוהים לפי הצורה שלהם: תעודת זהות (ספרת ביקורת), טלפונים, כרטיסי אשראי
-   (Luhn), IBAN, דוא"ל, וכל רצף של 6 ספרות ומעלה. מזהים *חסרי צורה* — שם האם,
-   תאריך לידה, כתובת — אין להם צורה כלל, והם מזוהים לפי שאלת האימות שקדמה להם.
-   שם שאיש לא ביקש אינו מצונזר; ראו docs/DEPLOYMENT.md §9.
-4. **מדדים אובייקטיביים** — יחס דיבור, קטיעות, סבלנות, שאלות, אורך מונולוג,
-   זמן שקט, קצב דיבור.
-5. **שופט LLM** — מחוון משוקלל בן 8 ממדים, מדורג על ידי מודל המוגש מקומית
-   ב-vLLM, עם ציטוטי ראיה מילה במילה (מאומתים, לעולם לא מומצאים).
-6. **דוח HTML לכל שיחה** — בעברית, RTL, לחלוטין אופליין (CSS מוטמע).
-
-סביב הליבה יושבות שלוש שכבות דקות: מנועי הרצה
-(`process` / `watch` / `run`), אגרגציה ברמת הבנקאי (`report`), וכיול השופט
-מול הערכות אנושיות (`calibrate`, QWK).
-
-**הכול רץ מקצה לקצה במצב mock על מכונה ללא GPU וללא מודלים** — מנועים
-דמה דטרמיניסטיים מאחורי אותם ממשקים בדיוק, שמתחלפים למנועים אמיתיים
-באמצעות קונפיגורציה בלבד. זיהוי רגשות מוחרג במפורש מהמערכת.
-
-## התחלה מהירה (כל מחשב, מצב mock)
-
-בלי GPU, בלי מודלים, בלי רשת. זה מוכיח שהתוכנה מותקנת ושכל השרשרת עובדת,
-עוד לפני שמורידים משהו:
+1. ב־GitHub לוחצים **Code ← Download ZIP**.
+2. פותחים את הקובץ. נוצרת תיקייה בשם `BRS_Model-main`.
+3. נכנסים אליה ב־terminal:
 
 ```bash
-./scripts/first_run.sh            # פייפליין mock על שיחות סינתטיות, ואז הדשבורד
+cd BRS_Model-main
 ```
 
-פורסים לסביבה אמיתית? קראו את **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** —
-זו דלת הכניסה: דרישות מוקדמות, מודלים, הרצת שירות, אימות ורישוי.
+---
 
-שלב אחר שלב:
+## שלב 2 — התקנה
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
-
-python scripts/generate_sample_data.py          # 6 קבצי WAV סטריאו סינתטיים + CSV
-
-# יחידת העבודה האטומית - שיחה אחת (מבחן הקבלה העיקרי):
-python -m callqa process --mock --audio data/input/calls/CALL001.wav
-
-# אצוות ה-PoC + דוחות מסכמים + כיול:
-python -m callqa run --mock
-python -m callqa report --mock
-python -m callqa calibrate --mock
-# פתח את data/output/reports/index.html
-
-make test                                        # חבילת הבדיקות
 ```
 
-קודי יציאה עבור `process`: `0` הצלחה · `1` נדרשת בדיקה אנושית ·
-`2` כישלון — ניתן לחבר ישירות כל מתזמן חיצוני או hook ממערכת ההקלטות.
-
-## פקודות CLI
-
-| פקודה | תפקיד |
-|---|---|
-| `callqa process --audio F [--call-id --banker-id --banker-channel]` | שיחה אחת, כל הצינור |
-| `callqa watch` | קליטה בייצור: סריקת תיקיית הקלט, עיבוד כל קובץ יציב פעם אחת, העברה ל-`processed/`/`failed/` |
-| `callqa run [--max-workers N]` | מנוע ההרצה של ה-PoC על `data/input/metadata.csv` |
-| `callqa report` | דוחות לכל בנקאי + `reports/index.html` |
-| `callqa calibrate` | QWK מול `human_ratings.csv` ← `reports/calibration.html` |
-| `callqa validate-inputs` | ולידציה קפדנית של המטא-דאטה והדירוגים |
-| `callqa preflight` | קונפיגורציה, גיבובי מודלים, נקודת קצה, מקום בדיסק וקלט — לפני תחילת אצווה |
-| `callqa verify <call>` | האם תוצאה שמורה עדיין ניתנת לשחזור, ואם לא — איזה קלט השתנה |
-| `callqa eval` | ציון למערכת כולה מול סט זהב (קראו קודם את docs/DEPLOYMENT.md §8) |
-| `callqa drift` | תזוזה בציונים, בשיעור הבדיקות ובאיכות מול תקופה ידועה כתקינה |
-| `callqa review-queue` / `callqa review` | שיחות שממתינות לאדם, ורישום ההכרעה שלו |
-| `callqa retention` | מחיקת ארטיפקטים גולמיים נושאי PII שעברו את חלון השמירה, עם יומן ביקורת |
-
-כל הפקודות מקבלות `--config`, `--mock`, `--force`. כל שדה בקונפיגורציה
-ניתן לדריסה דרך משתני סביבה: `CALLQA_SECTION__FIELD`
-(למשל `CALLQA_JUDGE__BASE_URL`).
-
-**פורסים את זה?** `docs/DEPLOYMENT.md` היא דלת הכניסה. בנוסף:
-`docs/MLOPS.md` (הפעלה לאורך שנים), `docs/diarization_he.md`,
-`docs/performance_he.md` (זמנים שנמדדו), `dashboard/DESIGN.md`.
-
-## חוזה הקלט
-
-- `data/input/calls/*.{wav,mp3}` — שם הקובץ (או המטא-דאטה) = `call_id`.
-- `data/input/metadata.csv` — חובה: `call_id, banker_id, file_name`;
-  רשות: `call_date, call_type, banker_channel (L/R), banker_name`.
-- `data/input/human_ratings.csv` — `call_id, rater_id,` ועמודה אחת לכל ממד
-  במחוון, ציונים 1–5 (1–2 מעריכים לכל שיחה).
-
-## הבטחות התכנון
-
-- **אידמפוטנטי וניתן להמשך**: מצב לכל שיחה×שלב ב-SQLite; הרצה חוזרת מדלגת
-  על שלבים שהושלמו; `--force` מריץ מחדש. כל תוצר נכתב אטומית.
-- **אטומיות ברמת השיחה**: נעילת SQLite לכל `call_id` מונעת עיבוד כפול;
-  כל שיחה מסתיימת במעטפת סטטוס מפורשת; שיחה בעייתית אחת לעולם לא עוצרת
-  את מנוע ההרצה.
-- **פרטיות**: רק טקסט מצונזר מגיע לשופט, לדוחות וללוגים. תמלילים גולמיים
-  שמורים רק תחת `data/output/transcripts/` (עם קובץ אזהרה). הלוגים מכילים
-  מזהי שיחה ושמות שלבים בלבד, לעולם לא תוכן תמליל.
-- **דטרמיניזם וניתן לביקורת**: טמפרטורת השופט 0.0; כל כרטיס ציונים שומר
-  מזהה מודל, SHA-256 של הפרומפט, גרסת פרומפט, מספר ניסיונות חוזרים, זמן
-  תגובה וחותמת זמן.
-- **אימות ראיות**: כל ציטוט של השופט חייב להופיע מילה במילה בתמליל המצונזר,
-  אחרת התשובה נדחית ומתבצע ניסיון חוזר; לאחר כישלון סופי השיחה מסומנת
-  `needs_human_review` — לעולם לא מומצא מידע.
-- **כלל שער**: ממד שער (זיהוי, ציות) שקיבל ציון 2 ומטה מגביל את הציון
-  הכולל ל-59 ומסמן את השיחה.
+- הפקודה הראשונה יוצרת "סביבה וירטואלית": תיקייה נפרדת שמחזיקה את כל ספריות ה־Python של הפרויקט, בלי לגעת במערכת.
+- **בכל פעם שפותחים terminal חדש** צריך להפעיל אותה מחדש עם `source .venv/bin/activate`.
 
 ---
 
+## שלב 3 — בדיקה שהכול עובד (בלי מודלים)
+
+```bash
+./scripts/first_run.sh
+```
+
+הסקריפט יוצר 6 שיחות לדוגמה ומריץ עליהן את כל התהליך במצב בדיקה (mock). המצב הזה לא דורש מודלים, כרטיס מסך או אינטרנט. בסוף הוא פותח את לוח הבקרה (עוצרים עם `Ctrl+C`).
+
+**הבדיקה הצליחה אם** הקובץ `data/output/reports/index.html` נפתח בדפדפן ומציג 6 שיחות עם ציונים.
+
+כדאי להריץ גם את חבילת הבדיקות האוטומטיות (לוקח כדקה):
+
+```bash
+python -m pytest -q
+```
 
 ---
 
-# מדריך התקנה בשרת הבנק
+## שלב 4 — הורדת המודלים
 
-מכונת הפיתוח לעולם אינה מורידה מודלים. כל קבצי המודלים נמשכים בשרת הבנק
-באמצעות `scripts/download_models.py`.
+המודלים (בערך 20–25GB) **לא** נמצאים בפרויקט, וצריך להוריד אותם פעם אחת. זה השלב היחיד שדורש אינטרנט.
 
-1. **העברה** של המאגר יחד עם חבילת ה-wheels. יש לבנות את החבילה קודם על
-   מכונה עם אינטרנט: `./scripts/build_offline_bundle.sh` (יוצר `wheels/`).
-2. **התקנה אופליין** בשרת: `./scripts/install_offline.sh --server`
-   (מתקין `requirements.txt` + `requirements-server.txt` מתוך `wheels/`,
-   ולאחר מכן את חבילת `callqa` — ללא רשת).
-3. **התקנת ffmpeg**: `apt/yum install ffmpeg`, או הצבת בינארי סטטי של
-   `ffmpeg`/`ffprobe` בתוך `$PATH` בשרת מנותק לחלוטין.
-4. **הורדת מודלים** לפי נפח ה-VRAM הזמין (שלב זה דורש אינטרנט או קבצים
-   שהוכנו מראש):
+**4.1 — אישור הרישיון של מודל הפרדת הדוברים** (בלי זה ההורדה תיכשל עם שגיאה 403):
 
-   | VRAM | ASR | מודל השופט (`--llm-model`) | דגלי vLLM |
-   |---|---|---|---|
-   | 24 GB | `--asr` (ivrit CT2, ~1.6GB) | `dicta-il/dictalm2.0-instruct` (7B fp16), או מודל 12–27B בכימות AWQ/GPTQ | `--quantization awq` עבור AWQ |
-   | ≥48 GB | `--asr` | `meta-llama/Llama-3.3-70B-Instruct` AWQ (מוגבל גישה) | `--quantization awq --tensor-parallel-size 2` |
+1. נכנסים עם חשבון Hugging Face לעמוד https://huggingface.co/pyannote/speaker-diarization-community-1 ומאשרים את התנאים.
+2. יוצרים טוקן קריאה בעמוד https://huggingface.co/settings/tokens.
+3. שומרים אותו בקובץ `.env`:
 
-   ```bash
-   python scripts/download_models.py --asr
-   python scripts/download_models.py --llm --llm-model dicta-il/dictalm2.0-instruct
-   # רק אם מתברר שההקלטות במונו (מוגבל גישה; יש לאשר תנאים ולהגדיר HF_TOKEN):
-   python scripts/download_models.py --diarization
-   # רשות: הסרת שמות אנשים מבוססת NER:
-   python scripts/download_models.py --ner    # ואז יש להגדיר redaction.ner: true
-   ```
-   הסקריפט כותב `models/MODELS_MANIFEST.json` ומעדכן את `judge.model`
-   בקובץ `config/config.yaml` כך שיצביע על המודל שהורד.
-5. **מעבר למצב אופליין**: `export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`.
-   מודל הדיאריזציה נטען מה-cache של Hugging Face של המשתמש שהריץ את ההורדה,
-   לא מ-`models/`: במכונה אחרת יש להעתיק את ה-cache ולהפנות אליו את `HF_HOME`.
-   `callqa preflight` בודק זאת.
-6. **הפעלת השופט** על כל שרת תואם-OpenAI. עם vLLM המפתח הוא חובה — הסקריפט
-   מסרב לעלות בלעדיו:
-   ```bash
-   export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)      # המפתח של השרת
-   ./scripts/start_vllm.sh <model-id-or-path> 8000
-   export CALLQA_JUDGE__API_KEY=$CALLQA_JUDGE_API_KEY       # העותק של הצינור
-   ```
-   שימו לב לקו התחתון הכפול בשם השני: זו הדריסה של `judge.api_key`. בלעדיו
-   השרת עונה 401. הצינור רק בודק קישוריות אל `judge.base_url`; הוא לעולם
-   אינו מפעיל שרת בעצמו.
-7. **הצבת הקלט**: הקלטות תחת `data/input/calls/`, יחד עם `metadata.csv`
-   ו-(לצורך כיול) `human_ratings.csv`.
-8. **ולידציה**: `python -m callqa validate-inputs` — נכשל עם טבלת בעיות
-   בכל תקלה במטא-דאטה.
-9. **עיבוד אצוות ה-PoC**: `python -m callqa run` (ניתן להוסיף
-   `--max-workers 2` אם יש עודף משאבים ב-GPU). בייצור שוטף יש להשתמש
-   ב-`python -m callqa watch` — הוא סורק את תיקיית הקלט ומעבד כל הקלטה
-   חדשה ברגע שגודל הקובץ שלה מתייצב.
-10. **כיול**: `python -m callqa calibrate` ←
-    `data/output/reports/calibration.html`. מעבר דורש גם לפחות 20 שיחות
-    מדורגות בידי אדם וגם QWK כולל ≥ 0.70 — מתחת ל-20 התוצאה נקראת FAIL גם אם
-    ההסכמה גבוהה, כי למספר עדיין אין משמעות; ממדים עם QWK < 0.60 מסומנים
-    "אין לפרוס ללא בקרה אנושית".
-11. **דוחות**: `python -m callqa report` ←
-    `data/output/reports/index.html` שמקשר לכל דוחות השיחות והבנקאים
-    (הכול HTML סטטי, ללא נכסים חיצוניים).
+```bash
+cp .env.example .env
+# פתחו את .env בעורך טקסט וכתבו בשורה המתאימה:  HF_TOKEN=hf_...
+```
 
-## פתרון תקלות
+**4.2 — ההורדה:**
 
-| תסמין | פתרון |
+```bash
+pip install -r requirements-server.txt
+pip install huggingface_hub
+python scripts/download_models.py --all --llm-model dicta-il/dictalm2.0-instruct
+```
+
+- `--llm-model` קובע איזה מודל ישמש לשיפוט. הדוגמה מתאימה לכרטיס מסך של 16–24GB. אפשרויות נוספות מופיעות ב־`python scripts/download_models.py --help`.
+- בסוף ההורדה מודפסת טבלה שמסכמת אילו מודלים ירדו בהצלחה (OK) ואילו נכשלו (FAILED), ומה עושים אם משהו נכשל.
+- הסקריפט רושם לכל מודל את הרישיון שלו בקובץ `models/MODELS_MANIFEST.json`, ומעדכן לבד את מודל השיפוט בקובץ `config/config.yaml`.
+- אם אין במחשב כרטיס מסך של NVIDIA, צריך לשנות בקובץ `config/config.yaml` את השורה `compute_type: float16` ל־`compute_type: int8`.
+
+---
+
+## שלב 5 — הפעלת מודל השיפוט
+
+מודל השיפוט צריך לרוץ כשרת נפרד. אפשר להשתמש בכל שרת שתומך בממשק OpenAI (`/v1/chat/completions`), למשל vLLM, TGI או שרת פנימי שכבר קיים אצלכם.
+
+vLLM **לא** מותקן כחלק מהפרויקט. אם בוחרים בו, מתקינים אותו בנפרד (`pip install vllm`) ומריצים:
+
+```bash
+export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)
+./scripts/start_vllm.sh models/dicta-il--dictalm2.0-instruct 8000
+```
+
+אחר כך מעתיקים את אותו מפתח לקובץ `.env`, בשורה:
+
+```
+CALLQA_JUDGE__API_KEY=<אותו ערך>
+```
+
+⚠️ שימו לב: בשם הראשון יש קו תחתון **אחד** (הוא מיועד לשרת), ובשני יש **שניים** (הוא מיועד לתוכנה). אם המפתחות לא זהים, התוכנה תדווח שהשרת "סירב (401)".
+
+---
+
+## שלב 6 — הגדרות
+
+כל ההגדרות נמצאות בקובץ `config/config.yaml`, ולכל אחת יש הסבר בגוף הקובץ. אלה ההגדרות שכדאי לבדוק:
+
+| הגדרה | מה היא עושה |
 |---|---|
-| CUDA OOM (תמלול) | הגדר `asr.compute_type: int8` בקונפיגורציה |
-| CUDA OOM (vLLM) | השתמש במודל AWQ/GPTQ, הקטן את `--max-model-len`, הוסף `--gpu-memory-utilization 0.9` |
-| "mono recording but no diarizer" / זוהו קבצי מונו | התקן את תלויות השרת, הרץ `download_models.py --diarization` עם `HF_TOKEN` (יש לאשר את תנאי pyannote ב-HF) |
-| נקודת הקצה של השופט *אינה זמינה* | אף שרת לא מאזין: הפעילו את שרת המודל; בדקו את הפורט ב-`judge.base_url` |
-| נקודת הקצה של השופט *סירבה (401/403)* | השרת פעיל; `CALLQA_JUDGE__API_KEY` חסר או שונה מהמפתח של השרת |
-| ביטחון תמלול נמוך (בלוק `quality` מסמן הרבה מקטעים) | בדוק את קצב הדגימה והרעש בהקלטה; ודא `asr.language: he`; שקול לשנות את מערך ההקלטה |
-| תיקיית מודל ה-ASR חסרה או ריקה | הרץ `download_models.py --asr` ובדוק את `paths.models_dir` |
-| שיחה תקועה במצב "already being processed" | תהליך קודם קרס באמצע: הנעילה נגנבת אוטומטית כאשר ה-pid מת; אחרת מחק את השורה מטבלת `locks` במסד המצב |
+| `judge.base_url` | הכתובת של שרת מודל השיפוט. ברירת המחדל היא `http://localhost:8000/v1`. |
+| `retention.raw_days` | אחרי כמה ימים נמחקים הנתונים הגולמיים עם הפרטים המזהים. ברירת המחדל היא 90. |
+| `redaction.ner` | הסתרה של שמות שאף אחד לא שאל עליהם. מחייב את `python scripts/download_models.py --ner`. |
 
-## מבנה המאגר
+סיסמאות ומפתחות שמים **רק** בקובץ `.env`, אף פעם לא בקובץ `config.yaml`.
 
-ראה `src/callqa/` — `pipeline.py` (`process_call()`, ליבת הייצור),
-`engines.py` (מכל הזרקת תלויות שנבנה פעם אחת לכל תהליך), מודולי השלבים
-(`ingestion`, `audio`, `asr/`, `speakers/`, `redaction`, `features`,
-`judge/`), `aggregation.py`, `calibration.py`, `reporting/`, ו-`cli.py`.
-הקונפיגורציה נמצאת ב-`config/` (`config.yaml`, `rubric.yaml`,
-`recommendations_he.yaml`). הבדיקות ב-`tests/` (`make test`).
+---
+
+## שלב 7 — הכנת השיחות
+
+```bash
+mkdir -p data/input/calls
+```
+
+1. מעתיקים את ההקלטות לתיקייה `data/input/calls/`.
+2. יוצרים את הקובץ `data/input/metadata.csv`, עם שורה אחת לכל הקלטה:
+
+```
+call_id,banker_id,file_name,banker_channel,banker_name
+C0001,B17,C0001.wav,L,דנה כהן
+```
+
+| עמודה | חובה | משמעות |
+|---|---|---|
+| `call_id` | כן | מזהה ייחודי לשיחה (אותיות באנגלית, ספרות, `_` `-` `.`) |
+| `banker_id` | כן | מזהה הבנקאי |
+| `file_name` | כן | שם קובץ ההקלטה בתוך `calls/` |
+| `banker_channel` | לא | `L` או `R`: באיזה ערוץ נמצא הבנקאי, בהקלטת סטריאו |
+| `banker_name` | לא | שם הבנקאי. יוסתר בתמלול. |
+
+⚠️ **אל תקראו לקובצי ההקלטה על שם הלקוח** (למשל לפי מספר ת"ז או טלפון). שם הקובץ מופיע בכל הדוחות ובכל הלוגים.
+
+---
+
+## שלב 8 — בדיקה והרצה
+
+```bash
+python -m callqa preflight          # בודק שהמודלים, השרת, הדיסק והקלט מוכנים
+python -m callqa run                # מעבד את כל השיחות שב-metadata.csv
+python -m callqa report             # מפיק דוח לכל בנקאי
+```
+
+את `preflight` כדאי להריץ לפני כל הרצה. אם אחת השורות שלו מסומנת `FAIL`, מתקנים אותה לפני שממשיכים.
+
+**הרצה אוטומטית:**
+- `python -m callqa watch` — מאזין לתיקייה `data/input/calls/` ומעבד כל הקלטה חדשה שמגיעה.
+- `python -m callqa process --audio <קובץ>` — מעבד שיחה אחת. קוד היציאה: `0` הצלחה · `1` נדרשת בדיקה אנושית · `2` כישלון. כך אפשר לחבר את זה לכל מתזמן משימות.
+
+---
+
+## מה נוצר ואיפה
+
+| מיקום | מה יש שם |
+|---|---|
+| `data/output/reports/index.html` | הדוחות. **מתחילים מכאן.** |
+| `data/output/transcripts/` | ⚠️ תמלול **גולמי** עם פרטים מזהים. `python -m callqa retention --apply` מוחק אותו אחרי מספר הימים שמוגדר ב־`retention.raw_days`. |
+| `data/output/redacted/` | תמלול אחרי הסתרת הפרטים המזהים |
+| `data/output/redacted_audio/` | הקלטה שבה הפרטים המזהים מושתקים |
+
+לוח הבקרה, אופציונלי: `python dashboard/server.py`. הפקודה מדפיסה כתובת שפותחים בדפדפן. אפשר למחוק את כל התיקייה `dashboard/` בלי שום השפעה על שאר המערכת.
+
+---
+
+## שרת בלי חיבור לאינטרנט
+
+מכינים הכול על מחשב שיש בו אינטרנט, ומעבירים לשרת.
+
+**על המחשב עם האינטרנט:**
+
+```bash
+./scripts/build_offline_bundle.sh
+python scripts/download_models.py --all --llm-model dicta-il/dictalm2.0-instruct
+```
+
+**מעבירים לשרת:** את תיקיית הפרויקט (כולל `wheels/` ו־`models/`), ואת התיקייה `~/.cache/huggingface`.
+
+**על השרת:**
+
+```bash
+./scripts/install_offline.sh --server
+source .venv/bin/activate
+export HF_HOME=<המיקום שאליו הועתקה התיקייה huggingface>
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+python -m callqa preflight
+```
+
+---
+
+## תקלות נפוצות
+
+| הודעה או מצב | מה עושים |
+|---|---|
+| `403` בהורדת מודל | לא אושר הרישיון בשלב 4.1, או ש־`HF_TOKEN` חסר בקובץ `.env` |
+| שרת השיפוט "unreachable" | השרת לא רץ, או שהכתובת ב־`judge.base_url` שגויה |
+| שרת השיפוט "refused (401/403)" | המפתח ב־`CALLQA_JUDGE__API_KEY` שונה מהמפתח של השרת (שלב 5) |
+| `size MISMATCH` ב־preflight | מודל הועתק רק באופן חלקי. מעתיקים אותו שוב. |
+| `model:diarization` מסומן WARN | ההקלטות שלכם בסטריאו? אז אפשר להתעלם. אחרת, ראו "שרת בלי חיבור לאינטרנט". |
+| כל השיחות נכשלות בשלב הראשון | חסר ffmpeg |
+| `externally-managed-environment` | שכחתם להפעיל את `source .venv/bin/activate` |
+
+---
+
+## מסמכים נוספים
+
+- `docs/DEPLOYMENT.md` — פירוט מלא: אבטחה, רישוי, מה נשמר ולכמה זמן, ומגבלות ידועות.
+- `docs/MLOPS.md` — תפעול לאורך זמן: הערכה, ניטור שינויים, שחזור תוצאות.
+- `CHANGELOG.md` — מה השתנה בכל גרסה.
+
+</div>
+
+---
+
+<a id="english"></a>
+
+## What this is
+
+Software that takes a recording of a Hebrew phone call between a banker and a customer and produces a quality-assurance report on it.
+It transcribes the call, separates the two speakers, hides the customer's identifiers (ID, phone, name, etc.), and scores the call with a language model that runs on your own infrastructure.
+
+- It is a command-line (terminal) program. There is no website and no server.
+- **It never contacts the internet at runtime.** It has only two network connections: the judge model server you configure (step 5), and a one-time model download (step 4).
+
+Run every command in this guide in a terminal, **from inside the project folder**.
+
+---
+
+## Before you start
+
+| | Requirement | How to check |
+|---|---|---|
+| Operating system | Linux (recommended) or macOS | — |
+| Python | 3.11 or 3.12 | `python3 --version` |
+| ffmpeg | Needed to read real recordings | `ffmpeg -version` |
+| Free disk | At least 40 GB | `df -h .` |
+| Memory | At least 16 GB | — |
+| NVIDIA GPU | Needed **only** for the judge model (step 5) | `nvidia-smi` |
+
+If ffmpeg is missing:
+- Ubuntu/Debian: `sudo apt install ffmpeg`
+- RHEL/Rocky: `sudo dnf install ffmpeg`
+- macOS: `brew install ffmpeg`
+
+---
+
+## Step 1 — Download and unpack
+
+1. On GitHub, click **Code → Download ZIP**.
+2. Unpack it. This creates a folder named `BRS_Model-main`.
+3. Go into it in a terminal:
+
+```bash
+cd BRS_Model-main
+```
+
+---
+
+## Step 2 — Install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+- The first command creates a "virtual environment": a separate folder that holds all of the project's Python libraries, without touching the system.
+- **Every time you open a new terminal**, activate it again with `source .venv/bin/activate`.
+
+---
+
+## Step 3 — Check that everything works (no models needed)
+
+```bash
+./scripts/first_run.sh
+```
+
+The script creates 6 sample calls and runs the whole process on them in test mode (mock). Test mode needs no models, no GPU and no internet. At the end it opens the dashboard (stop it with `Ctrl+C`).
+
+**The check passed if** `data/output/reports/index.html` opens in a browser and shows 6 scored calls.
+
+It is also worth running the automated test suite (about a minute):
+
+```bash
+python -m pytest -q
+```
+
+---
+
+## Step 4 — Download the models
+
+The models (about 20–25 GB) are **not** included in the project and have to be downloaded once. This is the only step that needs the internet.
+
+**4.1 — Accept the speaker-separation model's licence** (without this, the download fails with a 403 error):
+
+1. Using a Hugging Face account, go to https://huggingface.co/pyannote/speaker-diarization-community-1 and accept the conditions.
+2. Create a read token at https://huggingface.co/settings/tokens.
+3. Save it in the `.env` file:
+
+```bash
+cp .env.example .env
+# open .env in a text editor and fill in the matching line:  HF_TOKEN=hf_...
+```
+
+**4.2 — Download:**
+
+```bash
+pip install -r requirements-server.txt
+pip install huggingface_hub
+python scripts/download_models.py --all --llm-model dicta-il/dictalm2.0-instruct
+```
+
+- `--llm-model` sets which model is used for judging. The example fits a 16–24 GB GPU. Other options are listed in `python scripts/download_models.py --help`.
+- At the end it prints a table of which models downloaded successfully (OK) and which failed (FAILED), with what to do about each failure.
+- The script records each model's licence in `models/MODELS_MANIFEST.json` and updates the judge model in `config/config.yaml` for you.
+- If the machine has no NVIDIA GPU, change the line `compute_type: float16` to `compute_type: int8` in `config/config.yaml`.
+
+---
+
+## Step 5 — Start the judge model
+
+The judge model has to run as a separate server. Any server that supports the OpenAI interface (`/v1/chat/completions`) works: for example vLLM, TGI, or an internal server you already run.
+
+vLLM is **not** installed as part of this project. If you choose it, install it separately (`pip install vllm`) and run:
+
+```bash
+export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)
+./scripts/start_vllm.sh models/dicta-il--dictalm2.0-instruct 8000
+```
+
+Then copy the same key into `.env`, on this line:
+
+```
+CALLQA_JUDGE__API_KEY=<the same value>
+```
+
+⚠️ Note: the first name has **one** underscore (it is for the server); the second has **two** (it is for the program). If the keys are not identical, the program reports that the server "refused (401)".
+
+---
+
+## Step 6 — Settings
+
+All settings are in `config/config.yaml`, and each one is explained inside the file. These are the settings worth checking:
+
+| Setting | What it does |
+|---|---|
+| `judge.base_url` | The address of the judge model server. The default is `http://localhost:8000/v1`. |
+| `retention.raw_days` | After how many days the raw data containing identifiers is deleted. The default is 90. |
+| `redaction.ner` | Hides names that nobody asked for. Requires `python scripts/download_models.py --ner`. |
+
+Put passwords and keys **only** in `.env`, never in `config.yaml`.
+
+---
+
+## Step 7 — Prepare the calls
+
+```bash
+mkdir -p data/input/calls
+```
+
+1. Copy the recordings into `data/input/calls/`.
+2. Create `data/input/metadata.csv`, with one line per recording:
+
+```
+call_id,banker_id,file_name,banker_channel,banker_name
+C0001,B17,C0001.wav,L,דנה כהן
+```
+
+| Column | Required | Meaning |
+|---|---|---|
+| `call_id` | yes | A unique ID for the call (English letters, digits, `_` `-` `.`) |
+| `banker_id` | yes | The banker's ID |
+| `file_name` | yes | The recording's file name inside `calls/` |
+| `banker_channel` | no | `L` or `R`: which channel the banker is on, in a stereo recording |
+| `banker_name` | no | The banker's name. It is hidden in the transcript. |
+
+⚠️ **Do not name recording files after the customer** (for example by ID or phone number). The file name appears in every report and every log.
+
+---
+
+## Step 8 — Check and run
+
+```bash
+python -m callqa preflight          # checks that models, server, disk and input are ready
+python -m callqa run                # processes every call in metadata.csv
+python -m callqa report             # produces a report for each banker
+```
+
+Run `preflight` before every run. If any of its lines is marked `FAIL`, fix it before you continue.
+
+**Automated running:**
+- `python -m callqa watch` — watches `data/input/calls/` and processes every new recording that arrives.
+- `python -m callqa process --audio <file>` — processes one call. Exit code: `0` success · `1` needs human review · `2` failed. This lets you connect it to any task scheduler.
+
+---
+
+## What is created, and where
+
+| Location | What is there |
+|---|---|
+| `data/output/reports/index.html` | The reports. **Start here.** |
+| `data/output/transcripts/` | ⚠️ **Raw** transcripts containing identifiers. `python -m callqa retention --apply` deletes them once they are older than `retention.raw_days`. |
+| `data/output/redacted/` | Transcripts after the identifiers are hidden |
+| `data/output/redacted_audio/` | Recordings with the identifiers silenced |
+
+Optional dashboard: `python dashboard/server.py`. It prints an address to open in a browser. You can delete the whole `dashboard/` folder with no effect on the rest of the system.
+
+---
+
+## A server with no internet connection
+
+Prepare everything on a machine that has internet, then move it to the server.
+
+**On the machine with internet:**
+
+```bash
+./scripts/build_offline_bundle.sh
+python scripts/download_models.py --all --llm-model dicta-il/dictalm2.0-instruct
+```
+
+**Move to the server:** the project folder (including `wheels/` and `models/`), and the folder `~/.cache/huggingface`.
+
+**On the server:**
+
+```bash
+./scripts/install_offline.sh --server
+source .venv/bin/activate
+export HF_HOME=<where you copied the huggingface folder>
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+python -m callqa preflight
+```
+
+---
+
+## Common problems
+
+| Message or symptom | What to do |
+|---|---|
+| `403` while downloading a model | The licence in step 4.1 was not accepted, or `HF_TOKEN` is missing from `.env` |
+| Judge server "unreachable" | The server is not running, or the address in `judge.base_url` is wrong |
+| Judge server "refused (401/403)" | The key in `CALLQA_JUDGE__API_KEY` differs from the server's key (step 5) |
+| `size MISMATCH` in preflight | A model was only partly copied. Copy it again. |
+| `model:diarization` shows WARN | Are your recordings stereo? Then you can ignore it. Otherwise, see "A server with no internet connection". |
+| Every call fails at the first stage | ffmpeg is missing |
+| `externally-managed-environment` | You forgot to run `source .venv/bin/activate` |
+
+---
+
+## More documents
+
+- `docs/DEPLOYMENT.md` — full detail: security, licensing, what is stored and for how long, and known limits.
+- `docs/MLOPS.md` — running it over time: evaluation, drift monitoring, reproducing results.
+- `CHANGELOG.md` — what changed in each version.
