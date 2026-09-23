@@ -10,6 +10,7 @@ from callqa.models import (
     ScoreCard,
 )
 from callqa.reporting.common import (
+    ReportError,
     jinja_env,
     load_recommendations,
     pick_recommendation,
@@ -120,6 +121,20 @@ def render_call_report(
 ) -> str:
     if recommendations is None:
         recommendations = load_recommendations()
+    # A stored scorecard was produced under whatever rubric was current when the
+    # call ran, and resume reuses it: editing config/rubric.yaml and then
+    # re-running `report` renders old scores against new dimensions. The missing
+    # dimension surfaced as a bare KeyError from inside a Jinja render - an
+    # error that names a dictionary key and nothing an operator can act on.
+    stale = [d.id for d in rubric.dimensions if d.id not in scorecard.scores]
+    if stale:
+        raise ReportError(
+            f"call {scorecard.call_id} was scored under a different rubric: it "
+            f"has no score for {', '.join(stale)}. The rubric has changed since "
+            f"this call was judged.\nRun `callqa verify {scorecard.call_id}` to "
+            f"see exactly what changed, then reprocess it with --force to score "
+            f"it against the current rubric."
+        )
     weakest = weakest_non_gate_dimension(rubric, scorecard)
     recommendation = (
         pick_recommendation(recommendations, weakest, scorecard.call_id) if weakest else None

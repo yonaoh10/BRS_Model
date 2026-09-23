@@ -16,6 +16,10 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 SPEAKER_HE = {"banker": "בנקאי", "customer": "לקוח"}
 
 
+class ReportError(RuntimeError):
+    """A report cannot be rendered from the artifacts it was given."""
+
+
 def jinja_env() -> Environment:
     env = Environment(
         loader=FileSystemLoader(TEMPLATES_DIR),
