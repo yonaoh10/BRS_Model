@@ -9,7 +9,7 @@
 ## מה זה
 
 תוכנה שמקבלת הקלטה של שיחה טלפונית בעברית בין בנקאי ללקוח, ומפיקה דוח בקרת איכות על השיחה.
-היא מתמללת את השיחה, מפרידה בין הדוברים, מסתירה פרטים מזהים של הלקוח (ת"ז, טלפון, שם וכו'), ונותנת ציון לשיחה בעזרת מודל שפה שרץ אצלכם.
+היא מתמללת את השיחה, מפרידה בין הדוברים, מסתירה פרטים מזהים של הלקוח (ת"ז, טלפון, שם וכו'), ונותנת ציון לשיחה בעזרת מודל שפה שרץ על התשתית של הבנק.
 
 - זו תוכנת שורת פקודה (terminal). אין בה אתר ואין בה שרת.
 - **היא לא פונה לאינטרנט בזמן ריצה.** יש לה רק שני חיבורי רשת: שרת מודל השיפוט שאתם מגדירים (שלב 5), והורדה חד־פעמית של המודלים (שלב 4).
@@ -112,7 +112,7 @@ python scripts/download_models.py --all --llm-model dicta-il/dictalm2.0-instruct
 
 ## שלב 5 — הפעלת מודל השיפוט
 
-מודל השיפוט צריך לרוץ כשרת נפרד. אפשר להשתמש בכל שרת שתומך בממשק OpenAI (`/v1/chat/completions`), למשל vLLM, TGI או שרת פנימי שכבר קיים אצלכם.
+מודל השיפוט צריך לרוץ כשרת נפרד. אפשר להשתמש בכל שרת שתומך בממשק OpenAI (`/v1/chat/completions`), למשל vLLM, TGI או שרת פנימי שכבר קיים בבנק.
 
 vLLM **לא** מותקן כחלק מהפרויקט. אם בוחרים בו, מתקינים אותו בנפרד (`pip install vllm`) ומריצים:
 
@@ -254,7 +254,7 @@ python -m callqa preflight
 ## What this is
 
 Software that takes a recording of a Hebrew phone call between a banker and a customer and produces a quality-assurance report on it.
-It transcribes the call, separates the two speakers, hides the customer's identifiers (ID, phone, name, etc.), and scores the call with a language model that runs on your own infrastructure.
+It transcribes the call, separates the two speakers, hides the customer's identifiers (ID, phone, name, etc.), and scores the call with a language model that runs on the bank's own infrastructure.
 
 - It is a command-line (terminal) program. There is no website and no server.
 - **It never contacts the internet at runtime.** It has only two network connections: the judge model server you configure (step 5), and a one-time model download (step 4).
@@ -357,7 +357,7 @@ python scripts/download_models.py --all --llm-model dicta-il/dictalm2.0-instruct
 
 ## Step 5 — Start the judge model
 
-The judge model has to run as a separate server. Any server that supports the OpenAI interface (`/v1/chat/completions`) works: for example vLLM, TGI, or an internal server you already run.
+The judge model has to run as a separate server. Any server that supports the OpenAI interface (`/v1/chat/completions`) works: for example vLLM, TGI, or an internal server the bank already runs.
 
 vLLM is **not** installed as part of this project. If you choose it, install it separately (`pip install vllm`) and run:
 
