@@ -12,7 +12,11 @@ test:
 	$(PYTHON) -m pytest -q
 
 lint:
-	ruff check src tests scripts dashboard
+	# $(wildcard) expands to nothing when dashboard/ has been deleted, which
+	# the hand-off documentation says is supported. Naming it unconditionally
+	# made `make lint` fail on a tree that was in exactly the state the
+	# documentation describes.
+	ruff check src tests scripts $(wildcard dashboard)
 
 sample:
 	$(PYTHON) scripts/generate_sample_data.py

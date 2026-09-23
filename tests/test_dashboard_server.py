@@ -1,9 +1,14 @@
 """Tests for the local operator dashboard server.
 
-Covers the data contract, the security controls (this console can start
-billable cloud machines, so it must not be drivable by a page you happen to
-visit), and the project-wide rule that raw PII never leaves the redaction
-stage.
+Covers the data contract, the security controls (it serves call material, so
+it must not be drivable by a page you happen to visit), and the project-wide
+rule that raw PII never leaves the redaction stage.
+
+The whole module SKIPS when dashboard/ is absent. That directory is documented
+as deletable in one command for the bank hand-off, and the promise was only
+half kept: the pipeline ran fine without it, but `pytest` then failed to
+COLLECT this file - so a bank that deleted the dashboard and ran the verifying
+steps the documentation gives them saw a broken test suite.
 """
 
 from __future__ import annotations
@@ -20,6 +25,15 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Skipped at MODULE level, and before the import below rather than with a
+# `pytestmark`: a mark is evaluated after the module has already been imported,
+# so the `from server import ...` still ran and collection still died. It has
+# to be this, in this position, to actually skip.
+if not (REPO_ROOT / "dashboard" / "server.py").exists():
+    pytest.skip("dashboard/ has been removed; it is an optional, deletable add-on",
+                allow_module_level=True)
+
 sys.path.insert(0, str(REPO_ROOT / "dashboard"))
 
 from server import Handler, collect_state  # noqa: E402

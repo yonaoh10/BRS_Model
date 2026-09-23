@@ -61,3 +61,30 @@ jobs:
           python -m callqa report --mock
           python -m callqa preflight --mock
           test -s data/output/reports/index.html
+
+  # The hand-off documentation states that `rm -rf dashboard/` is supported.
+  # It was only half true: the pipeline ran, but `make lint` failed on a path
+  # that no longer existed and `pytest` could not even COLLECT the dashboard's
+  # own tests - so a bank that took the documentation at its word and then ran
+  # the verifying steps the documentation gives them saw a broken suite. A
+  # claim nobody exercises is a claim that quietly stops being true.
+  deletable-addons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e . ruff pytest
+      - name: Delete the optional dashboard
+        run: rm -rf dashboard/
+      - name: Lint, test and run the pipeline without it
+        run: |
+          set -eux
+          make lint
+          python -m pytest -q
+          python scripts/generate_sample_data.py
+          python -m callqa run --mock
+          python -m callqa report --mock
+          test -s data/output/reports/index.html

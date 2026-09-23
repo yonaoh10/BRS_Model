@@ -73,9 +73,18 @@ def _tracked_docs() -> list[Path]:
 DOCS = _tracked_docs()
 
 
+# Documented as deletable in one command for the bank hand-off. A document may
+# name a file inside one; once the directory is gone, so is the reference, and
+# that is the supported state rather than a broken link.
+_OPTIONAL_DIRS = ("dashboard",)
+
+
 def _resolves(candidate: str) -> bool:
     # Written by a run, so absent from a fresh checkout by design.
     if candidate.startswith(("data/", "models/", "wheels/", "logs/")):
+        return True
+    top = candidate.split("/", 1)[0]
+    if top in _OPTIONAL_DIRS and not (REPO / top).exists():
         return True
     if Path(candidate).name in _RUNTIME_ARTIFACTS:
         return True
