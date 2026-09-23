@@ -99,3 +99,102 @@ def test_redact_dialog_counts_and_offsets() -> None:
     assert redacted.turns[0].start == 1.0 and redacted.turns[0].end == 4.0
     assert "123456782" not in redacted.turns[0].text
     assert "1234567" not in redacted.turns[0].text
+
+
+# -- identifiers with no shape ----------------------------------------------
+#
+# A national ID passes a checksum, a phone has a prefix, a card passes Luhn.
+# A mother's name, a date of birth and a street address have no form at all -
+# the only thing that marks them as identifiers is that a banker asked for
+# them. These pin the question-and-answer path that masks them, in BOTH
+# directions: the leak must close, and ordinary speech must survive.
+
+
+def _dialog(*turns: tuple[str, str]) -> DialogTranscript:
+    return DialogTranscript(
+        call_id="QA", attribution_mode="stereo",
+        turns=[DialogTurn(speaker=s, start=float(i * 5), end=float(i * 5 + 4), text=t)
+               for i, (s, t) in enumerate(turns)],
+    )
+
+
+@pytest.mark.parametrize(("question", "answer", "label"), [
+    ("ומה שם האם לאימות נוסף?", "רות.", "שם"),
+    ("מה שם האם שלך?", "קוראים לה מרים.", "שם"),
+    ("מה השם המלא שלך?", "דוד בן ארי.", "שם"),
+    ("ומה תאריך הלידה?", "נולדתי בחמישי למרץ שמונים ושתיים.", "תאריך לידה"),
+    ("מתי נולדת?", "ב-5.3.1982.", "תאריך לידה"),
+    ("מה כתובת המגורים שלך?", "רחוב הרצל 15 בחיפה.", "כתובת"),
+    ("איפה אתה גר?", "שדרות רוטשילד 40 בתל אביב.", "כתובת"),
+])
+def test_an_answer_to_an_identity_question_is_masked(
+    question: str, answer: str, label: str
+) -> None:
+    """The answer arrives in its OWN turn, so nothing in the string itself is
+    recognisable - the preceding question is the entire signal."""
+    redacted = RegexRedactor().redact_dialog(_dialog(("banker", question), ("customer", answer)))
+    assert f"<{label}:████>" in redacted.turns[1].text, redacted.turns[1].text
+
+
+def test_the_question_itself_is_never_masked() -> None:
+    """A reviewer has to be able to read what the banker asked; masking the
+    question would also hide whether identification was performed at all,
+    which is one of the scored rubric dimensions."""
+    redacted = RegexRedactor().redact_dialog(_dialog(
+        ("banker", "ולאימות הכתובת, מה כתובת המגורים שלך?"),
+        ("customer", "רחוב הרצל 15 בחיפה."),
+    ))
+    assert redacted.turns[0].text == "ולאימות הכתובת, מה כתובת המגורים שלך?"
+    assert "████" in redacted.turns[1].text
+
+
+def test_the_askers_own_next_words_are_not_the_answer() -> None:
+    """Question and answer are matched across SPEAKERS. Without that, the rest
+    of the banker's own sentence reads as the answer."""
+    redacted = RegexRedactor().redact_dialog(_dialog(
+        ("banker", "מה שם האם לאימות נוסף?"),
+        ("banker", "אני שואל רק לצורך הזיהוי."),
+        ("customer", "רות."),
+    ))
+    assert "████" not in redacted.turns[1].text
+    assert "<שם:████>" in redacted.turns[2].text
+
+
+def test_a_refused_answer_does_not_swallow_ordinary_speech() -> None:
+    redacted = RegexRedactor().redact_dialog(_dialog(
+        ("banker", "מה שם האם שלך?"),
+        ("customer", "אני לא זוכר."),
+    ))
+    assert "████" not in redacted.turns[1].text
+
+
+def test_a_refusal_followed_by_a_real_answer_is_still_masked() -> None:
+    redacted = RegexRedactor().redact_dialog(_dialog(
+        ("banker", "מה שם האם שלך?"),
+        ("customer", "לא בטוח, אולי רות."),
+    ))
+    assert "<שם:████>" in redacted.turns[1].text
+
+
+@pytest.mark.parametrize("line", [
+    "הסניף ברחוב דיזנגוף פתוח היום עד חמש.",
+    "אני לקוח כבר עשר שנים וזו פעם ראשונה.",
+    "ההחזר החודשי המשוער הוא כאלף וחמש מאות שקל.",
+    "זה חיוב של שלושים שקלים מלפני שבוע.",
+    "המסלול עולה עשרה שקלים בחודש.",
+    "הכרטיס יגיע אליך עד שלושה ימי עסקים.",
+])
+def test_ordinary_speech_is_not_masked(line: str) -> None:
+    """Recall is trivially 1.0 for a redactor that masks everything. These are
+    the sentences that must survive: amounts the compliance and clarity
+    dimensions are scored on, and a branch location that is not a home address."""
+    redacted, counts = redact_text(line)
+    assert "████" not in redacted, f"over-masked: {redacted}"
+    assert counts == {}
+
+
+def test_a_landmark_without_a_house_number_is_not_an_address() -> None:
+    """"הסניף ברחוב דיזנגוף" is where the branch is; "רחוב הרצל 15" is where
+    the customer lives. The house number is what separates them."""
+    assert "████" not in redact_text("הסניף ברחוב דיזנגוף פתוח היום.")[0]
+    assert "<כתובת:████>" in redact_text("רחוב הרצל 15 בחיפה.")[0]

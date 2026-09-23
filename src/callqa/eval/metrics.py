@@ -8,6 +8,8 @@ recall number is the one that matters for a leak.
 
 from __future__ import annotations
 
+import re
+
 
 def _levenshtein(a: list, b: list) -> int:
     if a == b:
@@ -44,22 +46,47 @@ def _overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return a[0] < b[1] and b[0] < a[1]
 
 
+def gold_spans(text: str, literals: list[str]) -> list[tuple[int, int]]:
+    """Locate hand-labelled identifiers in `text`, as whole words, everywhere.
+
+    Two properties matter and a plain `str.find` has neither. It stops at the
+    FIRST hit, so an identifier repeated in a read-back is scored once while the
+    second, unmasked copy is just as much of a leak. And it matches inside other
+    words: the mother's name "רות" occurs inside "שירות" ("מוקד שירות הלקוחות")
+    several turns before it is ever spoken as a name, which would anchor the
+    gold span to the wrong place entirely and measure nothing.
+
+    The boundary is "not a letter or digit on either side" — Hebrew has no case
+    and no ASCII word boundary that behaves here.
+    """
+    spans: list[tuple[int, int]] = []
+    for lit in literals:
+        body = r"\s+".join(re.escape(p) for p in lit.split() if p)
+        if not body:
+            continue
+        pattern = re.compile(rf"(?<![\w֐-׿]){body}(?![\w֐-׿])")
+        spans.extend((m.start(), m.end()) for m in pattern.finditer(text))
+    return sorted(set(spans))
+
+
 def redaction_prf(reference_text: str, gold_literals: list[str]) -> dict:
     """Precision/recall/F1 of `find_pii` on `reference_text` vs gold identifiers.
 
-    Gold spans are located by string search for the KNOWN seeded identifiers,
+    Gold spans are located by searching for the KNOWN seeded identifiers,
     independent of find_pii — otherwise recall would be 100% by construction.
     A gold span counts as recalled if any detected span overlaps it; a detected
     span counts as precise if it overlaps some gold span.
+
+    RECALL is the safety number: it is the fraction of identifiers that would be
+    masked, so anything below 1.0 is a leak. PRECISION is the cost number: it
+    falls when the detector masks text that is not an identifier, which damages
+    the transcript a reviewer reads and the judge scores. Both are reported
+    because a detector can trivially reach recall 1.0 by masking everything.
     """
     from callqa.redaction import find_pii
 
     detected = [(m.start, m.end) for m in find_pii(reference_text)]
-    gold: list[tuple[int, int]] = []
-    for lit in gold_literals:
-        idx = reference_text.find(lit)
-        if idx >= 0:
-            gold.append((idx, idx + len(lit)))
+    gold = gold_spans(reference_text, gold_literals)
 
     recalled = sum(1 for g in gold if any(_overlap(g, d) for d in detected))
     precise = sum(1 for d in detected if any(_overlap(g, d) for g in gold))

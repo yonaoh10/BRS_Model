@@ -1,8 +1,0 @@
-asr done at 286.0s
-diar done at 394.0s
-PARALLEL2 (3+3 threads) combined wall: 394.0 s
-par2_asr load 5.46 transcribe 279.48 words 294 rss_mb 2357.1
-par2_diar load 2.78 diarize 381.51 steps {'segmentation': {'span_sec': 11.09, 'calls': 9, 't_first': 0.03}, 'speaker_counting': {'span_sec': 0.0, 'calls': 1, 't_first': 11.14}, 'embeddings': {'span_sec': 370.02, 'calls': 19, 't_first': 11.36}, 'discrete_diarization': {'span_sec': 0.0, 'calls': 1, 't_first': 381.46}} speakers 2 rss_mb 2612.1
-=== nowords variant ===
-b5_vad_nowords transcribe 170.9 s, 56 segments
-FINAL_DONE

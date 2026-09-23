@@ -26,15 +26,17 @@ per-banker aggregation (`report`), and judge calibration vs. human QA ratings
 models** — deterministic fake engines behind the same interfaces, switched to
 real engines by config only. Emotion recognition is explicitly out of scope.
 
-## Quick start (dev machine, mock mode)
+## Quick start (any machine, mock mode)
 
-The shortest path on any machine, with or without Docker:
+No GPU, no models, no network. This proves the software is installed and the
+whole chain works before anything is downloaded:
 
 ```bash
-cp .env.example .env              # keys go here (RunPod, Hugging Face); git ignores it
-./scripts/first_run.sh            # local Python: mock pipeline + dashboard
-./scripts/first_run.sh --docker   # the same inside the container (docker compose up)
+./scripts/first_run.sh            # mock pipeline on synthetic calls, then the dashboard
 ```
+
+Deploying it for real? Read **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — it is
+the front door: prerequisites, models, serving, verification and licensing.
 
 Step by step:
 
@@ -101,28 +103,6 @@ env-overridable: `CALLQA_SECTION__FIELD` (e.g. `CALLQA_JUDGE__BASE_URL`).
 
 ---
 
-<!-- cloud-option:start -->
-## Optional: cloud GPUs during development
-
-You can build and tune the whole system on a laptop with no GPU by renting one
-GPU machine by the hour and running only the two heavy stages on it
-(transcription and the LLM judge). Everything else stays local.
-
-```bash
-python cloud/runpod_cli.py up                              # start the GPU box
-python -m callqa run --config config/config.cloud.yaml     # laptop drives it
-python cloud/runpod_cli.py down                            # stop paying
-```
-
-Roughly a few dollars per month of development. The rented machine runs the
-same `download_models.py` and `vllm serve` as the bank runbook, so it is a
-rehearsal rather than a detour. **Development data only** — audio leaves your
-machine, so use synthetic or consented recordings.
-
-This is scaffolding: `python scripts/remove_cloud_option.py --apply` deletes it
-entirely and verifies the pipeline still passes. Full guide, costs and security
-rules: **[cloud/README.md](cloud/README.md)**.
-<!-- cloud-option:end -->
 
 ---
 
@@ -230,15 +210,17 @@ Config lives in `config/` (`config.yaml`, `rubric.yaml`,
 דמה דטרמיניסטיים מאחורי אותם ממשקים בדיוק, שמתחלפים למנועים אמיתיים
 באמצעות קונפיגורציה בלבד. זיהוי רגשות מוחרג במפורש מהמערכת.
 
-## התחלה מהירה (מכונת פיתוח, מצב mock)
+## התחלה מהירה (כל מחשב, מצב mock)
 
-הדרך הקצרה ביותר בכל מחשב, עם Docker או בלעדיו:
+בלי GPU, בלי מודלים, בלי רשת. זה מוכיח שהתוכנה מותקנת ושכל השרשרת עובדת,
+עוד לפני שמורידים משהו:
 
 ```bash
-cp .env.example .env              # המפתחות נכנסים לכאן (RunPod, Hugging Face); git מתעלם מהקובץ
-./scripts/first_run.sh            # פייתון מקומי: פייפליין mock + דשבורד
-./scripts/first_run.sh --docker   # אותו דבר בתוך הקונטיינר (docker compose up)
+./scripts/first_run.sh            # פייפליין mock על שיחות סינתטיות, ואז הדשבורד
 ```
+
+פורסים לסביבה אמיתית? קראו את **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** —
+זו דלת הכניסה: דרישות מוקדמות, מודלים, הרצת שירות, אימות ורישוי.
 
 שלב אחר שלב:
 
@@ -307,28 +289,6 @@ make test                                        # חבילת הבדיקות
 
 ---
 
-<!-- cloud-option:start -->
-## רשות: GPU בענן בזמן הפיתוח
-
-אפשר לבנות ולכוונן את המערכת כולה על מחשב נייד ללא GPU, על ידי שכירת מכונת
-GPU אחת לפי שעה והרצת שני השלבים הכבדים בלבד עליה (תמלול ושופט ה-LLM).
-כל השאר נשאר מקומי.
-
-```bash
-python cloud/runpod_cli.py up                              # הפעלת מכונת ה-GPU
-python -m callqa run --config config/config.cloud.yaml     # המחשב שלך מפעיל אותה
-python cloud/runpod_cli.py down                            # להפסיק לשלם
-```
-
-העלות היא כמה דולרים בודדים לחודש פיתוח. המכונה השכורה מריצה את אותו
-`download_models.py` ואותה פקודת `vllm serve` שבמדריך הבנק, ולכן זו חזרה
-גנרלית ולא עקיפה. **נתוני פיתוח בלבד** — האודיו יוצא מהמחשב שלך, ולכן יש
-להשתמש בהקלטות סינתטיות או בהסכמה.
-
-זהו פיגום זמני: הפקודה `python scripts/remove_cloud_option.py --apply` מוחקת
-אותו לחלוטין ומאמתת שהצינור עדיין עובר את כל הבדיקות. מדריך מלא, עלויות
-וכללי אבטחה: **[cloud/README.md](cloud/README.md)**.
-<!-- cloud-option:end -->
 
 ---
 

@@ -35,7 +35,7 @@ import numpy as np
 
 from callqa.audio import _read_wav, _write_wav
 from callqa.models import AudioArtifact, DialogTranscript
-from callqa.redaction import TURN_SEPARATOR, _name_pattern, find_pii
+from callqa.redaction import TURN_SEPARATOR, TurnSpan, _name_pattern, find_pii
 
 logger = logging.getLogger(__name__)
 
@@ -46,21 +46,29 @@ AUDIO_PAD_SEC = 0.25
 _LEADING_SPACE = (" ", "\t", "\u00a0")
 
 
-def _spoken_document(dialog: DialogTranscript) -> tuple[str, list[tuple[int, int, float, float]]]:
+def _spoken_document(
+    dialog: DialogTranscript,
+) -> tuple[str, list[tuple[int, int, float, float]], list[TurnSpan]]:
     """Rebuild the spoken text from words, tracking each word's char span + time.
 
-    Returns ``(document, word_spans)`` where each entry is
+    Returns ``(document, word_spans, turn_spans)`` where each word entry is
     ``(char_start, char_end, t_start, t_end)``. Turns are joined with
     ``TURN_SEPARATOR`` so a number the speaker paused in the middle of - two
     turns once split - is still one detectable digit run.
+
+    ``turn_spans`` carries the same boundaries in THIS document's coordinates,
+    which differ from the turn-text document's: detection needs them to tell an
+    identity question from the answer somebody else gave it.
     """
     pieces: list[str] = []
     word_spans: list[tuple[int, int, float, float]] = []
+    turn_spans: list[TurnSpan] = []
     cursor = 0
     for t_index, turn in enumerate(dialog.turns):
         if t_index:
             pieces.append(TURN_SEPARATOR)
             cursor += len(TURN_SEPARATOR)
+        turn_start = cursor
         started = False
         for word in turn.words:
             token = word.word
@@ -72,7 +80,8 @@ def _spoken_document(dialog: DialogTranscript) -> tuple[str, list[tuple[int, int
             pieces.append(token)
             cursor += len(token)
             word_spans.append((start, cursor, word.start, word.end))
-    return "".join(pieces), word_spans
+        turn_spans.append(TurnSpan(turn_start, cursor, turn.speaker))
+    return "".join(pieces), word_spans, turn_spans
 
 
 def _text_document(dialog: DialogTranscript) -> list[tuple[int, int, object]]:
@@ -92,8 +101,10 @@ def _text_document(dialog: DialogTranscript) -> list[tuple[int, int, object]]:
     return spans
 
 
-def _all_pii_spans(document: str, names: list[str]) -> list[tuple[int, int]]:
-    return [(m.start, m.end) for m in find_pii(document)] + _name_spans(document, names)
+def _all_pii_spans(
+    document: str, names: list[str], turns: list[TurnSpan] | None = None
+) -> list[tuple[int, int]]:
+    return [(m.start, m.end) for m in find_pii(document, turns)] + _name_spans(document, names)
 
 
 def _name_spans(document: str, extra_names: list[str]) -> list[tuple[int, int]]:
@@ -143,10 +154,10 @@ def masked_time_ranges(
     # Pass 1: precise word-level ranges. word_hits keeps the UNPADDED spans for
     # the coverage test below, so a neighbouring turn's padding cannot make a
     # turn look covered when it is not.
-    word_doc, word_spans = _spoken_document(dialog)
+    word_doc, word_spans, word_turns = _spoken_document(dialog)
     ranges: list[tuple[float, float]] = []
     word_hits: list[tuple[float, float]] = []
-    for s0, s1 in _all_pii_spans(word_doc, names):
+    for s0, s1 in _all_pii_spans(word_doc, names, word_turns):
         hits = [(ts, te) for (c0, c1, ts, te) in word_spans if c0 < s1 and s0 < c1]
         if hits:
             lo, hi = min(t for t, _ in hits), max(t for _, t in hits)
@@ -155,7 +166,8 @@ def masked_time_ranges(
 
     # Pass 2: the cross-turn safety net over the redactor's own document.
     turn_spans = _text_document(dialog)
-    for s0, s1 in _all_pii_spans(_joined_text(dialog), names):
+    text_turns = [TurnSpan(c0, c1, turn.speaker) for c0, c1, turn in turn_spans]
+    for s0, s1 in _all_pii_spans(_joined_text(dialog), names, text_turns):
         for c0, c1, turn in turn_spans:
             if c0 < s1 and s0 < c1 and not _covered(turn, word_hits):
                 ranges.append((turn.start - AUDIO_PAD_SEC, turn.end + AUDIO_PAD_SEC))

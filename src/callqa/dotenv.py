@@ -1,9 +1,10 @@
 """Load `.env` from the project directory, without a dependency.
 
-Only the handful of secrets and per-machine settings live there: the RunPod
-key, the Hugging Face token, the endpoints of a running GPU box. A variable
-that is already set in the environment is never overridden, so a value
-exported in the shell, or injected by a scheduler, always wins over the file.
+Only the handful of secrets and per-machine settings live there: the Hugging
+Face token used once to download models, and the judge endpoint and its API
+key. A variable that is already set in the environment is never overridden, so
+a value exported in the shell, or injected by a scheduler, always wins over
+the file.
 
 The file is looked for next to the code (the project root) and in the current
 directory, in that order. Anything else - ~/.env, parent directories - is
@@ -93,36 +94,3 @@ def load_dotenv(explicit: Path | None = None) -> list[str]:
                                    key, path, host)
         return applied
     return []
-
-
-def write_env_values(values: dict[str, str], path: Path | None = None) -> Path:
-    """Update or append KEY=value lines in `.env`, keeping everything else.
-
-    Used by the cloud CLI to hand the endpoints of a freshly started GPU box
-    to the pipeline, instead of printing shell exports for the operator to
-    paste by hand.
-    """
-    target = path or (project_root() / ".env")
-    lines: list[str] = []
-    if target.exists():
-        lines = target.read_text(encoding="utf-8").splitlines()
-    remaining = dict(values)
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key = stripped.split("=", 1)[0].removeprefix("export ").strip()
-        if key in remaining:
-            lines[i] = f"{key}={remaining.pop(key)}"
-    for key, value in remaining.items():
-        lines.append(f"{key}={value}")
-    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
-    try:
-        target.chmod(0o600)
-    except OSError:  # pragma: no cover
-        pass
-    for key, value in values.items():
-        os.environ[key] = value
-    return target

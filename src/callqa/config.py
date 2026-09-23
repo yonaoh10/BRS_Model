@@ -84,24 +84,15 @@ class AudioConfig(StrictModel):
 
 
 class ASRConfig(StrictModel):
-    # faster_whisper = in-process (bank server). remote = HTTP client to a
-    # cloud-hosted ASR server (DEV ONLY; see cloud/README.md). mock = fake.
-    engine: Literal["faster_whisper", "remote", "mock"] = "faster_whisper"
+    # faster_whisper = in-process on the machine running the pipeline. mock =
+    # deterministic fake, for a run with no models and no GPU.
+    engine: Literal["faster_whisper", "mock"] = "faster_whisper"
     model_dir: str = "{models_dir}/ivrit-whisper-large-v3-turbo-ct2"
     language: str = "he"
     compute_type: str = "float16"
     word_timestamps: bool = True
     vad_filter: bool = True
     low_confidence_logprob: float = -1.0
-    # --- remote engine only (dev phase); ignored by faster_whisper/mock ---
-    base_url: str = ""
-    api_key: str | None = None
-    timeout_sec: float = 900.0
-
-    @field_validator("base_url")
-    @classmethod
-    def _safe_base_url(cls, value: str) -> str:
-        return validate_endpoint(value, "asr.base_url")
 
     @field_validator("language")
     @classmethod
@@ -109,12 +100,6 @@ class ASRConfig(StrictModel):
         if not v or v == "auto":
             raise ValueError("asr.language must be an explicit language code (never autodetect)")
         return v
-
-    @model_validator(mode="after")
-    def _remote_needs_base_url(self) -> ASRConfig:
-        if self.engine == "remote" and not self.base_url:
-            raise ValueError("asr.engine='remote' requires asr.base_url (see cloud/README.md)")
-        return self
 
 
 class SpeakersConfig(StrictModel):
@@ -144,6 +129,11 @@ class RedactionConfig(StrictModel):
 
 
 class JudgeConfig(StrictModel):
+    # "vllm" names the WIRE PROTOCOL, not a required product: the judge is an
+    # OpenAI-compatible /v1/chat/completions client and nothing more. Any server
+    # that speaks it works - vLLM, TGI, llama.cpp's server, or an internal
+    # gateway. The pipeline never launches, manages or assumes a specific
+    # server; it only calls `base_url` and checks that it answers.
     engine: Literal["vllm", "mock"] = "vllm"
     base_url: str = "http://localhost:8000/v1"
     model: str = "<LLM_MODEL_ID_PLACEHOLDER>"

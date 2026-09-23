@@ -61,11 +61,11 @@ def _no_callqa_env_leakage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Start every test without CALLQA_* overrides in the environment.
 
     cli.main() calls load_dotenv(), which exports the operator's .env into
-    os.environ for the rest of the process - including every later test.
-    After `runpod_cli.py up` writes CALLQA_ASR__BASE_URL into .env (its
-    documented job), any CLI-invoking test silently armed that override and
-    tests asserting on missing endpoints failed. Tests that need such a
-    variable set it themselves via monkeypatch, which runs after this.
+    os.environ for the rest of the process - including every later test. An
+    operator who sets CALLQA_JUDGE__BASE_URL in .env (its documented job) would
+    otherwise silently arm that override for any CLI-invoking test, and tests
+    asserting on a missing endpoint failed. Tests that need such a variable set
+    it themselves via monkeypatch, which runs after this.
     """
     import os
 

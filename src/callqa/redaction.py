@@ -41,7 +41,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 from callqa.config import RedactionConfig
 from callqa.models import DialogTranscript, RedactedTranscript, RedactedTurn
@@ -58,6 +58,7 @@ ENTITY_LABELS_HE = {
     "EMAIL": 'דוא"ל',
     "DOB": "תאריך לידה",
     "PERSON": "שם",
+    "ADDRESS": "כתובת",
 }
 
 MASK = "████"
@@ -462,8 +463,346 @@ def _repeated_fragments(text: str, spans: list[PIIMatch]) -> list[PIIMatch]:
     return extra
 
 
-def find_pii(text: str) -> list[PIIMatch]:
-    """Find PII spans in `text`, in the coordinates of `text` itself."""
+# -- identifiers that have no shape ------------------------------------------
+#
+# Everything above this line recognises an identifier by its FORM: an ID passes
+# a checksum, a phone has a prefix, a card passes Luhn, a long digit run is
+# account-like. A whole class of identifier has no form at all. "רות" is a name,
+# "בחמישי למרץ שמונים ושתיים" is a date of birth, "רחוב הרצל 15" is an address -
+# and nothing about those strings distinguishes them from ordinary speech.
+#
+# The only signal is the question. A banker verifying a caller asks for the
+# mother's name, the date of birth, the address; the next thing the caller says
+# IS the identifier, whatever it looks like. So this pass reads the question and
+# masks the answer.
+#
+# It runs on the ORIGINAL text rather than the normalised/folded text the shape
+# detectors use, because it needs turn boundaries, and those are only known in
+# the coordinates of the document that was assembled from the turns.
+
+MAX_ANSWER_CLAUSES = 2          # a refusal then a real answer: "לא בטוח, אולי רות"
+ANSWER_WINDOW_CHARS = 240       # cap when the caller passes no turn boundaries
+_REFUSAL_LOOKAHEAD = 4          # how far into an answer a refusal can still lead it
+
+_CONTENT_TOKEN_RE = re.compile(r"[֐-׿]+|\d+")
+_CLAUSE_END_RE = re.compile(r"[.?!;\n]")
+# One-letter proclitics: Hebrew glues its prepositions, articles and
+# conjunctions onto the next word, so "מרץ" arrives as "למרץ" and "חיפה" as
+# "בחיפה". Every lookup below strips at most one of these.
+_PROCLITICS = "בלהומכש"
+
+# Said on the way to an answer, never the answer itself.
+_LEAD_IN = frozenset("""
+שמי שמה שמו השם שם קוראים לי לה לו הוא היא זה זו של שלי שלה שלו שלך
+האם אמא אימא אם אבא אבי אמי כן לא אה אהה אמ רגע שנייה שניה בטח בסדר טוב
+אוקיי אוקי כמובן בבקשה אז גם רק זאת נולדתי נולדה נולד תאריך לידה גר גרה
+מתגורר מתגוררת גרים כתובת ה את עם אני הכתובת
+אולי כנראה נדמה חושב חושבת בדיוק ממש נראה
+""".split())
+
+# The caller is declining, not answering. Masking what follows a refusal would
+# swallow ordinary speech ("אני לא זוכר"), so everything up to and including
+# the refusal is dropped and the search continues AFTER it - within the same
+# clause, because "לא בטוח, אולי רות" is one clause and the name is in it.
+# Skipping to the next clause instead left that name in the clear.
+_REFUSAL = frozenset("זוכר זוכרת יודע יודעת בטוח בטוחה סליחה שכחתי אמרתי נתתי כבר".split())
+
+_HEBREW_MONTHS = frozenset("""
+ינואר פברואר מרץ מרס אפריל מאי יוני יולי אוגוסט ספטמבר אוקטובר נובמבר דצמבר
+תשרי חשון חשוון כסלו טבת שבט אדר ניסן אייר סיון סיוון תמוז אב אלול
+""".split())
+
+_ORDINALS = frozenset("""
+ראשון ראשונה שני שנייה שניה שלישי שלישית רביעי רביעית חמישי חמישית שישי שישית
+שביעי שביעית שמיני שמינית תשיעי תשיעית עשירי עשירית
+""".split())
+
+# Tens and above, for a year spoken in words ("שמונים ושתיים"). The units live
+# in DIGIT_WORDS already.
+_NUMBER_SCALE = frozenset("""
+עשר עשרה עשרים שלושים ארבעים חמישים שישים שבעים שמונים תשעים מאה מאתיים מאות אלף
+""".split())
+
+_STREET_WORDS = frozenset("רחוב רח שדרות שד סמטה סמטת דרך שכונת שכונה כיכר ככר מושב קיבוץ".split())
+
+# The ask. Each pattern matches the QUESTION only - never the answer - so the
+# answer window always begins after the match.
+IDENTITY_QUESTIONS: list[tuple[re.Pattern[str], str]] = [
+    # mother's / father's name
+    (re.compile(r"שם\s+ה?(?:אמא|אימא|אם|אב|אבא)(?:\s+של[ךהוכם]?)?"), "PERSON"),
+    (re.compile(r"שם\s+נעורים(?:\s+של\s+\S+)?"), "PERSON"),
+    # the caller's own name
+    (re.compile(r"(?:ה)?שם\s+ה?מלא|מה\s+שמ[ךהו]|איך\s+קוראים\s+ל[ךהו]|שם\s+משפחה|שם\s+פרטי"),
+     "PERSON"),
+    # date of birth
+    (re.compile(r"תארי[ךכ]\s+ה?לידה|מתי\s+נולד[תהו]?|באיזה\s+תארי[ךכ]\s+נולד[תהו]?"
+                r"|שנת\s+ה?לידה|יום\s+ה?הולדת"), "DOB"),
+    # address
+    (re.compile(r"(?:ה)?כתובת(?:\s+ה?מגורים)?(?:\s+של[ךהו])?|איפה\s+אתה\s+גר|איפה\s+את\s+גרה"
+                r"|היכן\s+אתה\s+מתגורר|באיזו\s+עיר|מקום\s+ה?מגורים"), "ADDRESS"),
+    # place of birth
+    (re.compile(r"מקום\s+ה?לידה|איפה\s+נולד[תהו]?"), "ADDRESS"),
+]
+
+# An inline answer follows the question directly, in the same breath:
+# "שם האם הוא רות". Without one of these the answer is in the reply.
+#
+# A comma is NOT a connector, however natural it reads. "ולאימות הכתובת, מה
+# כתובת המגורים שלך?" is one banker sentence, and treating its comma as an
+# answer connector masked the second half of the question - destroying the
+# question a reviewer has to read while leaving the actual address, one turn
+# later, in the clear. Only an explicit copula introduces an answer.
+_INLINE_CONNECTOR_RE = re.compile(r"\s*(?:הוא|היא|זה|:)\s+")
+
+
+class TurnSpan(NamedTuple):
+    """Where one turn sits in the joined document, and who spoke it."""
+
+    start: int
+    end: int
+    speaker: str
+
+
+def _forms(token: str) -> tuple[str, ...]:
+    """The token as written, and without a leading one-letter proclitic.
+
+    Both, never only the stripped form: the proclitic letters are ordinary
+    Hebrew letters that also begin ordinary words. Stripping unconditionally
+    turned "שמונים" (eighty) into "מונים" and lost the year off the end of a
+    date of birth, masking "בחמישי למרץ" and leaving "שמונים ושתיים" in the
+    clear. The written form is checked first, so a real word always wins.
+    """
+    if len(token) > 2 and token[0] in _PROCLITICS:
+        return (token, token[1:])
+    return (token,)
+
+
+def _in(token: str, vocabulary: frozenset[str] | dict) -> bool:
+    return any(form in vocabulary for form in _forms(token))
+
+
+def _is_number_word(token: str) -> bool:
+    return token.isdigit() or _in(token, DIGIT_WORDS) or _in(token, _NUMBER_SCALE)
+
+
+def _is_day_word(token: str) -> bool:
+    return token.isdigit() or _in(token, _ORDINALS) or _in(token, DIGIT_WORDS)
+
+
+def _clauses(text: str, start: int, end: int) -> list[tuple[int, int]]:
+    """Split [start, end) at sentence punctuation, dropping empty pieces."""
+    out: list[tuple[int, int]] = []
+    cursor = start
+    for m in _CLAUSE_END_RE.finditer(text, start, end):
+        if m.start() > cursor:
+            out.append((cursor, m.start()))
+        cursor = m.end()
+    if cursor < end:
+        out.append((cursor, end))
+    return out
+
+
+def _content_tokens(text: str, start: int, end: int) -> list[tuple[str, int, int]]:
+    return [(m.group(), m.start(), m.end())
+            for m in _CONTENT_TOKEN_RE.finditer(text, start, end)]
+
+
+def _answer_windows(
+    text: str, q_end: int, turns: list[TurnSpan] | None
+) -> list[tuple[int, int]]:
+    """Where the answer to a question ending at `q_end` can be.
+
+    Two places, in priority order:
+
+    1. INLINE - immediately after a connector, still inside the asker's own
+       sentence ("שם האם הוא רות").
+    2. THE REPLY - the next turn spoken by somebody else. Without turn
+       information (a single string rather than a dialog) the next sentence
+       stands in for the next turn.
+
+    The remainder of the asker's OWN turn is never an answer window on its own.
+    "ומה שם האם לאימות נוסף?" continues with "לאימות נוסף" - the banker still
+    talking - and masking that would destroy the question a reviewer needs to
+    read while leaving the actual name untouched.
+    """
+    windows: list[tuple[int, int]] = []
+
+    inline = _INLINE_CONNECTOR_RE.match(text, q_end)
+    if inline:
+        sentence_end = _CLAUSE_END_RE.search(text, inline.end())
+        windows.append((inline.end(), sentence_end.start() if sentence_end else len(text)))
+
+    if turns:
+        asking = next((t for t in turns if t.start <= q_end <= t.end), None)
+        for turn in turns:
+            if turn.start >= q_end and (asking is None or turn.speaker != asking.speaker):
+                windows.append((turn.start, turn.end))
+                break
+    else:
+        after = _CLAUSE_END_RE.search(text, q_end)
+        if after:
+            start = after.end()
+            windows.append((start, min(len(text), start + ANSWER_WINDOW_CHARS)))
+
+    return windows
+
+
+def _past_refusal(tokens: list[tuple[str, int, int]]) -> list[tuple[str, int, int]]:
+    """Everything after the last refusal marker near the start of the answer.
+
+    "אני לא זוכר" leaves nothing and masks nothing; "לא בטוח, אולי רות" leaves
+    "אולי רות", and the lead-in skip then lands on the name. Only the opening
+    of the answer is examined, so a refusal word used later in a real answer
+    does not discard it.
+    """
+    last = None
+    for i, (token, _, _) in enumerate(tokens[:_REFUSAL_LOOKAHEAD]):
+        if _in(token, _REFUSAL):
+            last = i
+    return tokens if last is None else tokens[last + 1:]
+
+
+def _lead_in_skipped(tokens: list[tuple[str, int, int]]) -> list[tuple[str, int, int]]:
+    i = 0
+    while i < len(tokens) and _in(tokens[i][0], _LEAD_IN):
+        i += 1
+    return tokens[i:]
+
+
+def _extract_person(text: str, start: int, end: int) -> tuple[int, int] | None:
+    """The first run of up to three content words that is not a lead-in."""
+    for c_start, c_end in _clauses(text, start, end)[:MAX_ANSWER_CLAUSES]:
+        rest = _lead_in_skipped(_past_refusal(_content_tokens(text, c_start, c_end)))
+        if not rest:
+            continue
+        # A comma ends a name: "דני כהן, נעים מאוד".
+        taken = [rest[0]]
+        for token in rest[1:3]:
+            if "," in text[taken[-1][2]:token[1]]:
+                break
+            if _in(token[0], _LEAD_IN):
+                break
+            taken.append(token)
+        return taken[0][1], taken[-1][2]
+    return None
+
+
+def _extract_dob(text: str, start: int, end: int) -> tuple[int, int] | None:
+    """A date, in digits or spelled out, anywhere in the answer.
+
+    Unlike a name, a date of birth is not necessarily the first thing said:
+    "הספרות הן 4580 ונולדתי בחמישי למרץ שמונים ושתיים" answers two questions in
+    one breath. So the date is located by its own shape inside the window
+    rather than by position.
+    """
+    numeric = DATE_RE.search(text, start, end)
+    if numeric:
+        return numeric.start(), numeric.end()
+
+    tokens = _content_tokens(text, start, end)
+    for i, (token, _, _) in enumerate(tokens):
+        if not _in(token, _HEBREW_MONTHS):
+            continue
+        lo = i
+        while lo > 0 and i - lo < 2 and _is_day_word(tokens[lo - 1][0]):
+            lo -= 1
+        hi = i
+        while hi + 1 < len(tokens) and hi - i < 4 and _is_number_word(tokens[hi + 1][0]):
+            hi += 1
+        if lo == i and hi == i:
+            return None                 # a bare month name is not a birth date
+        return tokens[lo][1], tokens[hi][2]
+
+    # "נולדתי בשבעים ושתיים" - a year with no month.
+    rest = _lead_in_skipped(tokens)
+    if rest and _is_number_word(rest[0][0]):
+        hi = 0
+        while hi + 1 < len(rest) and hi < 3 and _is_number_word(rest[hi + 1][0]):
+            hi += 1
+        return rest[0][1], rest[hi][2]
+    return None
+
+
+def _extract_address(text: str, start: int, end: int) -> tuple[int, int] | None:
+    """From the street word (or the first content word) to the end of the clause.
+
+    An address answer is an address in its entirety - street, number and city
+    are one identifier - so unlike a name it is masked as a whole clause.
+    """
+    for c_start, c_end in _clauses(text, start, end)[:MAX_ANSWER_CLAUSES]:
+        tokens = _past_refusal(_content_tokens(text, c_start, c_end))
+        anchored = next((i for i, (t, _, _) in enumerate(tokens)
+                         if _in(t, _STREET_WORDS)), None)
+        rest = tokens[anchored:] if anchored is not None else _lead_in_skipped(tokens)
+        if not rest:
+            continue
+        return rest[0][1], rest[min(len(rest), 8) - 1][2]
+    return None
+
+
+_EXTRACTORS = {"PERSON": _extract_person, "DOB": _extract_dob, "ADDRESS": _extract_address}
+
+# Volunteered, with no question to anchor to. A caller routinely offers an
+# identity field before being asked ("נולדתי בחמישי למרץ שמונים ושתיים"), and
+# an answer-driven rule alone would miss every one of those. Both rules below
+# need their own evidence, so they do not depend on a question being present.
+_BIRTH_CONTEXT_RE = re.compile(r"נולד[תהוי]|לידה|יום\s+ה?הולדת")
+_BIRTH_LOOKAHEAD = 60           # characters after the birth word
+_STREET_ANCHOR_RE = re.compile(rf"(?<![\w֐-׿])[{_PROCLITICS}]?"
+                               rf"(?:{'|'.join(sorted(_STREET_WORDS))})"
+                               rf"(?![\w֐-׿])")
+
+
+def _volunteered_spans(text: str) -> list[PIIMatch]:
+    found: list[PIIMatch] = []
+
+    # A date spoken in words next to a birth word. The numeric form of this is
+    # already covered by DATE_RE + BIRTH_CONTEXT in the shape pass; this is the
+    # same rule for the form the ASR actually produces for spoken Hebrew.
+    for m in _BIRTH_CONTEXT_RE.finditer(text):
+        end = min(len(text), m.end() + _BIRTH_LOOKAHEAD)
+        clause = _CLAUSE_END_RE.search(text, m.end(), end)
+        span = _extract_dob(text, m.end(), clause.start() if clause else end)
+        if span and span[1] > span[0]:
+            found.append(PIIMatch("DOB", span[0], span[1]))
+
+    # A street word whose clause also carries a house number. The number is
+    # what makes this an address rather than a landmark: "הסניף ברחוב דיזנגוף"
+    # is where the branch is, "רחוב הרצל 15" is where the customer lives.
+    for m in _STREET_ANCHOR_RE.finditer(text):
+        clause = _CLAUSE_END_RE.search(text, m.start())
+        c_end = clause.start() if clause else len(text)
+        tokens = _content_tokens(text, m.start(), c_end)[:8]
+        if any(t.isdigit() for t, _, _ in tokens):
+            found.append(PIIMatch("ADDRESS", tokens[0][1], tokens[-1][2]))
+
+    return found
+
+
+def find_identity_answers(text: str, turns: list[TurnSpan] | None = None) -> list[PIIMatch]:
+    """Mask what a caller says in answer to a request for an identity field."""
+    found: list[PIIMatch] = []
+    for pattern, entity_type in IDENTITY_QUESTIONS:
+        extract = _EXTRACTORS[entity_type]
+        for question in pattern.finditer(text):
+            for w_start, w_end in _answer_windows(text, question.end(), turns):
+                if w_end <= w_start:
+                    continue
+                span = extract(text, w_start, w_end)
+                if span and span[1] > span[0]:
+                    found.append(PIIMatch(entity_type, span[0], span[1]))
+                    break               # inline wins; do not also mask the reply
+    found.extend(_volunteered_spans(text))
+    return found
+
+
+def find_pii(text: str, turns: list[TurnSpan] | None = None) -> list[PIIMatch]:
+    """Find PII spans in `text`, in the coordinates of `text` itself.
+
+    `turns` carries the turn boundaries and speakers of the joined document,
+    when the caller has them. They are used only to decide whose words answer a
+    question; every detector works without them.
+    """
     normalized, index = normalize_for_detection(text)
     folded, fold_spans = fold_number_words(normalized)
     spans = _spans_in_normalized(folded)
@@ -479,6 +818,11 @@ def find_pii(text: str) -> list[PIIMatch]:
         if n_start >= len(index) or n_end - 1 >= len(index):
             continue                                  # pragma: no cover
         out.append(PIIMatch(span.entity_type, index[n_start], index[n_end - 1] + 1))
+
+    # Shape first: where a shaped identifier and an answer overlap, the shaped
+    # label is the more specific one and `_apply` keeps whichever starts first.
+    out.extend(find_identity_answers(text, turns))
+    out.sort(key=lambda s: s.start)
     return out
 
 
@@ -607,7 +951,14 @@ class RegexRedactor:
             cursor += len(text) + len(TURN_SEPARATOR)
         document = TURN_SEPARATOR.join(texts)
 
-        matches = find_pii(document)
+        # Who said what, so a question asked by one party can be matched to the
+        # answer given by the other. Without this the banker's own next words
+        # would read as the answer to the banker's own question.
+        turn_spans = [
+            TurnSpan(offsets[i], offsets[i] + len(texts[i]), turn.speaker)
+            for i, turn in enumerate(dialog.turns)
+        ]
+        matches = find_pii(document, turn_spans)
         totals: dict[str, int] = {}
         turns: list[RedactedTurn] = []
         for i, turn in enumerate(dialog.turns):

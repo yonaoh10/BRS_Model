@@ -13,7 +13,6 @@ models/
 .venv/
 venv/
 MODELS_MANIFEST.json
-cloud/.runpod_state.json
 dashboard/qa-output/
 
 # Recordings and anything derived from them never belong in version control.
@@ -29,9 +28,6 @@ logs/
 .env
 wheels/
 
-# rescued QA material: audio is derivable from Calls/, keep out of git
-qa/rescued-2026-09-15/qa_perf/*.wav
-
 # Data backups (contain raw, un-redacted transcripts + the state DB) must never
 # be committed. Belt-and-suspenders alongside the data/ rule above.
 *.tar.gz
@@ -44,3 +40,6 @@ data_backup*
 
 # scratch / QA working files
 scratchpad/
+
+# Internal working notes for the AI assistant; not part of the deliverable.
+HANDOVER.md

@@ -19,7 +19,7 @@ CSP, reads only `data/output/`) and cannot know the real pod/cost/model state �
 so it was hardcoded demo values, and the page read as stitched-together. It is
 now purely the reviewer's tool: which calls need attention, the score
 distribution, per-call detail with the redacted transcript, banker comparison,
-and judge calibration. The cloud lifecycle belongs to `cloud/runpod_cli.py`, not
+and judge calibration. Model serving belongs to the operator's own tooling, not
 here. Provenance a reviewer *does* need — model, engine, prompt version, run
 date — lives quietly in the sidebar footer, read from the real `audit{}`.
 

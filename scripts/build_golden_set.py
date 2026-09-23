@@ -21,16 +21,42 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from callqa.eval.metrics import gold_spans  # noqa: E402 - same locator the metric uses
 from callqa.models import DialogTranscript, ScoreCard  # noqa: E402
 
-# Structured identifiers the redactor is designed to catch, seeded into the
-# fixture dialogs. Gold PII per call = those present in its transcript, located
-# by string search (independent of find_pii, so recall is a real measurement).
-# Deliberately NOT labelled: a mother's name given as a STANDALONE answer to
-# "what is your mother's name?" — find_pii only catches it inline ("שם האם הוא
-# X"), so it is a known redaction gap, tracked separately (docs/MLOPS.md), not
-# folded into the recall baseline.
-KNOWN_PII = ["123456782", "052-1234567", "765432", "4580"]
+# Every identifier seeded into the fixture dialogs, hand-labelled. Gold PII per
+# call = those present in its transcript, located by whole-word search
+# (independent of find_pii, so recall is a REAL measurement, not a restatement
+# of what the detector happens to find).
+#
+# Two kinds, deliberately:
+#   SHAPED    - recognisable on their own: an ID passes a checksum, a phone has
+#               a prefix, a long digit run is account-like.
+#   SHAPELESS - nothing about the string says "identifier". A mother's name, a
+#               date of birth, a street address. The only signal is that a
+#               banker asked for them, so they are only maskable by reading the
+#               question that precedes the answer.
+#
+# The shapeless ones are labelled HERE, in the answer key, even while the
+# detector misses them. A recall metric that quietly omits the identifiers a
+# system is known to leak reports 1.0 and means nothing; it must be allowed to
+# go red. See docs/MLOPS.md.
+KNOWN_PII = [
+    # shaped
+    "123456782",        # Israeli ID (checksum-valid, synthetic)
+    "052-1234567",      # mobile
+    "765432",           # account number
+    "4580",             # card last four
+    # shapeless
+    # Labelled exactly as SPOKEN, prefix letter included: Hebrew glues its
+    # one-letter prepositions onto the following word ("ב"+"חמישי" -> "בחמישי"),
+    # so a literal written without the prefix has no word boundary to anchor to
+    # and silently labels nothing. Scoring is overlap-based, so a detector that
+    # masks the date without the preposition still counts as a hit.
+    "רות",                                # mother's name, standalone answer
+    "בחמישי למרץ שמונים ושתיים",           # date of birth, spoken in words
+    "רחוב הרצל 15 בחיפה",                  # street address
+]
 
 
 def _reference_for(out: Path, call_id: str) -> dict:
@@ -43,7 +69,9 @@ def _reference_for(out: Path, call_id: str) -> dict:
     return {
         "transcript": transcript,
         "speakers": [{"speaker": t.speaker, "text": t.text} for t in dialog.turns],
-        "pii": [lit for lit in KNOWN_PII if lit in transcript],
+        # whole-word, so "רות" is not "found" inside "שירות" - the same locator
+        # the metric uses, so the label and the score agree by construction.
+        "pii": [lit for lit in KNOWN_PII if gold_spans(transcript, [lit])],
     }
 
 

@@ -12,7 +12,7 @@ It is written to two constraints that shape every decision here:
    driver level or by reading the artifacts the core already writes — the same
    way `dashboard/` reads them. New machinery lives in `src/callqa/ops/` and
    `src/callqa/eval/`; it imports the core, never the reverse, and never touches
-   `dashboard/` or `cloud/`.
+   `dashboard/`.
 2. **Every dependency is justified against the air gap.** The bank runs
    disconnected. No capability here adds a runtime dependency: each is a plain
    file (JSON / JSONL / CSV) plus the SQLite database that already exists, read
@@ -38,7 +38,7 @@ promotes and connects these rather than replacing them.
 | Model inventory | `MODELS_MANIFEST.json` (id / path / size / downloaded_at) | `scripts/download_models.py` |
 | Config safety | strict (typo-proof) sections, egress validation | `config.py` |
 | Drift signal sources | score, gate, review status, redaction counts, role confidence, diarization alignment, transcription confidence — all persisted per call | `models.py` artifacts |
-| Deletability | core never imports `dashboard/`/`cloud/` | verified; guarded by a test |
+| Deletability | core never imports `dashboard/` | verified; guarded by a test |
 
 What is genuinely absent: a code/config fingerprint on a result; model *weight*
 hashing and a runtime reader of the manifest; a machine-readable run record; a

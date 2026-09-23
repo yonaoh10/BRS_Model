@@ -122,10 +122,25 @@ PROBE_SECONDS = 240              # total sampled, spread across the whole file
 PROBE_WINDOWS = 6                # ... in this many windows
 
 
+# What a decoder raises on a file it cannot read: wave.Error and EOFError from a
+# truncated or malformed header, OSError from an unreadable file, ValueError when
+# the frame count and channel count disagree, AudioError for a width we reject.
+# On the PROBE path every one of them means the same thing - "this file cannot be
+# sampled" - and probe_channels must answer dual_mono, never propagate.
+_UNDECODABLE = (wave.Error, EOFError, OSError, ValueError, AudioError)
+
+
 def _decode_stereo_window(
     src: Path, start: float, seconds: float, rate: int = 8000
 ) -> np.ndarray | None:
-    """Decode one window of a file to (n, 2) float32. None if not stereo."""
+    """Decode one window of a file to (n, 2) float32. None if not stereo.
+
+    Returns None - never raises - when the file cannot be decoded at all. The
+    caller treats that as "could not sample the channels" and falls back to the
+    diarization path, which infers the speakers and records that it inferred.
+    Raising here would abort a call that the safe path could still process, and
+    on a machine without ffmpeg it aborted on the stdlib WAV reader alone.
+    """
     if _have_ffmpeg():
         proc = subprocess.run(
             ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
@@ -140,7 +155,12 @@ def _decode_stereo_window(
         return data[: (data.size // 2) * 2].reshape(-1, 2)
     if src.suffix.lower() != ".wav":
         return None
-    data, src_rate = _read_wav(src)
+    try:
+        data, src_rate = _read_wav(src)
+    except _UNDECODABLE as exc:
+        logger.warning("could not decode %s for channel probing (%s: %s)",
+                       src.name, type(exc).__name__, exc)
+        return None
     if data.shape[1] < 2:
         return None
     lo = int(start * src_rate)

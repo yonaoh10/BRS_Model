@@ -18,8 +18,18 @@ def test_redaction_prf_scores_find_pii_against_gold() -> None:
     text = "תעודת הזהות שלי היא 123456782 והטלפון 052-1234567"
     prf = redaction_prf(text, ["123456782", "052-1234567"])
     assert prf["recall"] == 1.0 and prf["precision"] == 1.0 and prf["f1"] == 1.0
-    # a gold identifier find_pii misses drops recall, not precision
-    missed = redaction_prf("שם האם לאימות? רות", ["רות"])
+
+    # An identifier with no shape, recognised only because it answers a
+    # verification question. This case used to score 0.0 and was the leak the
+    # harness was built to expose.
+    answered = redaction_prf("שם האם לאימות? רות", ["רות"])
+    assert answered["recall"] == 1.0
+
+    # Recall must still be ABLE to fall, or the metric proves nothing. A name
+    # mentioned in passing, with no question to anchor it, is the class that
+    # remains open: nothing in "דנה" says identifier and nobody asked for it.
+    missed = redaction_prf("העברתי את הבקשה לטיפול. דנה תחזור אליך מחר", ["דנה"])
+    assert missed["gold"] == 1                  # the label really was located
     assert missed["recall"] == 0.0
 
 

@@ -1,10 +1,13 @@
-.PHONY: test lint sample mock-e2e clean up down dashboard docker-build cloud-up cloud-status cloud-down cloud-remove
+.PHONY: test lint sample mock-e2e eval golden dashboard clean
+
+# Everything here runs with the core dependencies alone (requirements.txt).
+# No GPU, no models and no network are needed for any target in this file.
 
 test:
 	python -m pytest -q
 
 lint:
-	ruff check src tests scripts dashboard cloud
+	ruff check src tests scripts dashboard
 
 sample:
 	python scripts/generate_sample_data.py
@@ -21,38 +24,8 @@ eval:
 golden:
 	python scripts/build_golden_set.py
 
+dashboard:
+	python dashboard/server.py
+
 clean:
 	rm -rf data/output data/callqa_state.db*
-
-# --- one-command bring-up with Docker ---------------------------------------
-# First time:  cp .env.example .env   (then paste keys into .env)
-up: .env
-	docker compose up --build
-
-down:
-	docker compose down
-
-dashboard: .env
-	docker compose up --build dashboard
-
-docker-build:
-	docker build -t callqa:local .
-
-.env:
-	@if [ ! -f .env ]; then cp .env.example .env && echo "created .env from .env.example - paste your keys into it"; fi
-
-# --- dev-phase cloud option (see cloud/README.md) -------------------------
-cloud-up:
-	python cloud/runpod_cli.py up
-
-cloud-status:
-	python cloud/runpod_cli.py status
-
-cloud-down:
-	python cloud/runpod_cli.py down
-
-# Removes the cloud option entirely (files + code references), then verifies.
-# Run this when moving to the bank servers. Dry-run first:
-#   python scripts/remove_cloud_option.py
-cloud-remove:
-	python scripts/remove_cloud_option.py --apply

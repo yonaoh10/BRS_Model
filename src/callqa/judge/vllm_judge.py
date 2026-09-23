@@ -36,7 +36,7 @@ class VLLMJudge:
 
     def _headers(self) -> dict[str, str]:
         # A real User-Agent, because CDNs in front of hosted endpoints
-        # (RunPod's proxy runs Cloudflare) reject urllib's default
+        # (many reverse proxies do) reject urllib's default
         # Python-urllib/x.y with a 403 before the request reaches vLLM.
         headers = {"Content-Type": "application/json", "User-Agent": "callqa-judge/1.0"}
         if self.config.api_key:

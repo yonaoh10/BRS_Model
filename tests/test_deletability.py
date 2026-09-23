@@ -1,9 +1,13 @@
-"""The deliverable must stay `rm -rf dashboard/ cloud/`-able.
+"""The deliverable must stay `rm -rf dashboard/`-able.
 
-The core (src/callqa) must never import the add-on directories, or removing them
-for the bank hand-off would break the pipeline. This scans every import in the
-core and fails if any reaches into dashboard/ or cloud/. It also pins the
-version so the release number is not left stale.
+The core (src/callqa) must never import the optional add-on directory, or
+removing it would break the pipeline. This scans every import in the core and
+fails if any reaches into dashboard/. It also pins the version so the release
+number is not left stale.
+
+`cloud/` is still named here although the directory is gone: the guard is what
+keeps a future add-on from being wired into the core the way the cloud option
+never was.
 """
 
 from __future__ import annotations

@@ -1,8 +1,20 @@
 """Canned Hebrew banking dialogs used by the mock ASR engine.
 
-Fixture 0 intentionally contains a fake (checksum-valid) Israeli ID and a
-phone number so the redaction stage is exercised end-to-end in mock mode.
-All content is synthetic.
+These dialogs are also the source of the evaluation golden set
+(`scripts/build_golden_set.py`), so each one deliberately seeds identifiers of
+a different KIND:
+
+  - dialog 0: a checksum-valid Israeli ID and a phone number  -> caught by SHAPE
+  - dialog 1: a card's last four, a date of birth spoken in words, and a street
+              address                                         -> shapeless
+  - dialog 2: an account number and a mother's name given as a standalone
+              answer to a verification question               -> shapeless
+
+The shapeless ones have no recognisable form at all: the only signal that they
+are identifiers is that a banker asked for them. They exist here so the
+evaluation harness measures that path, not only the regex path.
+
+All content is synthetic. No real customer data is in this file.
 """
 
 from __future__ import annotations
@@ -31,6 +43,8 @@ DIALOGS: list[list[tuple[str, str]]] = [
         ("customer", "בוקר טוב. אני שוקל לקחת הלוואה לשיפוץ הדירה ורציתי להבין מה התנאים."),
         ("banker", "אשמח להסביר. קודם אזהה אותך בבקשה, מה ארבע הספרות האחרונות של הכרטיס ותאריך הלידה?"),
         ("customer", "הספרות הן 4580 ונולדתי בחמישי למרץ שמונים ושתיים."),
+        ("banker", "ולאימות הכתובת, מה כתובת המגורים שלך?"),
+        ("customer", "רחוב הרצל 15 בחיפה."),
         ("banker", "מעולה, הזיהוי הושלם. כמה כסף אתה צריך לשיפוץ ולאיזו תקופה נוח לך להחזיר?"),
         ("customer", "בערך שמונים אלף שקל, ואני חושב על החזר של חמש שנים."),
         ("banker", "הבנתי. במסלול הזה הריבית היום היא פריים פלוס אחוז וחצי, והיא יכולה להשתנות. יש גם עמלת פתיחת תיק של מאתיים שקל."),

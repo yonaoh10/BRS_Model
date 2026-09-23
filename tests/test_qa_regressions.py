@@ -208,6 +208,30 @@ class TestChannelDetection:
         broken.write_bytes(b"RIFF....WAVEfmt not really audio")
         assert probe_channels(broken) == "dual_mono"
 
+    @pytest.mark.parametrize("have_ffmpeg", [True, False], ids=["ffmpeg", "no-ffmpeg"])
+    @pytest.mark.parametrize("payload", [
+        pytest.param(b"RIFF....WAVEfmt not really audio", id="truncated-header"),
+        pytest.param(b"", id="empty"),
+        pytest.param(b"\x00" * 4096, id="not-audio"),
+        pytest.param(b"RIFF$\x00\x00\x00WAVE", id="no-fmt-chunk"),
+    ])
+    def test_undecodable_fails_closed_on_both_decode_paths(
+        self, tmp_path: Path, monkeypatch, have_ffmpeg: bool, payload: bytes
+    ) -> None:
+        """The version above only ever exercised whichever branch the machine
+        happened to have. On a box WITHOUT ffmpeg the stdlib reader raised
+        EOFError straight out of probe_channels, so the documented fail-closed
+        behaviour held on the developer's laptop and not in CI - or on a locked
+        down bank server, where ffmpeg is exactly the thing that is missing.
+        Both branches are pinned here, and a missing file too."""
+        from callqa import audio as audio_mod
+
+        monkeypatch.setattr(audio_mod, "_have_ffmpeg", lambda: have_ffmpeg)
+        broken = tmp_path / "broken.wav"
+        broken.write_bytes(payload)
+        assert probe_channels(broken) == "dual_mono"
+        assert probe_channels(tmp_path / "does-not-exist.wav") == "dual_mono"
+
 
 class TestVoiceActivity:
     def _mono(self, path: Path, samples: np.ndarray) -> Path:
@@ -476,13 +500,14 @@ class TestDotenv:
         from callqa.dotenv import load_dotenv
 
         env = tmp_path / ".env"
-        env.write_text("RUNPOD_API_KEY=from-file\nHF_TOKEN=hf-file\n", encoding="utf-8")
-        monkeypatch.setenv("RUNPOD_API_KEY", "from-shell")
+        env.write_text("CALLQA_JUDGE__API_KEY=from-file\nHF_TOKEN=hf-file\n",
+                       encoding="utf-8")
+        monkeypatch.setenv("CALLQA_JUDGE__API_KEY", "from-shell")
         monkeypatch.delenv("HF_TOKEN", raising=False)
         applied = load_dotenv(env)
         assert applied == ["HF_TOKEN"]
         import os
-        assert os.environ["RUNPOD_API_KEY"] == "from-shell"
+        assert os.environ["CALLQA_JUDGE__API_KEY"] == "from-shell"
 
     def test_empty_placeholders_are_not_applied(self, tmp_path: Path, monkeypatch) -> None:
         """`.env.example` ships every key blank; a blank must not shadow a
@@ -490,25 +515,9 @@ class TestDotenv:
         from callqa.dotenv import load_dotenv
 
         env = tmp_path / ".env"
-        env.write_text("RUNPOD_API_KEY=\n", encoding="utf-8")
-        monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+        env.write_text("HF_TOKEN=\n", encoding="utf-8")
+        monkeypatch.delenv("HF_TOKEN", raising=False)
         assert load_dotenv(env) == []
-
-    def test_endpoints_are_written_without_losing_other_lines(self, tmp_path: Path,
-                                                               monkeypatch) -> None:
-        """runpod_cli hands the pod's endpoints to the pipeline through .env;
-        the operator's own lines and comments must survive that write."""
-        from callqa.dotenv import write_env_values
-
-        env = tmp_path / ".env"
-        env.write_text("# keep me\nRUNPOD_API_KEY=rp\nCALLQA_ASR__BASE_URL=\n", encoding="utf-8")
-        write_env_values({"CALLQA_ASR__BASE_URL": "https://x/asr",
-                          "CALLQA_JUDGE__BASE_URL": "https://x/v1"}, env)
-        text = env.read_text(encoding="utf-8")
-        assert "# keep me" in text and "RUNPOD_API_KEY=rp" in text
-        assert "CALLQA_ASR__BASE_URL=https://x/asr" in text
-        assert text.count("CALLQA_ASR__BASE_URL=") == 1
-        assert oct(env.stat().st_mode & 0o777) == "0o600"
 
     def test_the_example_file_parses_and_names_every_key_the_code_reads(self) -> None:
         import re
@@ -517,8 +526,7 @@ class TestDotenv:
 
         example = Path(__file__).resolve().parent.parent / ".env.example"
         keys = set(parse_env_file(example.read_text(encoding="utf-8")))
-        assert {"RUNPOD_API_KEY", "HF_TOKEN", "CALLQA_JUDGE__API_KEY",
-                "CALLQA_ASR__BASE_URL", "CALLQA_DASHBOARD_TOKEN"} <= keys
+        assert {"HF_TOKEN", "CALLQA_DASHBOARD_TOKEN"} <= keys
         # nothing in the example may carry a value: it is a template
         for line in example.read_text(encoding="utf-8").splitlines():
             if re.match(r"^[A-Z_]+=", line):

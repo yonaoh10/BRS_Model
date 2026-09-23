@@ -91,9 +91,6 @@ def _engine_checks(config: Config, deep: bool) -> list[Check]:
     checks: list[Check] = []
     if config.asr.engine == "faster_whisper":
         checks.append(_verify_local_model(config, "asr", Path(config.asr.model_dir), deep))
-    elif config.asr.engine == "remote":
-        from callqa.asr.remote_engine import RemoteASREngine
-        checks.append(_reachable("asr endpoint", lambda: RemoteASREngine(config.asr)))
     if config.judge.engine == "vllm":
         from callqa.judge.vllm_judge import VLLMJudge
         checks.append(_reachable("judge endpoint", lambda: VLLMJudge(config.judge)))

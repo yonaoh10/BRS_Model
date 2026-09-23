@@ -14,11 +14,11 @@ DESIGN NOTES
 - stdlib only. The project has no JavaScript toolchain and a hard offline
   constraint, and this is a single-user localhost console, so FastAPI/uvicorn
   would add dependencies for nothing. The same reasoning produced
-  cloud/asr_server.py.
+  a single-purpose stdlib server.
 - Read-only by default. `--allow-actions` is required before any endpoint can
   spend money or mutate state, and even then each action is explicit.
-- Bound to 127.0.0.1. Never 0.0.0.0: this console can start billable cloud
-  machines, so it must not be reachable from the network.
+- Bound to 127.0.0.1. Never 0.0.0.0: it serves call material, so it must not
+  be reachable from the network.
 - A random session token is required on every request and is embedded in the
   URL printed at startup. Together with the Origin/Host checks below this
   blocks DNS-rebinding: a malicious page you happen to visit can otherwise
@@ -479,9 +479,9 @@ def main() -> int:
         print(f"ERROR: dashboard page missing at {PAGE}", file=sys.stderr)
         return 2
 
-    # 127.0.0.1 only - this console can start billable cloud machines. The
+    # 127.0.0.1 only - this console serves call material. The
     # container is the one legitimate exception: it listens on all of ITS
-    # interfaces while docker publishes the port to 127.0.0.1 on the host.
+    # interfaces when a container runtime publishes the port to the host.
     if args.bind != "127.0.0.1":
         logger.warning("listening on %s: make sure this port is only reachable from "
                        "this machine", args.bind)
