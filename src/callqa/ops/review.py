@@ -84,6 +84,19 @@ def record_review(ratings_csv: Path, call_id: str, rater_id: str,
             existing_header = next(csv.reader(fh), None)
     has_header = bool(existing_header)
     if has_header:  # align to the file's own column order
+        # ...but never by throwing a reviewer's score away. When the rubric has
+        # gained a dimension since the file was started, the file's header does
+        # not have that column, and the row used to be written without it - the
+        # score silently dropped while the CLI printed "recorded". A human's
+        # judgement on a held call is the scarcest input this system has.
+        missing = [c for c in ["call_id", "rater_id", *dim_ids] if c not in existing_header]
+        if missing:
+            raise ReviewError(
+                f"{ratings_csv.name} has no column for {', '.join(missing)}: the rubric "
+                "has changed since this file was started, and writing the verdict "
+                "would drop those scores. Add the column(s) to the file's header "
+                "(existing rows may leave them empty), then record the review again."
+            )
         header = existing_header
     ratings_csv.parent.mkdir(parents=True, exist_ok=True)
     row = {"call_id": call_id, "rater_id": rater_id, **{d: scores[d] for d in dim_ids}}

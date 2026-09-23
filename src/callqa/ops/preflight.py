@@ -54,8 +54,15 @@ def _inputs_check(config: Config) -> tuple[Check, int]:
     v = load_metadata(config.paths.input_dir / "metadata.csv",
                       config.paths.input_dir / "calls")
     if not v.ok:
+        # Say WHICH problem. "invalid: 1 problem(s)" was printed for a
+        # metadata.csv that simply did not exist yet - on a fresh extract, the
+        # first thing an operator sees - with nothing saying so.
+        from callqa.redaction import sanitize_error
+
+        first = v.problems[0]
+        more = f" (+{len(v.problems) - 1} more; run validate-inputs)" if len(v.problems) > 1 else ""
         return Check("inputs", False, True,
-                     f"metadata.csv invalid: {len(v.problems)} problem(s)"), 0
+                     f"metadata.csv: {sanitize_error(first.problem, limit=200)}{more}"), 0
     return Check("inputs", True, True, f"{len(v.rows)} call(s) in metadata.csv"), len(v.rows)
 
 
@@ -73,7 +80,21 @@ def _verify_local_model(config: Config, role: str, model_dir: Path, deep: bool) 
             return Check(f"model:{role}", False, True,
                          "weight hash MISMATCH — not the model that produced earlier results")
         return Check(f"model:{role}", True, True, "present; weight hash verified")
-    return Check(f"model:{role}", True, True, "present (fast check; use --deep to re-hash)")
+    # The fast path compares total SIZE with what the download recorded. A
+    # directory that merely exists and is non-empty is exactly what a truncated
+    # copy looks like - and moving 20 GB onto an air-gapped machine by disk or
+    # share is where truncation happens. Summing sizes is instant; hashing is
+    # what --deep is for.
+    expected = entry.get("size_bytes")
+    if expected:
+        actual_size = sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file())
+        if actual_size != expected:
+            return Check(f"model:{role}", False, True,
+                         f"size MISMATCH at {model_dir}: {actual_size:,} bytes on disk, "
+                         f"{expected:,} recorded at download. Incomplete copy? Re-transfer "
+                         "it, then run preflight --deep.")
+    return Check(f"model:{role}", True, True,
+                 "present, size matches the download (fast check; --deep re-hashes)")
 
 
 def _hf_hub_cache() -> Path:

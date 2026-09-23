@@ -24,7 +24,11 @@ def _fake_model(models_dir: Path) -> tuple[Path, str]:
     sha = dir_sha256(model_dir)
     (models_dir / "MODELS_MANIFEST.json").write_text(json.dumps({
         "asr": {"role": "asr", "model_id": "ivrit-ai/whisper", "local_path": str(model_dir),
-                "size_bytes": 15, "sha256": sha, "downloaded_at": "2026-01-01T00:00:00+00:00"},
+                # the real total, as download_models.py records it - the value
+                # used to be a hand-written 15 for 17 bytes on disk, which the
+                # size check (rightly) called an incomplete copy
+                "size_bytes": sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file()),
+                "sha256": sha, "downloaded_at": "2026-01-01T00:00:00+00:00"},
     }), encoding="utf-8")
     return model_dir, sha
 
@@ -121,3 +125,25 @@ def test_preflight_looks_for_diarization_where_pyannote_loads_it(tmp_path, monke
     assert not missing.ok and not missing.critical       # stereo calls still run
     (tmp_path / "hub" / "models--pyannote--speaker-diarization-community-1").mkdir(parents=True)
     assert _diarization_check(config).ok
+
+
+def test_a_truncated_model_copy_fails_the_fast_check(tmp_path: Path) -> None:
+    """Moving 20 GB onto an air-gapped machine is where truncation happens, and
+    a truncated directory still exists and is non-empty - which was all the
+    default check looked at. It passed; only --deep, re-hashing tens of GB,
+    would have caught it."""
+    cfg = _cfg(tmp_path)
+    model_dir, _ = _fake_model(tmp_path / "models")
+    (model_dir / "model.bin").write_bytes(b"fake")          # the copy stopped early
+    fast = _verify_local_model(cfg, "asr", model_dir, deep=False)
+    assert not fast.ok and fast.critical and "size MISMATCH" in fast.detail
+
+
+def test_preflight_says_why_the_inputs_are_not_ready(tmp_path: Path) -> None:
+    """On a fresh extract metadata.csv does not exist yet, and preflight said
+    only "invalid: 1 problem(s)" - indistinguishable from a malformed file."""
+    from callqa.ops.preflight import _inputs_check
+
+    check, n = _inputs_check(_cfg(tmp_path))
+    assert not check.ok and n == 0
+    assert "not found" in check.detail

@@ -66,7 +66,8 @@ version; and, per model, the weight hash from the manifest.
 **Weight hashing** (`scripts/download_models.py`). The manifest is extended at
 download time with a `sha256` per model (content hash of the weight files, which
 are immutable once downloaded). Preflight verifies presence with a fast
-size+mtime check by default and a full re-hash under `--deep`. Hashing multi-GB
+total-size check against the download record by default (mtime is not
+used: a copy onto another machine changes it) and a full re-hash under `--deep`. Hashing multi-GB
 weights on every run would be wasteful; hashing once at download and verifying
 cheaply thereafter is the right trade for an air-gapped box.
 
@@ -111,17 +112,23 @@ and phone (⇒ redaction span references), together with the seeded human rating
 `callqa eval --golden-dir` at its own labelled set, kept out of the repo because it holds
 customer data.
 
-**Metrics** (`eval/metrics.py`; the DER scorer stayed in
-`scripts/eval_diarization.py`, which the harness shells out to rather than
-importing — moving it into the package was considered and not done, because it
-needs an RTTM reference the synthetic set does not have):
+**Metrics** (`eval/metrics.py`):
 - **Transcription** — WER and CER via a small standard-library Levenshtein
   (≈30 lines; adding `jiwer` for that is not justified air-gapped).
-- **Speaker separation** — DER, best-pairing separation, role accuracy, reused
-  from the existing scorer (now importable; the script becomes a thin wrapper).
-- **Redaction** — recall, precision, F1 by running the real `redaction.find_pii`
-  over the reference and comparing detected spans to the gold PII spans. Recall
-  is the one that matters for a leak; precision guards against over-masking.
+- **Speaker separation** — role accuracy only: the fraction of turns whose
+  speaker matches the reference, aligned by order. `callqa eval` does NOT
+  compute DER. The full DER scorer (with best-pairing and a NIST collar) is the
+  standalone `scripts/eval_diarization.py`, run by hand against an RTTM
+  reference; it is not called by the harness, because the synthetic golden set
+  has no RTTM to score against.
+- **Redaction** — two different questions, both reported. *Recall, precision
+  and F1* run the real `redaction.find_pii` over the reference text and compare
+  its spans to the hand-labelled gold identifiers: that scores the DETECTOR.
+  *Applied recall* checks the redacted transcript the pipeline actually wrote
+  and counts the gold identifiers still in it: that scores the ARTIFACT. They
+  differ exactly when the detector works and was not applied - redaction
+  disabled, or a detector wired without its turn boundaries - and applied recall
+  gates with zero tolerance, since one identifier in the artifact is a leak.
 - **Judge agreement** — QWK, reused from `calibration.calibrate` against the gold
   human scores.
 - **Timing** — end-to-end and per-stage.

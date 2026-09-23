@@ -50,9 +50,15 @@ def _stage_seconds(db_path: Path, call_id: str, call_start: float) -> dict[str, 
     out: dict[str, float] = {}
     prev = call_start
     for stage, done in rows:
-        if done is None:
+        # Only stages that ran in THIS run. A resumed call keeps the earlier
+        # run's completed_at for every stage it skips, and differencing those
+        # against this run's start fabricated durations: the whole gap between
+        # the two runs - hours, a weekend - landed on one stage, and stages that
+        # did no work at all were reported with a time. Skipped stages simply
+        # have no entry; the run record says what this run did.
+        if done is None or done < call_start:
             continue
-        out[stage] = round(max(0.0, done - prev), 3) if prev else 0.0
+        out[stage] = round(max(0.0, done - prev), 3)
         prev = done
     return out
 

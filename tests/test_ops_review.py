@@ -92,3 +92,15 @@ def _dimension_ids() -> list[str]:
     from callqa.rubric import load_rubric
 
     return [d.id for d in load_rubric().dimensions]
+
+
+def test_a_score_for_a_dimension_the_file_lacks_is_refused_not_dropped(tmp_path: Path) -> None:
+    """After a rubric gains a dimension, the existing file's header has no
+    column for it; the verdict was written without that score while the CLI
+    printed "recorded". The reviewer's judgement is the scarce input - refuse
+    loudly rather than keep part of it."""
+    ratings = tmp_path / "human_ratings.csv"
+    ratings.write_text("call_id,rater_id,a,b\nC0,r,3,3\n", encoding="utf-8")
+    with pytest.raises(ReviewError, match="new_dim"):
+        record_review(ratings, "C1", "r", {"a": 4, "b": 4, "new_dim": 5}, ["a", "b", "new_dim"])
+    assert "C1" not in ratings.read_text(encoding="utf-8")    # nothing half-written

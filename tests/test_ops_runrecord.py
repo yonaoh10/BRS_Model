@@ -96,3 +96,28 @@ def test_verify_without_a_run_record_cannot_lie(workspace, engines, tmp_path) ->
     _run_one(workspace, engines, tmp_path)
     missing = verify_call(workspace.paths.output_dir, "NEVER_RAN", workspace, load_rubric().sha256)
     assert missing.run_id is None and not missing.reproducible and missing.reason
+
+
+def test_a_resumed_run_does_not_invent_stage_timings(tmp_path) -> None:
+    """A resumed call keeps the previous run's completed_at for every stage it
+    skips. Differencing those against this run's start put the whole gap
+    between the runs on one stage and gave skipped stages a duration."""
+    import sqlite3
+
+    from callqa.ops.runrecord import _stage_seconds
+
+    db = tmp_path / "state.db"
+    with sqlite3.connect(db) as c:
+        c.execute("CREATE TABLE stages (call_id TEXT, stage TEXT, status TEXT, completed_at REAL)")
+        day = 86400.0
+        # run 1, three days ago: finished ingestion..asr, then died
+        for i, st in enumerate(["ingestion", "audio", "asr"]):
+            c.execute("INSERT INTO stages VALUES ('C1', ?, 'done', ?)", (st, 1000.0 + i))
+        # run 2, today: resumed and did only the rest
+        start = 1000.0 + 3 * day
+        for i, st in enumerate(["speakers", "redaction"]):
+            c.execute("INSERT INTO stages VALUES ('C1', ?, 'done', ?)", (st, start + 2 + 2 * i))
+
+    out = _stage_seconds(db, "C1", start)
+    assert set(out) == {"speakers", "redaction"}            # skipped stages: no entry
+    assert out == {"speakers": 2.0, "redaction": 2.0}      # no three-day "stage"
