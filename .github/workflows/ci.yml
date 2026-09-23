@@ -9,8 +9,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -93,3 +94,60 @@ jobs:
           python -m callqa run --mock
           python -m callqa report --mock
           test -s data/output/reports/index.html
+
+  # The bank's desktops are Microsoft VDI: Windows, no admin rights, no WSL
+  # guaranteed. Everything the README tells a Windows user to type is typed
+  # here, on a real Windows machine, in a folder whose path has a space and
+  # Hebrew in it - the two things that break naive path handling.
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (the pinned set the bank installs)
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install -r requirements.txt
+          python -m pip install --no-deps -e .
+      - name: Lint
+        run: ruff check src tests scripts dashboard
+      - name: Tests
+        run: python -m pytest -q
+      - name: Mock end-to-end
+        if: always()
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          python scripts/generate_sample_data.py
+          python -m callqa run --mock
+          python -m callqa report --mock
+          python -m callqa calibrate --mock
+      - name: Evaluation gate (no regression vs baseline)
+        if: always()
+        run: python -m callqa eval --mock --baseline eval/baseline.json
+      - name: The README's Windows steps, from a GitHub ZIP, in a path with a space and Hebrew
+        if: always()
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          # GitHub's "Download ZIP" is `git archive` with LF endings.
+          git -c core.autocrlf=false archive --format=zip --prefix=BRS_Model-main/ -o "$env:RUNNER_TEMP\repo.zip" HEAD
+          $dest = Join-Path $env:RUNNER_TEMP "בדיקה עם רווח"
+          Expand-Archive -Path "$env:RUNNER_TEMP\repo.zip" -DestinationPath $dest
+          Set-Location (Join-Path $dest "BRS_Model-main")
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+          .\.venv\Scripts\python.exe -m pip install -e .
+          .\.venv\Scripts\python.exe -m pytest -q
+          .\.venv\Scripts\python.exe scripts/generate_sample_data.py
+          .\.venv\Scripts\python.exe -m callqa run --mock
+          .\.venv\Scripts\python.exe -m callqa report --mock
+          .\.venv\Scripts\python.exe -m callqa preflight --mock
+          if (-not (Test-Path data\output\reports\index.html)) { throw "no index.html" }
