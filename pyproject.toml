@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "callqa"
-version = "1.1.0"
+version = "1.2.0"
 description = "Hebrew Call-QA PoC - conversation intelligence pipeline for banker calls"
 readme = "README.md"
 license = { text = "Proprietary" }

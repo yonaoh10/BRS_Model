@@ -45,4 +45,4 @@ def test_core_never_imports_dashboard_or_cloud() -> None:
 
 
 def test_version_is_released() -> None:
-    assert callqa.__version__ == "1.1.0"
+    assert callqa.__version__ == "1.2.0"

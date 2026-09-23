@@ -5,6 +5,69 @@ All notable changes to callqa are recorded here. The format follows
 semantic versioning: the CLI commands, exit codes, and on-disk artifact schemas
 are the public contract.
 
+## [1.2.0] — 2026-09-24
+
+Windows. The bank's desktops are Microsoft VDI - Windows, no administrator
+rights, no WSL - and the software now installs and runs there natively. Every
+change was driven by a read-only audit of the whole project for Windows and by
+a real Windows machine: CI runs the suite, the README's steps and an offline
+install on Windows, and a second workflow runs the REAL engines there (ASR,
+VAD, NER, redaction, and an llama.cpp judge over the OpenAI protocol).
+
+### Added
+- `scripts/install.py`, `scripts/first_run.py`, `scripts/build_offline_bundle.py`
+  - one Python command per job, the same on Windows and Linux, replacing the
+  bash scripts. No activation, so PowerShell's execution policy never matters.
+- `scripts/start_llama_server.py` - the judge on a machine without a GPU;
+  `download_models.py --llm-gguf` fetches one quantized file for it.
+- `callqa.portable` - the OS calls whose POSIX spelling was wrong on Windows.
+- Preflight: data location (OneDrive, network share), folder privacy, the
+  Visual C++ runtime, the audio decoder, and a Hugging Face cache copied
+  without its symlinks.
+- `--log-file` for scheduled runs; `asr.device`; `judge.allow_public_endpoint`.
+
+### Fixed — would not run on Windows at all
+- `os.uname()` does not exist there: every call failed taking its lock.
+- `os.kill(pid, 0)` is CTRL_C_EVENT / TerminateProcess there, not a probe.
+- `pip install -e .` broke in a folder whose path has Hebrew in it.
+- Hebrew printed to a redirected stream (a Scheduled Task, CI) raised
+  UnicodeEncodeError; subprocess output was decoded in the ANSI code page.
+- ctranslate2 4.5.0 imports `pkg_resources`, which current setuptools no longer
+  ships: pinned to 4.6.2.
+- A Windows path written into config.yaml's double quotes broke the YAML.
+
+### Fixed — privacy and security
+- pyannote.audio 4 sends usage telemetry to otel.pyannote.ai by default: off,
+  and the CLI enforces `HF_HUB_OFFLINE`.
+- Data folders are owner-only on Windows (chmod does nothing there; folders
+  under C:\\ inherit "Users: read" on multi-session hosts); the installer does
+  the same for the project folder.
+- On a shared host: the judge default is 127.0.0.1 (localhost is [::1] first
+  on Windows); the judge client checks the server serves the configured model
+  before sending anything, never goes through the system proxy for loopback,
+  and refuses a public internet endpoint; the dashboard binds exclusively.
+- Stale redacted audio fails closed, and the dashboard never serves a WAV
+  older than its transcript.
+
+### Fixed — correctness
+- Distinct recording names could share a call_id (all-Hebrew names became
+  "call") and silently reuse another recording's results.
+- `first_run.py` works in `data/demo/`: rerun after real calls were in place,
+  it marked them processed with mock output.
+- `watch` processed files Windows was still copying (copies pre-size the file).
+- Excel CSVs: empty rows, mixed UTF-8/cp1255 rows, TAB/';' separators, bidi
+  marks, case-insensitive duplicate call_ids, device names (CON, NUL).
+- Model hashes, the rubric hash and the config hash are identical on Windows
+  and Linux.
+- mp3/m4a and telephony (G.711) WAV decode through PyAV - installed with the
+  engines - so no ffmpeg.exe is needed.
+
+### Changed
+- `download_models.py` writes the judge model into `.env`, not config.yaml.
+- PyYAML pinned to 6.0.3 (pyannote needs >=6.0.2).
+- README is written for Windows first; the judge options are stated as
+  measured: a GPU server for real scoring, a CPU judge to see the chain work.
+
 ## [1.1.0] — 2026-09-23
 
 The hand-off release: prepared for a bank's implementation engineer to download

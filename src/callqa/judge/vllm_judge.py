@@ -123,9 +123,10 @@ class VLLMJudge:
                 f"{exc.code} to GET /models; check that judge.base_url ends in /v1."
             ) from exc
         except (urllib.error.URLError, OSError) as exc:
+            reason = getattr(exc, "reason", None) or exc
             raise VLLMJudgeError(
-                f"judge endpoint unreachable at {self.config.base_url}: nothing is "
-                "listening there. Start your model server (scripts/start_llama_server.py "
+                f"judge endpoint unreachable at {self.config.base_url} ({reason}): nothing "
+                "is listening there. Start your model server (scripts/start_llama_server.py "
                 "and scripts/start_vllm.sh are examples) and check judge.base_url."
             ) from exc
         self._check_it_serves_our_model(listing)

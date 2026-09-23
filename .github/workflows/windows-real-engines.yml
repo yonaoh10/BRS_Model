@@ -80,23 +80,6 @@ jobs:
           .\.venv\Scripts\python -c "import secrets; open('.env', 'a', encoding='utf-8').write('CALLQA_JUDGE__API_KEY=' + secrets.token_hex(32) + '\n')"
           Get-Content .env | Select-String -NotMatch "API_KEY"
 
-      - name: Start the judge with scripts/start_llama_server.py
-        run: |
-          $ErrorActionPreference = "Stop"
-          $gguf = Get-ChildItem -Recurse models -Filter $env:JUDGE_FILE | Select-Object -First 1
-          Start-Process -FilePath .\.venv\Scripts\python.exe -ArgumentList "scripts\start_llama_server.py", "`"$($gguf.FullName)`"" -RedirectStandardOutput llama.out.log -RedirectStandardError llama.err.log
-          $key = (Get-Content .env | Select-String "CALLQA_JUDGE__API_KEY=").ToString().Split("=")[1]
-          $up = $false
-          foreach ($i in 1..90) {
-            try { Invoke-RestMethod -Uri http://127.0.0.1:8000/v1/models -Headers @{Authorization = "Bearer $key"} | Out-Null; $up = $true; break } catch { Start-Sleep -Seconds 2 }
-          }
-          if (-not $up) { Get-Content llama.out.log, llama.err.log; throw "llama-server did not come up" }
-          # The key is enforced: the server answers call material only to the pipeline.
-          $status = 0
-          try { Invoke-WebRequest -Uri http://127.0.0.1:8000/v1/chat/completions -Method Post -Body '{"messages":[{"role":"user","content":"hi"}]}' -ContentType application/json | Out-Null; $status = 200 } catch { $status = $_.Exception.Response.StatusCode.value__ }
-          if ($status -ne 401) { throw "llama-server accepted a request without the API key (status $status)" }
-          Write-Host "judge is up and refuses requests without the key"
-
       - name: Two speech tracks (Windows' own text-to-speech)
         shell: powershell
         run: |
@@ -117,20 +100,41 @@ jobs:
           $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
           .\.venv\Scripts\python scripts\prepare_real_call.py --call-id WIN001 --banker-track "$env:RUNNER_TEMP\banker.wav" --customer-track "$env:RUNNER_TEMP\customer.wav"
 
-      - name: Preflight and a REAL run (ASR, VAD, NER, redaction, judge)
+      # ONE step for the judge server and everything that talks to it: the
+      # Windows runner stops the processes a step started when that step ends.
+      - name: Start the judge (scripts/start_llama_server.py), preflight, and a REAL run
         env:
           CALLQA_REDACTION__NER: "true"
           CALLQA_JUDGE__MAX_RETRIES: "1"
         run: |
+          $ErrorActionPreference = "Stop"
+          $gguf = Get-ChildItem -Recurse models -Filter $env:JUDGE_FILE | Select-Object -First 1
+          Start-Process -FilePath .\.venv\Scripts\python.exe -ArgumentList "scripts\start_llama_server.py", "`"$($gguf.FullName)`"" -RedirectStandardOutput llama.out.log -RedirectStandardError llama.err.log
+          $key = (Get-Content .env | Select-String "CALLQA_JUDGE__API_KEY=").ToString().Split("=")[1]
+          $up = $false
+          foreach ($i in 1..90) {
+            try { Invoke-RestMethod -Uri http://127.0.0.1:8000/v1/models -Headers @{Authorization = "Bearer $key"} | Out-Null; $up = $true; break } catch { Start-Sleep -Seconds 2 }
+          }
+          if (-not $up) { Get-Content llama.out.log, llama.err.log; throw "llama-server did not come up" }
+          # The key is enforced: the server answers call material only to the pipeline.
+          $status = 0
+          try { Invoke-WebRequest -Uri http://127.0.0.1:8000/v1/chat/completions -Method Post -Body '{"messages":[{"role":"user","content":"hi"}]}' -ContentType application/json | Out-Null; $status = 200 } catch { $status = $_.Exception.Response.StatusCode.value__ }
+          if ($status -ne 401) { throw "llama-server accepted a request without the API key (status $status)" }
+          Write-Host "judge is up and refuses requests without the key"
           $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
           .\.venv\Scripts\python -m callqa preflight
           $PSNativeCommandUseErrorActionPreference = $false
-          .\.venv\Scripts\python -m callqa run -v *> run.log
-          $code = $LASTEXITCODE
+          .\.venv\Scripts\python -m callqa run -v --log-file run.log
           Get-Content run.log -Tail 60
           $PSNativeCommandUseErrorActionPreference = $true
           .\.venv\Scripts\python -m callqa report
           .\.venv\Scripts\python .github\check_real_run.py run.log WIN001
+
+      - name: The judge server's own log
+        if: always()
+        run: |
+          if (Test-Path llama.err.log) { Get-Content llama.err.log -Tail 40 }
+          if (Test-Path llama.out.log) { Get-Content llama.out.log -Tail 20 }
 
       - name: The suite, with the real engine libraries installed
         if: always()
