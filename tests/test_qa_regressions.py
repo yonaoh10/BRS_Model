@@ -547,8 +547,23 @@ class TestPresidioConstructionFailure:
             raise OSError("[E050] Can't find model 'en_core_web_lg'")
 
         monkeypatch.setattr(redaction.PresidioRedactor, "__init__", boom)
-        redactor = redaction.build_redactor(RedactionConfig(), mock=False)
+        config = RedactionConfig(presidio=True)          # opt-in; see below
+        redactor = redaction.build_redactor(config, mock=False)
         assert redactor.name == "regex"
+
+    def test_presidio_is_off_unless_asked_for(self, monkeypatch) -> None:
+        """Constructing presidio loads a spaCy pipeline, and presidio downloads
+        that model when it is missing: an outbound network call at runtime, on
+        a machine whose whole promise is that it makes none. It must not happen
+        because somebody forgot to turn something off."""
+        from callqa import redaction
+        from callqa.config import RedactionConfig
+
+        def never(self, config, models_dir=None):  # noqa: ANN001, ARG001
+            raise AssertionError("presidio must not be constructed by default")
+
+        monkeypatch.setattr(redaction.PresidioRedactor, "__init__", never)
+        assert redaction.build_redactor(RedactionConfig(), mock=False).name == "regex"
 
 
 class TestGershayimInJudgePrompt:

@@ -2,30 +2,35 @@
 
 # Everything here runs with the core dependencies alone (requirements.txt).
 # No GPU, no models and no network are needed for any target in this file.
+#
+# PYTHON is resolved rather than hardcoded: a stock Debian or RHEL host has
+# python3 and no `python` at all, so every target here failed on exactly the
+# kind of clean server this is meant to be deployed on.
+PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python)
 
 test:
-	python -m pytest -q
+	$(PYTHON) -m pytest -q
 
 lint:
 	ruff check src tests scripts dashboard
 
 sample:
-	python scripts/generate_sample_data.py
+	$(PYTHON) scripts/generate_sample_data.py
 
 mock-e2e: sample
-	python -m callqa run --mock
-	python -m callqa report --mock
-	python -m callqa calibrate --mock
+	$(PYTHON) -m callqa run --mock
+	$(PYTHON) -m callqa report --mock
+	$(PYTHON) -m callqa calibrate --mock
 	@echo "Open data/output/reports/index.html"
 
 eval:
-	python -m callqa eval --mock --baseline eval/baseline.json
+	$(PYTHON) -m callqa eval --mock --baseline eval/baseline.json
 
 golden:
-	python scripts/build_golden_set.py
+	$(PYTHON) scripts/build_golden_set.py
 
 dashboard:
-	python dashboard/server.py
+	$(PYTHON) dashboard/server.py
 
 clean:
 	rm -rf data/output data/callqa_state.db*

@@ -362,8 +362,30 @@ def prepare_audio(
         # the extra channels would vanish without a word.
         logger.warning("call_id=%s: file has %d channels; only the first two are "
                        "used", call.call_id, meta.channels)
-    layout = (probe_channels(call.audio_path, meta.duration_sec)
-              if meta.channels >= 2 else "mono")
+    # `speakers.mode` was a documented setting that no code read: an operator
+    # who set it to force one path got the automatic behaviour anyway, silently.
+    # It is honoured here, where the decision is actually made.
+    #   auto   - probe the channels and decide (the default, and what to use)
+    #   stereo - trust the two channels; for a recorder known to keep the
+    #            parties apart on a file the probe misreads
+    #   mono   - always diarize; for a recorder whose "stereo" is two
+    #            microphones in one room, where a channel split is meaningless
+    if config.speakers.mode == "mono":
+        layout = "mono"
+        logger.info("call_id=%s: speakers.mode=mono; diarizing regardless of the "
+                    "file's channels", call.call_id)
+    elif config.speakers.mode == "stereo":
+        if meta.channels < 2:
+            raise AudioError(
+                f"speakers.mode='stereo' but {call.audio_path.name} has "
+                f"{meta.channels} channel(s). Set speakers.mode to auto or mono."
+            )
+        layout = "stereo"
+        logger.info("call_id=%s: speakers.mode=stereo; splitting channels without "
+                    "probing them", call.call_id)
+    else:
+        layout = (probe_channels(call.audio_path, meta.duration_sec)
+                  if meta.channels >= 2 else "mono")
     if layout != "stereo":
         # Two declared channels that carry one recording: the split would
         # produce two copies of the same conversation, so downmix and let the

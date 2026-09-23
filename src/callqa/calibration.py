@@ -107,7 +107,18 @@ def load_human_ratings(
                 raw = (row.get(dim) or "").strip()
                 if not raw:
                     continue
-                score = int(raw)
+                try:
+                    score = int(raw)
+                except ValueError:
+                    # A human fills this file in by hand, in a spreadsheet, so
+                    # "4.5", "n/a" and a stray Hebrew word are all normal
+                    # mistakes. Every other bad value here reports the row and
+                    # column; this one used to escape as a bare ValueError
+                    # traceback that named neither.
+                    raise CalibrationError(
+                        f"human_ratings.csv row {i}: {dim}={raw!r} is not a whole "
+                        f"number 1-5"
+                    ) from None
                 if not 1 <= score <= 5:
                     raise CalibrationError(
                         f"human_ratings.csv row {i}: {dim}={score} outside 1-5"

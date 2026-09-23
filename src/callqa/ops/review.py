@@ -72,16 +72,23 @@ def record_review(ratings_csv: Path, call_id: str, rater_id: str,
         raise ReviewError(f"{rater_id} has already reviewed {call_id}")
 
     header = ["call_id", "rater_id", *dim_ids]
-    exists = ratings_csv.exists()
-    if exists:  # align to the file's own column order
+    # "Has a header already" is not the same question as "exists". A file that
+    # exists but is EMPTY - created by a touch, an interrupted write, or a
+    # spreadsheet saving nothing - took the append path and wrote the row with
+    # no header line. csv.DictReader then read that first verdict AS the header,
+    # so the reviewer's judgement vanished and every later row was misaligned.
+    # The file has a header only if its first line is one.
+    existing_header = None
+    if ratings_csv.exists() and ratings_csv.stat().st_size > 0:
         with ratings_csv.open(encoding="utf-8-sig", newline="") as fh:
             existing_header = next(csv.reader(fh), None)
-        if existing_header:
-            header = existing_header
+    has_header = bool(existing_header)
+    if has_header:  # align to the file's own column order
+        header = existing_header
     ratings_csv.parent.mkdir(parents=True, exist_ok=True)
     row = {"call_id": call_id, "rater_id": rater_id, **{d: scores[d] for d in dim_ids}}
     with ratings_csv.open("a", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=header)
-        if not exists:
+        if not has_header:
             writer.writeheader()
         writer.writerow({k: row.get(k, "") for k in header})

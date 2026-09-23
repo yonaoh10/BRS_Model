@@ -1,8 +1,14 @@
 # Core runtime dependencies (mock mode runs with these alone).
 # Heavy model engines are pinned in requirements-server.txt and are only
 # needed on the bank server; every real engine is behind a lazy import.
+#
+# pytest and ruff are here on purpose: the offline bundle built from this file
+# has to be able to run the test suite on the air-gapped machine, which is the
+# only way to prove the install there.
+#
+# pydantic-settings was pinned here and imported nowhere - a dependency the
+# bank would have had to review, vendor and keep patched for nothing.
 pydantic==2.13.4
-pydantic-settings==2.15.0
 Jinja2==3.1.6
 PyYAML==6.0.1
 numpy==2.4.6

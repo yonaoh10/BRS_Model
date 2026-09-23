@@ -10,8 +10,12 @@ recording (Hebrew) and produces the complete per-call output:
 1. **Transcription** — ivrit.ai Whisper (faster-whisper CT2), Hebrew forced.
 2. **Speaker attribution** — stereo channel split (primary); pyannote
    diarization fallback for mono recordings.
-3. **PII redaction** — Hebrew-aware (Israeli ID with checksum, phones,
-   payment cards, aggressive account-like numbers (any run of 6+ digits), names).
+3. **PII redaction** — Hebrew-aware, in two layers. *Shaped* identifiers are
+   recognised by form: Israeli ID (checksum), phones, payment cards (Luhn),
+   IBAN, e-mail, and any run of 6+ digits. *Shapeless* ones — a mother's name,
+   a date of birth, an address — have no form at all and are recognised by the
+   verification question that precedes them. A name nobody asked for is not
+   masked; see docs/DEPLOYMENT.md §9.
 4. **Objective features** — talk ratio, interruptions, patience, questions,
    monologue length, dead air, speech rate.
 5. **LLM judge** — a weighted 8-dimension rubric scored by a locally served
@@ -71,9 +75,19 @@ wire any external scheduler or recording-system hook straight into it.
 | `callqa report` | per-banker reports + `reports/index.html` |
 | `callqa calibrate` | QWK vs `human_ratings.csv` → `reports/calibration.html` |
 | `callqa validate-inputs` | strict metadata / ratings validation |
+| `callqa preflight` | config, model hashes, endpoint, disk and inputs — before a batch starts |
+| `callqa verify <call>` | is a stored result still reproducible, and if not, which input changed |
+| `callqa eval` | score the whole system against a golden set (read docs/DEPLOYMENT.md §8 first) |
+| `callqa drift` | movement in scores, review rate and quality vs a known-good period |
+| `callqa review-queue` / `callqa review` | held calls awaiting a human, and recording the verdict |
+| `callqa retention` | delete raw PII-bearing artifacts past the window, with an audit log |
 
 All commands accept `--config`, `--mock`, `--force`. Any config field is
 env-overridable: `CALLQA_SECTION__FIELD` (e.g. `CALLQA_JUDGE__BASE_URL`).
+
+**Deploying this?** `docs/DEPLOYMENT.md` is the front door. Also:
+`docs/MLOPS.md` (running it for years), `docs/diarization_he.md`,
+`docs/performance_he.md` (measured timings), `dashboard/DESIGN.md`.
 
 ## Input contract
 
@@ -151,7 +165,9 @@ the bank server by `scripts/download_models.py`.
    `python -m callqa watch` instead — it polls the input directory and
    processes each new recording once its file size is stable.
 10. **Calibrate**: `python -m callqa calibrate` →
-    `data/output/reports/calibration.html` (PASS at overall QWK ≥ 0.70;
+    `data/output/reports/calibration.html`. PASS needs BOTH at least 20
+    human-rated calls AND overall QWK ≥ 0.70 — below 20 the result reads FAIL
+    however high the agreement, because the number means nothing yet;
     dimensions with QWK < 0.60 are flagged "do not deploy without human
     review").
 11. **Reports**: `python -m callqa report` →
@@ -194,8 +210,11 @@ Config lives in `config/` (`config.yaml`, `rubric.yaml`,
 1. **תמלול** — מודל ivrit.ai Whisper (faster-whisper CT2), עברית כפויה.
 2. **שיוך דוברים** — פיצול ערוצי סטריאו (המסלול העיקרי); pyannote כגיבוי
    להקלטות מונו.
-3. **הסרת פרטים מזהים (PII)** — מותאם לעברית (תעודת זהות עם ספרת ביקורת,
-   טלפונים, כרטיסי אשראי, מספרי חשבון (כל רצף של 6 ספרות ומעלה), שמות).
+3. **הסרת פרטים מזהים (PII)** — מותאם לעברית, בשתי שכבות. מזהים *בעלי צורה*
+   מזוהים לפי הצורה שלהם: תעודת זהות (ספרת ביקורת), טלפונים, כרטיסי אשראי
+   (Luhn), IBAN, דוא"ל, וכל רצף של 6 ספרות ומעלה. מזהים *חסרי צורה* — שם האם,
+   תאריך לידה, כתובת — אין להם צורה כלל, והם מזוהים לפי שאלת האימות שקדמה להם.
+   שם שאיש לא ביקש אינו מצונזר; ראו docs/DEPLOYMENT.md §9.
 4. **מדדים אובייקטיביים** — יחס דיבור, קטיעות, סבלנות, שאלות, אורך מונולוג,
    זמן שקט, קצב דיבור.
 5. **שופט LLM** — מחוון משוקלל בן 8 ממדים, מדורג על ידי מודל המוגש מקומית
@@ -255,10 +274,20 @@ make test                                        # חבילת הבדיקות
 | `callqa report` | דוחות לכל בנקאי + `reports/index.html` |
 | `callqa calibrate` | QWK מול `human_ratings.csv` ← `reports/calibration.html` |
 | `callqa validate-inputs` | ולידציה קפדנית של המטא-דאטה והדירוגים |
+| `callqa preflight` | קונפיגורציה, גיבובי מודלים, נקודת קצה, מקום בדיסק וקלט — לפני תחילת אצווה |
+| `callqa verify <call>` | האם תוצאה שמורה עדיין ניתנת לשחזור, ואם לא — איזה קלט השתנה |
+| `callqa eval` | ציון למערכת כולה מול סט זהב (קראו קודם את docs/DEPLOYMENT.md §8) |
+| `callqa drift` | תזוזה בציונים, בשיעור הבדיקות ובאיכות מול תקופה ידועה כתקינה |
+| `callqa review-queue` / `callqa review` | שיחות שממתינות לאדם, ורישום ההכרעה שלו |
+| `callqa retention` | מחיקת ארטיפקטים גולמיים נושאי PII שעברו את חלון השמירה, עם יומן ביקורת |
 
 כל הפקודות מקבלות `--config`, `--mock`, `--force`. כל שדה בקונפיגורציה
 ניתן לדריסה דרך משתני סביבה: `CALLQA_SECTION__FIELD`
 (למשל `CALLQA_JUDGE__BASE_URL`).
+
+**פורסים את זה?** `docs/DEPLOYMENT.md` היא דלת הכניסה. בנוסף:
+`docs/MLOPS.md` (הפעלה לאורך שנים), `docs/diarization_he.md`,
+`docs/performance_he.md` (זמנים שנמדדו), `dashboard/DESIGN.md`.
 
 ## חוזה הקלט
 
@@ -335,8 +364,10 @@ make test                                        # חבילת הבדיקות
    ב-`python -m callqa watch` — הוא סורק את תיקיית הקלט ומעבד כל הקלטה
    חדשה ברגע שגודל הקובץ שלה מתייצב.
 10. **כיול**: `python -m callqa calibrate` ←
-    `data/output/reports/calibration.html` (עובר כאשר QWK כולל ≥ 0.70;
-    ממדים עם QWK < 0.60 מסומנים "אין לפרוס ללא בקרה אנושית").
+    `data/output/reports/calibration.html`. מעבר דורש גם לפחות 20 שיחות
+    מדורגות בידי אדם וגם QWK כולל ≥ 0.70 — מתחת ל-20 התוצאה נקראת FAIL גם אם
+    ההסכמה גבוהה, כי למספר עדיין אין משמעות; ממדים עם QWK < 0.60 מסומנים
+    "אין לפרוס ללא בקרה אנושית".
 11. **דוחות**: `python -m callqa report` ←
     `data/output/reports/index.html` שמקשר לכל דוחות השיחות והבנקאים
     (הכול HTML סטטי, ללא נכסים חיצוניים).

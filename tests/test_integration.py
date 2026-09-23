@@ -251,12 +251,33 @@ def test_full_run_report_calibrate_no_leaks(tmp_path: Path, workspace) -> None: 
     banker_reports = list((out / "reports" / "bankers").glob("*.html"))
     assert len(banker_reports) == 3
 
-    # No raw PII digits anywhere outside the raw transcripts directory.
-    for path in out.rglob("*"):
-        if not path.is_file() or path.suffix not in (".html", ".json"):
+    # The project's hardest rule, checked over the WHOLE output tree rather
+    # than one stage: every seeded identifier, every file type, every
+    # directory. Only transcripts/ - the raw stage, which `callqa retention`
+    # deletes on a schedule - may contain one.
+    #
+    # Deliberately the crudest possible check, because it assumes nothing about
+    # which stage might leak: an artifact a future feature adds is covered the
+    # day it is written, without anyone remembering to extend this.
+    #
+    # Both KINDS of identifier are seeded, and the second is the reason this
+    # replaced a two-string version. A national ID and a phone have a shape; a
+    # mother's name, a date of birth and an address do not, and are masked only
+    # because a banker asked for them - a much easier path to break.
+    #
+    # Whole-word matching, via the same locator the evaluation uses: "רות" is
+    # the tail of "הספרות" ("the digits"), and a substring search reports a
+    # leak on a transcript that is perfectly clean.
+    from callqa.eval.metrics import gold_spans
+
+    seeded = [RAW_ID, "052-1234567", "765432",                      # shaped
+              "רות", "רחוב הרצל 15 בחיפה", "בחמישי למרץ שמונים ושתיים"]  # shapeless
+    escaped: dict[str, list[str]] = {}
+    for path in sorted(out.rglob("*")):
+        if not path.is_file() or path.is_relative_to(out / "transcripts"):
             continue
-        if path.is_relative_to(out / "transcripts"):
-            continue  # raw transcripts are the one guarded exception
         content = path.read_text(encoding="utf-8", errors="ignore")
-        assert RAW_ID not in content, f"raw Israeli ID leaked into {path}"
-        assert "052-1234567" not in content, f"raw phone leaked into {path}"
+        found = [s for s in seeded if gold_spans(content, [s])]
+        if found:
+            escaped[str(path.relative_to(out))] = found
+    assert not escaped, f"raw identifiers escaped redaction: {escaped}"

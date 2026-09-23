@@ -52,7 +52,20 @@ def _banner() -> None:
 
 
 def _snapshot(model_id: str, target: Path, token: str | None = None) -> tuple[str, Path]:
-    from huggingface_hub import snapshot_download
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        # Deliberately not in requirements.txt: it is the one library that
+        # exists to download things, and the runtime must never be able to.
+        # That is a good decision with a bad failure mode, so it says so here
+        # rather than surfacing as a bare ImportError from a nested call.
+        raise SystemExit(
+            "huggingface_hub is not installed.\n"
+            "It is kept out of the runtime dependencies on purpose - the "
+            "pipeline must never be able to download anything - so install it "
+            "for this step only:\n\n"
+            "    pip install huggingface_hub\n"
+        ) from None
 
     print(f"-> downloading {model_id} into {target} ...")
     path = snapshot_download(model_id, local_dir=target, token=token)

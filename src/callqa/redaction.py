@@ -41,6 +41,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple, Protocol
 
 from callqa.config import RedactionConfig
@@ -913,8 +914,10 @@ class RegexRedactor:
 
     name = "regex"
 
-    def __init__(self, config: RedactionConfig | None = None) -> None:
+    def __init__(self, config: RedactionConfig | None = None,
+                 models_dir: Path | None = None) -> None:
         self.config = config or RedactionConfig()
+        self.models_dir = Path(models_dir) if models_dir else Path("models")
 
     def redact_dialog(
         self, dialog: DialogTranscript, extra_names: list[str] | None = None
@@ -1030,20 +1033,26 @@ class PresidioRedactor(RegexRedactor):
         "IP_ADDRESS": "ACCOUNT_LIKE",
     }
 
-    def __init__(self, config: RedactionConfig) -> None:
+    def __init__(self, config: RedactionConfig, models_dir: Path | None = None) -> None:
         from presidio_analyzer import AnalyzerEngine
 
-        super().__init__(config)
+        super().__init__(config, models_dir)
         self.analyzer = AnalyzerEngine()
         self._ner = self._load_ner() if config.ner else None
 
     def _load_ner(self):  # noqa: ANN202
+        # Under paths.models_dir, not a hardcoded "models/": an operator who
+        # put the weights on a different volume - the normal case on a server,
+        # where models do not live beside the code - got NER silently disabled
+        # with a warning that read like the model was broken.
+        model_path = self.models_dir / "dictabert-ner"
         try:
             from transformers import pipeline as hf_pipeline  # lazy import
 
-            return hf_pipeline("ner", model="models/dictabert-ner", aggregation_strategy="simple")
+            return hf_pipeline("ner", model=str(model_path), aggregation_strategy="simple")
         except Exception as exc:  # pragma: no cover - server-only path
-            logger.warning("DictaBERT-NER unavailable (%s); NER redaction disabled", exc)
+            logger.warning("DictaBERT-NER unavailable at %s (%s); NER redaction disabled",
+                           model_path, exc)
             return None
 
     def _redact(self, dialog: DialogTranscript, extra_names: list[str]) -> RedactedTranscript:
@@ -1072,19 +1081,34 @@ class PresidioRedactor(RegexRedactor):
                                   redaction_counts=totals, enabled=True)
 
 
-def build_redactor(config: RedactionConfig, mock: bool) -> Redactor:
-    if mock:
-        return RegexRedactor(config)
+def build_redactor(config: RedactionConfig, mock: bool,
+                   models_dir: Path | None = None) -> Redactor:
+    """The redactor the pipeline will use.
+
+    Presidio is OPT-IN (`redaction.presidio`). It used to be attempted on every
+    non-mock run, and that is worse than it sounds: constructing presidio's
+    AnalyzerEngine loads a spaCy pipeline, and presidio downloads that model
+    when it is missing. On the air-gapped machine this is built for, that is an
+    outbound network call at runtime from a system whose central promise is
+    that it makes none - and when the download failed, the result was a silent
+    fall back to the regex redactor, so nobody found out either way.
+
+    Nothing is lost by default: the built-in pass already recognises payment
+    cards by Luhn, e-mail and IBAN directly, so presidio's contribution on
+    Hebrew text is IP addresses and very little else.
+    """
+    if mock or not config.presidio:
+        return RegexRedactor(config, models_dir)
     try:
-        return PresidioRedactor(config)
+        return PresidioRedactor(config, models_dir)
     except ImportError:
-        logger.warning("presidio not installed; using built-in regex redactor")
-        return RegexRedactor(config)
+        logger.warning("redaction.presidio is on but presidio is not installed; "
+                       "using the built-in regex redactor")
+        return RegexRedactor(config, models_dir)
     except Exception as exc:  # noqa: BLE001 - degrade, never block redaction
-        # Presidio imports fine but cannot construct - typically the spaCy
-        # model its AnalyzerEngine loads (en_core_web_lg) is not installed,
-        # which raises OSError, not ImportError. Redaction itself must never
-        # die with it: the built-in recognizers do all the Hebrew-specific
-        # work and presidio only layers international extras on top.
-        logger.warning("presidio unavailable (%s); using built-in regex redactor", exc)
-        return RegexRedactor(config)
+        # Presidio imports but cannot construct - typically the spaCy model is
+        # absent, which raises OSError rather than ImportError. Redaction must
+        # never die with it.
+        logger.warning("redaction.presidio is on but presidio could not start (%s); "
+                       "using the built-in regex redactor", exc)
+        return RegexRedactor(config, models_dir)

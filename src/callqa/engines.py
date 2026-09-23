@@ -66,7 +66,8 @@ def build_engines(config: Config, rubric_path: str | None = None) -> Engines:
 
     from callqa.redaction import build_redactor
 
-    redactor = build_redactor(config.redaction, mock=mock)
+    redactor = build_redactor(config.redaction, mock=mock,
+                              models_dir=config.paths.models_dir)
 
     if mock or config.judge.engine == "mock":
         from callqa.judge.mock_judge import MockJudge

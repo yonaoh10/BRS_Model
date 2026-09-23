@@ -125,7 +125,19 @@ class SpeakersConfig(StrictModel):
 
 class RedactionConfig(StrictModel):
     enabled: bool = True
+    # Hebrew NER for person names (DictaBERT-NER, downloaded separately). Costs
+    # a model load and inference time per call; catches names nobody asked for,
+    # which the question-driven rules cannot.
     ner: bool = False
+    # Presidio, layered on top of the built-in recognizers. OFF by default, and
+    # the default is the important part: constructing presidio's AnalyzerEngine
+    # loads a spaCy pipeline, and presidio DOWNLOADS that model when it is
+    # missing - an outbound network call, at runtime, on a machine that is
+    # supposed to be air-gapped. It also adds almost nothing here: the built-in
+    # pass already detects payment cards (Luhn), e-mail and IBAN itself, so
+    # presidio contributes IP addresses and little else on Hebrew text.
+    # Turn it on only on a machine where en_core_web_lg is already installed.
+    presidio: bool = False
 
 
 class JudgeConfig(StrictModel):

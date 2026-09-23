@@ -114,3 +114,51 @@ def test_mono_file_is_labelled_mono(tmp_path: Path, channels: int) -> None:
     config = Config()
     config.audio.vad = "energy"
     assert prepare_audio(call, meta, config, tmp_path / "wav").channel_layout == "mono"
+
+
+# -- speakers.mode was documented but never read ------------------------------
+
+class TestSpeakersModeIsHonoured:
+    """`speakers.mode` appeared in config.yaml with three documented values and
+    no code anywhere read it. An operator who set it to force a path got the
+    automatic behaviour, silently - the worst kind of configuration bug, because
+    the setting looks applied."""
+
+    def _config(self, tmp_path: Path, mode: str) -> Config:
+        config = Config()
+        config.paths.output_dir = tmp_path / "out"
+        config.audio.vad = "energy"
+        config.speakers.mode = mode
+        return config
+
+    def _prepare(self, path: Path, config: Config, tmp_path: Path, channels: int):  # noqa: ANN202
+        call = CallInput(call_id="M1", audio_path=path)
+        meta = CallMeta(call_id="M1", banker_id="B1", file_name=path.name,
+                        duration_sec=3.0, sample_rate=RATE, channels=channels)
+        return prepare_audio(call, meta, config, tmp_path / "wav")
+
+    def test_mono_mode_diarizes_a_genuinely_stereo_file(self, tmp_path: Path) -> None:
+        src = _write(tmp_path / "two-speakers.wav", _tone(220), _tone(700))
+        artifact = self._prepare(src, self._config(tmp_path, "mono"), tmp_path, 2)
+        assert artifact.is_stereo is False
+
+    def test_auto_still_splits_that_same_file(self, tmp_path: Path) -> None:
+        """The control: without the override the probe recognises real stereo,
+        so the test above is measuring the setting and not something else."""
+        src = _write(tmp_path / "two-speakers.wav", _tone(220), _tone(700))
+        artifact = self._prepare(src, self._config(tmp_path, "auto"), tmp_path, 2)
+        assert artifact.is_stereo is True
+
+    def test_stereo_mode_refuses_a_file_that_cannot_be_split(self, tmp_path: Path) -> None:
+        """Failing loudly beats silently falling back: the operator asked for a
+        channel split because they believe the recorder produces one."""
+        from callqa.audio import AudioError
+
+        mono = tmp_path / "one.wav"
+        with wave.open(str(mono), "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(RATE)
+            wf.writeframes((_tone(300) * 32767).astype(np.int16).tobytes())
+        with pytest.raises(AudioError, match="speakers.mode='stereo'"):
+            self._prepare(mono, self._config(tmp_path, "stereo"), tmp_path, 1)

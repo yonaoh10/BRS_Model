@@ -63,3 +63,32 @@ def test_bad_verdicts_are_rejected(tmp_path: Path) -> None:
     record_review(ratings, "C", "r", _FULL, DIMS)
     with pytest.raises(ReviewError, match="already reviewed"):
         record_review(ratings, "C", "r", _FULL, DIMS)                       # duplicate
+
+
+def test_a_verdict_into_an_empty_ratings_file_is_not_swallowed(tmp_path: Path) -> None:
+    """An existing-but-empty human_ratings.csv took the append path without
+    writing a header, so csv.DictReader read the first verdict AS the header:
+    the reviewer's judgement disappeared and every later row was misaligned.
+    A reviewer's verdict on a held call is the most valuable thing this system
+    produces, and it was being lost in the most silent way possible."""
+    import csv
+
+    from callqa.ops.review import record_review
+
+    ratings = tmp_path / "calibration" / "human_ratings.csv"
+    ratings.parent.mkdir(parents=True)
+    ratings.write_text("", encoding="utf-8")        # touched, never written to
+
+    dims = _dimension_ids()
+    record_review(ratings, "C1", "rater-1", {d: 3 for d in dims}, dims)
+
+    rows = list(csv.DictReader(ratings.open(encoding="utf-8-sig")))
+    assert len(rows) == 1, f"the verdict was lost: {ratings.read_text()!r}"
+    assert rows[0]["call_id"] == "C1"
+    assert rows[0]["rater_id"] == "rater-1"
+
+
+def _dimension_ids() -> list[str]:
+    from callqa.rubric import load_rubric
+
+    return [d.id for d in load_rubric().dimensions]

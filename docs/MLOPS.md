@@ -225,7 +225,7 @@ Raw transcripts and raw audio contain customer identifiers. The bank will requir
 an answer to how long they live and how they are destroyed.
 
 The policy ships as configuration — `retention.raw_days` (default **90**) — so
-each deployment can set its own window. `callqa retention --status` lists the raw,
+each deployment can set its own window. `callqa retention` (no flag) lists the raw,
 PII-bearing artifacts older than the window (`transcripts/*.json`,
 `transcripts/*.dialog.json`, `audio/wav/*`, `redacted_audio/*`). `callqa retention
 --apply` destroys them and **keeps** the derived, non-PII outputs — redacted
