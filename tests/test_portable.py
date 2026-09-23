@@ -134,3 +134,24 @@ def test_yaml_errors_name_the_file_and_the_windows_cause(tmp_path: Path) -> None
     utf16 = tmp_path / "rubric.yaml"
     utf16.write_bytes("name: 'רובריקה'\n".encode("utf-16"))
     assert load_yaml(utf16) == {"name": "רובריקה"}
+
+
+def test_a_file_still_being_written_is_recognised(tmp_path: Path) -> None:
+    """Windows copies set the final size first, so only an open writer handle
+    says the copy is not finished."""
+    target = tmp_path / "incoming.wav"
+    with target.open("wb") as writer:
+        writer.write(b"RIFF")
+        writer.flush()
+        if os.name == "nt":
+            assert portable.held_open_for_writing(target)
+    assert not portable.held_open_for_writing(target)
+
+
+def test_move_renames_within_a_volume(tmp_path: Path) -> None:
+    src = tmp_path / "calls" / "a.wav"
+    src.parent.mkdir()
+    src.write_bytes(b"x")
+    (tmp_path / "processed").mkdir()
+    portable.move(src, tmp_path / "processed" / "a.wav")
+    assert not src.exists() and (tmp_path / "processed" / "a.wav").read_bytes() == b"x"

@@ -395,6 +395,42 @@ def private_to_owner(path: Path) -> bool:
     return user in sids and set(sids) <= _OWNER_ONLY_SIDS | {user}
 
 
+def held_open_for_writing(path: Path) -> bool:
+    """Is some other program still writing `path`? Windows only; else False.
+
+    Explorer, robocopy and CopyFileEx set a copy's final SIZE before writing
+    its data, so "the size stopped changing" - the watch driver's test - is
+    true from the first moment of a slow copy, and the call was transcribed
+    from a WAV whose tail was still zeros. Opening the file while refusing to
+    share it with writers fails exactly while a writer holds it.
+    """
+    if not IS_WINDOWS:
+        return False
+    _kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.HANDLE]
+    _kernel32.CreateFileW.restype = wintypes.HANDLE
+    generic_read, file_share_read, open_existing = 0x80000000, 0x1, 3
+    handle = _kernel32.CreateFileW(str(path), generic_read, file_share_read, None,
+                                   open_existing, 0, None)
+    if handle is None or handle == wintypes.HANDLE(-1).value:
+        return ctypes.get_last_error() == 32            # ERROR_SHARING_VIOLATION
+    _kernel32.CloseHandle(handle)
+    return False
+
+
+def move(src: Path, dst: Path) -> None:
+    """Move a file: a same-volume rename, retried past a brief antivirus lock
+    (portable.replace); a copy-and-delete only when the volumes differ."""
+    try:
+        replace(src, dst)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 17 or exc.errno == 18:   # other volume
+            shutil.move(str(src), str(dst))
+        else:
+            raise
+
+
 # -- external programs ------------------------------------------------------
 
 def project_root() -> Path:
