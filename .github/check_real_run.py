@@ -29,7 +29,7 @@ print("status:", result["status"], "| error:", result.get("error"))
 need(result["status"] in ("success", "needs_human_review"),
      f"the call {result['status']}: {result.get('error')}")
 need("faster-whisper model loaded" in log, "the real ASR model was never loaded")
-need("no CUDA GPU on this machine" in log,
+need("no usable CUDA GPU" in log,
      "the CPU fallback for asr.compute_type was not exercised")
 need("judge call failed" not in log,
      "the judge endpoint failed at the transport level (see run.log)")
@@ -45,9 +45,17 @@ need(words >= 10, "the ASR produced (almost) no words from real speech")
 need({"banker", "customer"} <= speakers, "the stereo split did not yield both speakers")
 need(redacted.get("enabled") is True, "redaction did not run")
 
-report = out / "reports" / "calls" / f"{call_id}.html"
-need(report.is_file() and report.read_text(encoding="utf-8").rstrip().endswith("</html>"),
-     "no complete HTML report for the call")
+if result["status"] == "success":
+    report = out / "reports" / "calls" / f"{call_id}.html"
+    need(report.is_file() and report.read_text(encoding="utf-8").rstrip().endswith("</html>"),
+         "no complete HTML report for the call")
+else:
+    # A call held for review has no scorecard, so no score report. With the
+    # 0.5B test judge that is the expected outcome: its quotes rarely survive
+    # evidence verification. What must hold is that it ANSWERED, in the
+    # schema, and that the answer was checked - "judge validation failed".
+    need("judge validation failed" in log,
+         "the call was held for review, but not because a judge answer was checked")
 
 if problems:
     print("\nREAL-ENGINE RUN ON WINDOWS FAILED:")

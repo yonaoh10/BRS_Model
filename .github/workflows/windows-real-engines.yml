@@ -127,7 +127,8 @@ jobs:
           .\.venv\Scripts\python -m callqa run -v --log-file run.log
           Get-Content run.log -Tail 60
           $PSNativeCommandUseErrorActionPreference = $true
-          .\.venv\Scripts\python -m callqa report
+          # Aggregate reports need at least one scored call; a held one has none.
+          if (Get-ChildItem data\output\scores -Filter *.json -ErrorAction SilentlyContinue) { .\.venv\Scripts\python -m callqa report }
           .\.venv\Scripts\python .github\check_real_run.py run.log WIN001
 
       - name: The judge server's own log

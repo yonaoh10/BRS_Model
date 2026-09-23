@@ -56,8 +56,13 @@ The bank's desktops are VDI, so this is a first-class target, and CI proves it
 on a real Windows machine on every change: the full test suite, the README's
 install steps from a GitHub ZIP unpacked into a folder whose path contains a
 space and Hebrew, an offline install from a Windows wheels bundle, and a real
-call through the real ASR, VAD, NER and an llama.cpp judge
-(`.github/workflows/windows-real-engines.yml`). What differs from Linux:
+call through the real engines (`.github/workflows/windows-real-engines.yml`):
+preflight, stereo split, silero VAD, faster-whisper on the CPU, redaction with
+the NER model, silenced audio, and an llama.cpp judge answering in the
+enforced JSON schema. The CI judge is a 0.5B model chosen for speed; its quotes
+fail evidence verification, so the call ends held for human review - which is
+the pipeline behaving correctly, and also why §5 recommends a larger judge on a
+GPU. What differs from Linux:
 
 - **Nothing needs admin rights.** Python comes from python.org's per-user
   installer; `scripts/install.py` builds `.venv` inside the project; ffmpeg and
