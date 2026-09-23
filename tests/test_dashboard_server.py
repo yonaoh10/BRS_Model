@@ -38,19 +38,30 @@ sys.path.insert(0, str(REPO_ROOT / "dashboard"))
 
 from server import Handler, collect_state  # noqa: E402
 
+# The requests go to 127.0.0.1, and a bank desktop's system proxy (which Python
+# applies to every URL; its "<local>" bypass misses 127.0.0.1) must not see them.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def _chrome() -> str | None:
     """The same Chromium lookup the QA harness uses, without importing it
     (that module pulls in playwright, which a bank machine will not have)."""
     import glob
+    import os
     import shutil
 
+    local = os.environ.get("LOCALAPPDATA", "")
     for pattern in ("/opt/pw-browsers/chromium*/chrome-linux/chrome",
-                    str(Path.home() / ".cache/ms-playwright/chromium*/chrome-linux/chrome")):
+                    str(Path.home() / ".cache/ms-playwright/chromium*/chrome-linux/chrome"),
+                    str(Path(local) / "ms-playwright/chromium*/chrome-win/chrome.exe")):
         matches = sorted(glob.glob(pattern))
         if matches:
             return matches[-1]
-    return shutil.which("chromium") or shutil.which("google-chrome")
+    # Edge is on every Windows 10/11 machine, and Playwright drives it.
+    edge = [Path(os.environ.get(v, "")) / "Microsoft/Edge/Application/msedge.exe"
+            for v in ("ProgramFiles(x86)", "ProgramFiles")]
+    return (shutil.which("chromium") or shutil.which("google-chrome")
+            or next((str(e) for e in edge if e.is_file()), None))
 
 
 RAW_ID = "123456782"          # seeded into the mock dialog fixture
@@ -168,7 +179,7 @@ def live_server(pipeline_output: Path):
 def _status(url: str, headers: dict | None = None) -> int:
     req = urllib.request.Request(url, headers=headers or {})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with _OPENER.open(req, timeout=10) as resp:
             return resp.status
     except urllib.error.HTTPError as exc:
         return exc.code
@@ -214,7 +225,7 @@ def test_serves_generated_reports(live_server: str) -> None:
 # ------------------------------------------------------- transcript endpoint
 
 def _get_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=10) as resp:
+    with _OPENER.open(url, timeout=10) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -277,7 +288,7 @@ def test_transcript_endpoint_refuses_disabled_redaction(live_server: str,
 
 
 def test_page_is_served_with_its_token(live_server: str) -> None:
-    with urllib.request.urlopen(f"{live_server}/?t=test-token-value", timeout=10) as resp:
+    with _OPENER.open(f"{live_server}/?t=test-token-value", timeout=10) as resp:
         html = resp.read().decode("utf-8")
     assert 'window.__CALLQA_TOKEN__="test-token-value"' in html
     assert 'dir="rtl"' in html or "direction:rtl" in html
@@ -329,7 +340,7 @@ def _get(url: str, headers: dict | None = None):
     """Return (status, headers, body-bytes) for a GET, following no redirects."""
     req = urllib.request.Request(url, headers=headers or {})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with _OPENER.open(req, timeout=10) as resp:
             return resp.status, dict(resp.headers), resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers), exc.read()

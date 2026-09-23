@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,16 +16,19 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def sample_data_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Generate the synthetic sample set once per test session."""
     input_dir = tmp_path_factory.mktemp("input")
-    subprocess.run(
+    proc = subprocess.run(
         [
             sys.executable,
             str(REPO_ROOT / "scripts" / "generate_sample_data.py"),
             "--input-dir",
             str(input_dir),
         ],
-        check=True,
         capture_output=True,
+        env=dict(os.environ, PYTHONUTF8="1"),
     )
+    if proc.returncode:
+        # Its stderr, not just "exit status 1": ~150 tests depend on this.
+        pytest.fail(proc.stderr.decode("utf-8", "replace"))
     return input_dir
 
 

@@ -76,7 +76,9 @@ jobs:
 
       - name: Judge key in .env, as the README says
         run: |
-          .\.venv\Scripts\python -c "import secrets, pathlib; pathlib.Path('.env').write_text('CALLQA_JUDGE__API_KEY=' + secrets.token_hex(32) + '\n', encoding='utf-8')"
+          # Appended: the downloader has already written CALLQA_JUDGE__MODEL there.
+          .\.venv\Scripts\python -c "import secrets; open('.env', 'a', encoding='utf-8').write('CALLQA_JUDGE__API_KEY=' + secrets.token_hex(32) + '\n')"
+          Get-Content .env | Select-String -NotMatch "API_KEY"
 
       - name: Start the judge with scripts/start_llama_server.py
         run: |

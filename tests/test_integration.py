@@ -194,7 +194,7 @@ def test_watch_picks_up_stable_file(tmp_path: Path, workspace, engines) -> None:
     config = workspace.model_copy(deep=True)
     config.paths.input_dir = input_dir
     config.watch.poll_seconds = 0.1
-    config.watch.stable_seconds = 0.3
+    config.watch.stable_seconds = 1.5
     engines = dataclasses.replace(engines, config=config)
 
     stop = threading.Event()
@@ -209,12 +209,14 @@ def test_watch_picks_up_stable_file(tmp_path: Path, workspace, engines) -> None:
         # Drop the file in two chunks to simulate an in-progress recording copy.
         source = (workspace.paths.input_dir / "calls" / "CALL005.wav").read_bytes()
         target = input_dir / "calls" / "CALL005.wav"
+        # The writer stays open across the pause, as a real copy does: an
+        # antivirus scanning a just-closed file on a VDI stalled the reopen
+        # long enough to use up the margin.
         with target.open("wb") as fh:
             fh.write(source[: len(source) // 2])
             fh.flush()
-        time.sleep(0.25)  # watcher sees the growing file, must NOT process it
-        assert not (input_dir / "processed" / "CALL005.wav").exists()
-        with target.open("ab") as fh:
+            time.sleep(0.25)  # watcher sees the growing file, must NOT process it
+            assert not (input_dir / "processed" / "CALL005.wav").exists()
             fh.write(source[len(source) // 2:])
         # Wait for stabilization + processing.
         deadline = time.monotonic() + 15

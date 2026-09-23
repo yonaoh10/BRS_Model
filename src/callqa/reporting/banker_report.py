@@ -42,13 +42,18 @@ def _banker_slugs(banker_ids: list[str]) -> dict[str, str]:
     with a short hash of the raw id. Deterministic (sorted) so filenames are
     stable across runs.
     """
+    from callqa.ingestion import is_windows_reserved
+
     slugs: dict[str, str] = {}
-    owner: dict[str, str] = {}   # stem -> the banker_id that claimed it
+    owner: dict[str, str] = {}   # casefolded stem -> the banker_id that claimed it
     for bid in sorted(set(banker_ids)):
         stem = safe_filename(bid)
-        if owner.get(stem, bid) != bid:
+        if is_windows_reserved(stem):
+            stem = f"b_{stem}"            # "NUL.html" is a device on Windows
+        # Casefolded: on Windows "B001.html" and "b001.html" are one file.
+        if owner.get(stem.casefold(), bid) != bid:
             stem = f"{stem}-{hashlib.sha256(bid.encode('utf-8')).hexdigest()[:8]}"
-        owner[stem] = bid
+        owner[stem.casefold()] = bid
         slugs[bid] = stem
     return slugs
 

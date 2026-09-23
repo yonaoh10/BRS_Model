@@ -57,7 +57,10 @@ def dir_sha256(path: Path) -> str:
     """
     root = Path(path)
     top = hashlib.sha256()
-    for f in sorted(root.rglob("*")):
+    # Sorted by the relative parts as plain strings: sorting the Path objects
+    # themselves is case-INsensitive on Windows, so a model hashed on Linux
+    # ("README.md" before "config.json") failed preflight --deep on Windows.
+    for f in sorted(root.rglob("*"), key=lambda p: p.relative_to(root).parts):
         if not f.is_file():
             continue
         fh = hashlib.sha256()

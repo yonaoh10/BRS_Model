@@ -144,7 +144,11 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
         from callqa.pipeline import STAGES
         from callqa.state import StateDB
 
-        db_path = REPO_ROOT / "data" / "callqa_state.db"
+        # Beside the output folder it describes (data/output -> data/, and the
+        # demo's data/demo/output -> data/demo/), not a fixed repository path:
+        # pointed at a test or demo tree, the dashboard read - and, opening it,
+        # wrote to - the production database.
+        db_path = output_dir.parent / "callqa_state.db"
         if db_path.exists():
             state = StateDB(db_path)
             done_ids = {c["id"] for c in calls}

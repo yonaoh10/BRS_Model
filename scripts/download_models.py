@@ -37,13 +37,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from callqa.dotenv import load_dotenv  # noqa: E402
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+from callqa.dotenv import _decode_env, load_dotenv  # noqa: E402
 from callqa.ops.provenance import dir_sha256  # noqa: E402 - the one canonical hasher
 from callqa.portable import configure_stdio  # noqa: E402
 
@@ -186,38 +186,23 @@ def _record(models_dir: Path, role: str, model_id: str, local_path: Path) -> Non
     )
 
 
-def _write_llm_into_config(model_id: str) -> None:
-    """Point judge.model in config/config.yaml at the downloaded LLM.
+def _write_llm_into_env(model_path: str) -> None:
+    """Point the judge at the downloaded LLM, in this machine's .env.
 
-    Edits the one line rather than reserialising the file. Round-tripping it
-    through yaml.safe_dump deleted every comment in it, and those comments are
-    how the bank's operators know what the settings mean.
-
-    The path arrives with forward slashes (Path.as_posix), which Windows
-    accepts: inside a double-quoted YAML string a Windows backslash is an
-    escape character, and "models\\Qwen..." made config.yaml unreadable.
+    .env, not config/config.yaml: which file the judge serves is a fact about
+    THIS machine, like its keys, while config.yaml is the shipped, reviewed
+    configuration (a test holds it identical to the packaged defaults, and it
+    failed on every machine that had downloaded a model). The pipeline reads
+    CALLQA_JUDGE__MODEL from .env over the YAML.
     """
-    config_path = Path("config/config.yaml")
-    if not config_path.exists():
-        print("   note: config/config.yaml not found; set judge.model manually")
-        return
-    lines = config_path.read_text(encoding="utf-8").splitlines(keepends=True)
-    in_judge = False
-    for i, line in enumerate(lines):
-        if re.match(r"^judge:\s*$", line):
-            in_judge = True
-            continue
-        if in_judge and re.match(r"^\S", line):
-            break                                    # left the judge block
-        if in_judge and re.match(r"^\s+model:\s", line):
-            indent = line[: len(line) - len(line.lstrip())]
-            comment = line.split("#", 1)
-            trailing = f"  #{comment[1].rstrip()}" if len(comment) > 1 else ""
-            lines[i] = f'{indent}model: "{model_id}"{trailing}\n'
-            config_path.write_text("".join(lines), encoding="utf-8")
-            print(f"   config/config.yaml updated: judge.model = {model_id}")
-            return
-    print("   note: judge.model not found in config/config.yaml; set it manually")
+    env_path = ROOT / ".env"
+    line = f"CALLQA_JUDGE__MODEL={model_path}"
+    lines: list[str] = []
+    if env_path.exists():
+        lines = _decode_env(env_path.read_bytes()).splitlines()
+    kept = [x for x in lines if not x.strip().startswith("CALLQA_JUDGE__MODEL=")]
+    env_path.write_text("\n".join([*kept, line]) + "\n", encoding="utf-8")
+    print(f"   .env updated: {line}")
 
 
 def main() -> int:
@@ -365,14 +350,14 @@ def _download_llm(models_dir: Path, llm_model: str, token: str | None,
             raise RuntimeError(f"{llm_model} has no file named {gguf}. The .gguf file "
                                f"names are listed at https://huggingface.co/{llm_model}")
         _record(models_dir, "llm", llm_model, target)
-        _write_llm_into_config(path.as_posix())
+        _write_llm_into_env(path.as_posix())
         return
     model_id, path = _snapshot(llm_model, target, token)
     _record(models_dir, "llm", model_id, path)
     # The LOCAL PATH, not the repo id: snapshot_download(local_dir=...)
     # deliberately bypasses the Hugging Face cache, so an offline machine asked
     # to serve the repo id has nowhere to resolve it from and vLLM fails.
-    _write_llm_into_config(path.as_posix())
+    _write_llm_into_env(path.as_posix())
 
 
 def _download_ner(models_dir: Path, token: str | None) -> None:

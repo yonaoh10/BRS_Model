@@ -144,6 +144,8 @@ def disable_console_quick_edit() -> None:
     if not IS_WINDOWS:
         return
     try:
+        import atexit
+
         _kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
         _kernel32.GetStdHandle.restype = wintypes.HANDLE
         _kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
@@ -152,7 +154,10 @@ def disable_console_quick_edit() -> None:
         mode = wintypes.DWORD()
         if _kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
             extended_flags, quick_edit = 0x0080, 0x0040
-            _kernel32.SetConsoleMode(handle, (mode.value | extended_flags) & ~quick_edit)
+            if _kernel32.SetConsoleMode(handle, (mode.value | extended_flags) & ~quick_edit):
+                # The console belongs to the shell that started us: give it its
+                # setting back when we finish.
+                atexit.register(_kernel32.SetConsoleMode, handle, mode.value)
     except (OSError, AttributeError):  # no console (Scheduled Task): nothing to do
         pass
 

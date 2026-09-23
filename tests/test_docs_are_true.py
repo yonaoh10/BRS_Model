@@ -129,7 +129,7 @@ def _readable_env_names() -> set[str]:
 
 
 def _ids(path: Path) -> str:
-    return str(path.relative_to(REPO))
+    return path.relative_to(REPO).as_posix()     # the same test id on every OS
 
 
 @pytest.mark.parametrize("doc", DOCS, ids=_ids)
