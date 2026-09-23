@@ -58,10 +58,16 @@ This proves the install is correct. It needs no models, no GPU and no network,
 and it takes seconds.
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate     # recommended; see below
 pip install -r requirements.txt
 pip install -e .
 ./scripts/first_run.sh
 ```
+
+Use a virtual environment. Debian 12, Ubuntu 24.04 and RHEL 9 mark the system
+Python "externally managed" and refuse `pip install` into it outright, and RHEL
+ships no bare `pip` at all. On an air-gapped machine, `scripts/install_offline.sh`
+creates the environment for you from the wheels bundle (§4.3).
 
 It generates six synthetic calls, runs the complete pipeline over them in mock
 mode, writes reports, and starts the local dashboard. If
@@ -71,7 +77,7 @@ except the models is working.
 Run the test suite too — it is fast and needs nothing extra:
 
 ```bash
-python -m pytest -q          # ~330 tests
+python -m pytest -q          # the full suite, about a minute
 ruff check src tests scripts dashboard
 ```
 
@@ -146,6 +152,13 @@ Then on the target: `./scripts/install_offline.sh`, and set `HF_HUB_OFFLINE=1`
 and `TRANSFORMERS_OFFLINE=1` in the service environment. The pipeline never
 downloads, so these only guard against a library trying to phone home.
 
+**The diarization model is the one that does not live in `models/`.** pyannote
+loads through the *Hugging Face cache* of whichever user ran the download
+(`~/.cache/huggingface/hub` by default). Copy that directory across and point
+`HF_HOME` at its parent in the service environment. `callqa preflight` checks
+exactly this and says where it looked. Stereo recordings never need it; mono
+and dual-mono ones cannot be processed without it.
+
 ---
 
 ## 5. Serving the judge model
@@ -158,11 +171,11 @@ llama.cpp's server, or an internal inference gateway the bank already runs.
 `scripts/start_vllm.sh` is a worked example, not a requirement:
 
 ```bash
-CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32) \
-  ./scripts/start_vllm.sh models/<your-judge-model> 8000
+export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)     # the SERVER's key
+./scripts/start_vllm.sh models/<your-judge-model> 8000
 ```
 
-Then point the pipeline at whatever you started:
+Then point the pipeline at whatever you started, and give it the same key:
 
 ```yaml
 # config/config.yaml
@@ -170,6 +183,17 @@ judge:
   base_url: "http://127.0.0.1:8000/v1"
   model: "<the model id the server reports>"
 ```
+
+```bash
+# .env (or the service environment) - never in the YAML
+CALLQA_JUDGE__API_KEY=<the same value>
+```
+
+The two names differ by one underscore and that is not a typo:
+`CALLQA_JUDGE_API_KEY` is read by `start_vllm.sh`; `CALLQA_JUDGE__API_KEY`
+(double underscore) is the pipeline's override for `judge.api_key`. Miss the
+second and the server answers 401, which the pipeline reports as *refused*,
+not *unreachable* - the server is fine, the key is not.
 
 Two things that bite:
 
@@ -280,13 +304,30 @@ differently:
   of six or more digits) are recognised by form, with checksums where one
   exists.
 - *Shapeless* identifiers (mother's name, date of birth, address) have no form
-  at all and are recognised by the verification question that precedes them.
+  at all and are recognised by the verification question that precedes them,
+  or by the caller naming themselves ("קוראים לי ...", "שמי ...").
+- Account numbers are masked even when a currency word follows, with one
+  deliberate exception: "בחשבון" (*in* the account) introduces a balance, and
+  the amounts a banker quotes are what the compliance dimension is scored on.
+
+The redacted **audio** is silenced wherever the redacted **text** is masked, by
+whatever rule or model masked it. Where the audio stage cannot place a silence
+precisely, it silences the whole turn rather than risk an audible identifier.
 
 **Known limit, stated plainly:** a name mentioned in passing that nobody asked
-for — a third party named mid-conversation — is not masked. Nothing about the
-string marks it as an identifier and no question anchors it. Enabling
-`redaction.ner` adds a Hebrew NER model that helps, at a performance cost. This
-is a real residual risk and the bank should decide about it consciously.
+for — a third party named mid-conversation — is not masked by the rules.
+Nothing about the string marks it as an identifier and no question anchors it.
+Setting `redaction.ner: true` adds a Hebrew NER model for exactly this, at a
+performance cost; download it with `download_models.py --ner`. If it is enabled
+and the model is missing, the pipeline **refuses to start** rather than
+quietly running without it. This is a real residual risk with NER off, and the
+bank should decide about it consciously.
+
+**Name recordings by call, not by customer.** A recording's file name becomes
+the call id, and the call id appears in every artifact path, report title and
+log line. A file named after the customer's phone or ID number puts that
+number everywhere. The pipeline warns when it sees a long digit run in a call
+id, and masks it in validation messages, but it cannot rename your files.
 
 **Licences:**
 
@@ -311,6 +352,9 @@ is a real residual risk and the bank should decide about it consciously.
 | `could not find rubric.yaml` | Running from outside the project directory. Pass `--config`, or set `CALLQA_CONFIG_DIR`. |
 | Every call exits `2` on ingestion | ffmpeg is missing and the recordings are not plain WAV. |
 | Judge times out | Raise `judge.request_timeout_sec` and the reverse proxy's timeout. §5. |
+| Judge *refused* (401/403) | The server is running; `CALLQA_JUDGE__API_KEY` is missing or differs from the key the server was started with. |
+| "redaction.ner is on, but DictaBERT-NER could not be loaded" | Working as designed: NER was requested and is missing. `download_models.py --ner`, or set `redaction.ner: false`. |
+| Mono calls fail on diarization | The Hugging Face cache is not on this machine. §4.3. |
 | Both speakers attributed to one side | The recording is dual-mono (one microphone copied to both channels). The pipeline detects this and falls back to diarization; check `attribution_mode` in the transcript. |
 | Calls held with `needs_human_review` | Working as designed: role confidence below `speakers.min_role_confidence`, or the judge could not produce verified evidence. Use `callqa review-queue`. |
 | A call cannot be reproduced | `callqa verify <call>` names the input that changed. |

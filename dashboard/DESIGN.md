@@ -100,7 +100,15 @@ in-flight — a `server.py` fix made in this rebuild.
 
 ```bash
 python dashboard/server.py          # prints a URL with a session token
-python dashboard/qa_dashboard.py    # the accessibility harness (0 findings)
+```
+
+The accessibility harness is a DEVELOPMENT tool, not a runtime dependency, and
+it needs two things the deployment does not install: the Playwright package and
+a Chromium it can drive. Neither is in `requirements.txt`, deliberately.
+
+```bash
+pip install playwright && playwright install chromium   # dev machine only
+python dashboard/qa_dashboard.py    # contrast, focus, RTL and bidi checks (target: 0 findings)
 ```
 
 Read-only by design: it renders what the pipeline already wrote.

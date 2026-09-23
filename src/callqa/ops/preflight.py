@@ -76,6 +76,53 @@ def _verify_local_model(config: Config, role: str, model_dir: Path, deep: bool) 
     return Check(f"model:{role}", True, True, "present (fast check; use --deep to re-hash)")
 
 
+def _hf_hub_cache() -> Path:
+    """Where huggingface_hub keeps its cache, resolved the way it resolves it,
+    without importing it (it is deliberately not a runtime dependency)."""
+    import os
+
+    if os.environ.get("HF_HUB_CACHE"):
+        return Path(os.environ["HF_HUB_CACHE"])
+    home = os.environ.get("HF_HOME") or os.path.join(
+        os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "huggingface")
+    return Path(home) / "hub"
+
+
+def _diarization_check(config: Config) -> Check:
+    """Can the diarization model be loaded on THIS machine, offline?
+
+    Not critical - a genuinely stereo recording never needs it - but a mono or
+    dual-mono one cannot be processed without it, and that failure otherwise
+    surfaces on the first such call in the middle of a batch. The runtime
+    dependency is not models/: pyannote loads through the Hugging Face cache of
+    whoever ran the download, and on an air-gapped machine that cache has to
+    have been copied across and HF_HOME pointed at it.
+    """
+    model = config.speakers.diarization_model
+    if Path(model).exists():
+        return Check("model:diarization", True, False, f"local pipeline at {model}")
+    cached = _hf_hub_cache() / ("models--" + model.replace("/", "--"))
+    if cached.exists():
+        return Check("model:diarization", True, False, f"in the Hugging Face cache ({cached})")
+    return Check(
+        "model:diarization", False, False,
+        f"'{model}' is not in the Hugging Face cache at {_hf_hub_cache()}. Mono "
+        "recordings will fail. Run scripts/download_models.py --diarization as the "
+        "user that runs the pipeline, or copy that cache here and set HF_HOME."
+    )
+
+
+def _ner_check(config: Config) -> Check:
+    """redaction.ner is a privacy control; if it is on, its model must be here.
+    The redactor refuses to start without it, so find out now, not at call 1."""
+    model_dir = config.paths.models_dir / "dictabert-ner"
+    if model_dir.exists() and any(model_dir.iterdir()):
+        return Check("model:ner", True, True, f"present at {model_dir}")
+    return Check("model:ner", False, True,
+                 f"redaction.ner is on but {model_dir} is missing. Run "
+                 "scripts/download_models.py --ner, or set redaction.ner: false.")
+
+
 def _reachable(name: str, build) -> Check:  # noqa: ANN001
     try:
         build().check_connectivity()
@@ -91,6 +138,10 @@ def _engine_checks(config: Config, deep: bool) -> list[Check]:
     checks: list[Check] = []
     if config.asr.engine == "faster_whisper":
         checks.append(_verify_local_model(config, "asr", Path(config.asr.model_dir), deep))
+    if config.speakers.mode != "stereo":
+        checks.append(_diarization_check(config))
+    if config.redaction.ner:
+        checks.append(_ner_check(config))
     if config.judge.engine == "vllm":
         from callqa.judge.vllm_judge import VLLMJudge
         checks.append(_reachable("judge endpoint", lambda: VLLMJudge(config.judge)))

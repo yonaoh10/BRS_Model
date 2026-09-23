@@ -93,3 +93,31 @@ def test_disk_check_is_present_in_a_full_preflight(workspace) -> None:  # noqa: 
 def test_check_dataclass_shape() -> None:
     c = Check("x", True, True, "ok")
     assert c.name == "x" and c.ok and c.critical
+
+
+def test_preflight_finds_an_enabled_ner_model_missing_before_the_batch(tmp_path, monkeypatch):
+    """The redactor refuses to start when redaction.ner is on and the model is
+    absent; preflight must say so at second zero, not the batch at call one."""
+    from callqa.config import Config
+    from callqa.ops.preflight import _ner_check
+
+    config = Config()
+    config.paths.models_dir = tmp_path / "models"
+    config.redaction.ner = True
+    check = _ner_check(config)
+    assert not check.ok and check.critical
+    assert "download_models.py --ner" in check.detail
+
+
+def test_preflight_looks_for_diarization_where_pyannote_loads_it(tmp_path, monkeypatch):
+    """Not models/: pyannote loads through the Hugging Face cache of whoever
+    ran the download, which on an air-gapped machine must be copied across."""
+    from callqa.config import Config
+    from callqa.ops.preflight import _diarization_check
+
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "hub"))
+    config = Config()
+    missing = _diarization_check(config)
+    assert not missing.ok and not missing.critical       # stereo calls still run
+    (tmp_path / "hub" / "models--pyannote--speaker-diarization-community-1").mkdir(parents=True)
+    assert _diarization_check(config).ok

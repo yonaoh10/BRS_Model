@@ -137,3 +137,26 @@ def test_api_key_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("CALLQA_JUDGE__API_KEY", "from-env")
     assert load_config(None).judge.api_key == "from-env"
+
+
+def test_a_refused_api_key_is_not_reported_as_an_unreachable_server() -> None:
+    """HTTPError subclasses URLError, so a 401 from a running, correctly secured
+    server came out as "vLLM endpoint unreachable ... start it with
+    start_vllm.sh" - sending the operator to restart a server that was fine and
+    was only refusing a missing key."""
+    import io
+    import urllib.error
+    from unittest import mock
+
+    import pytest
+
+    from callqa.config import JudgeConfig
+    from callqa.judge.vllm_judge import VLLMJudge, VLLMJudgeError
+
+    refused = urllib.error.HTTPError("http://x/v1/models", 401, "Unauthorized",
+                                     {}, io.BytesIO(b""))
+    judge = VLLMJudge(JudgeConfig(base_url="http://127.0.0.1:8000/v1", model="m"))
+    with mock.patch("urllib.request.urlopen", side_effect=refused):
+        with pytest.raises(VLLMJudgeError, match="API key") as err:
+            judge.check_connectivity()
+    assert "unreachable" not in str(err.value)

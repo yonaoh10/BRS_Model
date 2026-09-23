@@ -71,3 +71,18 @@ def test_nothing_destroyed_when_all_recent(tmp_path: Path) -> None:
     _write(out / "audio" / "wav" / "R.mono.wav", "raw", 5)
     assert apply_retention(out, raw_days=90) == []
     assert (out / "transcripts" / "R.json").exists()
+
+
+def test_a_crash_orphaned_raw_temp_file_is_retired_too(tmp_path: Path) -> None:
+    """An atomic write that is killed mid-flight (SIGKILL, OOM, power loss)
+    leaves ".<call>.dialog.json.<random>.tmp" holding the complete unredacted
+    transcript. "transcripts/*.json" could never match it, so it outlived every
+    retention run while the command reported the raw data destroyed."""
+    out = tmp_path / "output"
+    orphan = _write(out / "transcripts" / ".C1.dialog.json.k3j2.tmp",
+                    '{"turns": [{"text": "raw"}]}', age_days=120)
+    kept = _write(out / "redacted" / "C1.json", '{"turns": []}', age_days=120)
+
+    expired = {e.path for e in find_expired(out, raw_days=90)}
+    assert orphan in expired
+    assert kept not in expired                    # derived, non-PII: kept

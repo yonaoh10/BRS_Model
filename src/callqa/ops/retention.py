@@ -25,7 +25,13 @@ logger = logging.getLogger(__name__)
 # RAW, PII-bearing artifacts. "transcripts/*.json" catches both the raw
 # transcript and the raw *.dialog.json. redacted/, scores/, reports/,
 # redacted_audio/ are DERIVED non-PII and are deliberately NOT listed.
-RAW_GLOBS = ["transcripts/*.json", "audio/wav/*"]
+# EVERYTHING in these two directories, not just the expected names. Every file
+# here is raw by definition, and "*.json" missed the one kind most likely to be
+# forgotten: the temp file an atomic write leaves behind when the process is
+# killed mid-write (SIGKILL, an OOM kill, power loss). It is named
+# ".<call>.dialog.json.<random>.tmp", holds the complete unredacted transcript,
+# and survived every retention run because of its suffix.
+RAW_GLOBS = ["transcripts/*", "audio/wav/*"]
 RETENTION_DIR = "retention"
 
 

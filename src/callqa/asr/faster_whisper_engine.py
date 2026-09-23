@@ -8,6 +8,7 @@ scripts/download_models.py on the bank server (never downloaded here).
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 from callqa.asr.mock_engine import _with_quality
@@ -40,6 +41,7 @@ class FasterWhisperEngine:
         self.config = config
         self._model_dir = model_dir
         self._model = None
+        self._load_lock = threading.Lock()
         # Intel macOS: ctranslate2 and torch each bundle libiomp5. LOAD ORDER
         # DECIDES SURVIVAL: ct2-then-torch ran a whole night of real calls;
         # torch-then-ct2 (torch arrives with silero VAD in the audio stage,
@@ -75,7 +77,15 @@ class FasterWhisperEngine:
         into one process for nothing, which is exactly the duplicate-libiomp
         setup that aborts or segfaults.
         """
-        if self._model is None:
+        # Double-checked under a lock. `run --max-workers N` shares ONE Engines
+        # across N threads, and this load is a multi-second C-extension call
+        # between the check and the assignment: two workers arriving together
+        # both loaded the model - ~1.5 GB each, on a GPU sized for one.
+        if self._model is not None:
+            return self._model
+        with self._load_lock:
+            if self._model is not None:
+                return self._model
             import os
             import sys
 

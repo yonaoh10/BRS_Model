@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 
 from callqa.config import SpeakersConfig
@@ -55,10 +56,19 @@ class LazyPyannoteDiarizer:
     def __init__(self, config: SpeakersConfig) -> None:
         self.config = config
         self._pipeline = None
+        # `run --max-workers N` shares one diarizer across N threads; without
+        # this, two mono calls arriving together each built the pipeline.
+        self._load_lock = threading.Lock()
 
     # -- loading ----------------------------------------------------------
 
     def _load(self):  # noqa: ANN202 - the pyannote Pipeline type is a lazy import
+        if self._pipeline is not None:
+            return self._pipeline
+        with self._load_lock:
+            return self._load_locked()
+
+    def _load_locked(self):  # noqa: ANN202
         if self._pipeline is not None:
             return self._pipeline
         try:

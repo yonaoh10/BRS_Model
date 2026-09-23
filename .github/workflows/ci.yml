@@ -26,8 +26,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install
-        run: pip install -e . ruff pytest
+      # The PINNED set from requirements.txt - the exact versions the offline
+      # bundle carries to the bank - and the package with --no-deps, so
+      # pyproject's loose floors cannot pull in anything newer. CI used to
+      # install `-e .` alone, which resolved those floors against whatever PyPI
+      # had that day: it validated a dependency set nobody would ever deploy.
+      - name: Install (the pinned set the bank installs)
+        run: pip install -r requirements.txt && pip install --no-deps -e .
       - name: Lint
         run: ruff check src tests scripts dashboard
       - name: Tests
@@ -51,7 +56,7 @@ jobs:
           set -eux
           git archive --format=tar --prefix=extract/ HEAD | tar -x -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP/extract"
-          pip install -e .
+          pip install --no-deps -e .
           # The suite too, not just the pipeline: the deployment instructions
           # tell the engineer to run pytest from the extract, and a test that
           # shells out to git fails to COLLECT there while passing here.
@@ -75,8 +80,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install
-        run: pip install -e . ruff pytest
+      - name: Install (the pinned set the bank installs)
+        run: pip install -r requirements.txt && pip install --no-deps -e .
       - name: Delete the optional dashboard
         run: rm -rf dashboard/
       - name: Lint, test and run the pipeline without it

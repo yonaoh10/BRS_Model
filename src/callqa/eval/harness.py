@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import statistics
 import subprocess
 import sys
@@ -95,7 +96,23 @@ def _generate_synthetic_inputs(dest: Path) -> None:
 
 
 def evaluate(config: Config, golden_dir: Path | None = None) -> EvalReport:
-    """Run the pipeline over the golden set and score it against the references."""
+    """Run the pipeline over the golden set and score it against the references.
+
+    The pipeline runs into a private temporary tree, which is DELETED when the
+    evaluation ends, whether it succeeded or not. It used to be left behind, and
+    that tree holds everything the pipeline writes - including the RAW,
+    unredacted transcripts. On the synthetic set that is harmless; pointed at
+    the real golden set this harness exists for, it left customer transcripts in
+    /tmp on every run, outside the output directory that retention sweeps.
+    """
+    work = Path(tempfile.mkdtemp(prefix="callqa-eval-"))       # created 0700
+    try:
+        return _evaluate_in(work, config, golden_dir)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def _evaluate_in(work: Path, config: Config, golden_dir: Path | None) -> EvalReport:
     from callqa.engines import build_engines
     from callqa.pipeline import process_call
     from callqa.rubric import load_rubric
@@ -105,7 +122,6 @@ def evaluate(config: Config, golden_dir: Path | None = None) -> EvalReport:
     references = _load_references(golden_dir)
     rubric = load_rubric()
 
-    work = Path(tempfile.mkdtemp(prefix="callqa-eval-"))
     is_real_golden_set = (golden_dir / "calls").exists()
     input_dir = golden_dir if is_real_golden_set else work / "input"
     if not is_real_golden_set:

@@ -152,10 +152,20 @@ the bank server by `scripts/download_models.py`.
    ```
    The script writes `models/MODELS_MANIFEST.json` and points `judge.model`
    in `config/config.yaml` at the downloaded LLM.
-5. **Go offline**: `export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`.
-6. **Serve the judge**: `./scripts/start_vllm.sh <model-id-or-path> 8000`
-   (see the script header for quantization flags). The pipeline only checks
-   connectivity to `judge.base_url`; it never launches vLLM.
+5. **Go offline**: `export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`. The
+   diarization model loads from the Hugging Face cache of the user who ran the
+   download, not from `models/`: on another machine, copy that cache across
+   and point `HF_HOME` at it. `callqa preflight` checks it.
+6. **Serve the judge** on any OpenAI-compatible server. With vLLM, the key is
+   mandatory - the script refuses to start without it:
+   ```bash
+   export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)      # the server's key
+   ./scripts/start_vllm.sh <model-id-or-path> 8000
+   export CALLQA_JUDGE__API_KEY=$CALLQA_JUDGE_API_KEY       # the pipeline's copy
+   ```
+   Note the double underscore in the second name: it is the config override
+   for `judge.api_key`. Without it the server answers 401. The pipeline only
+   checks connectivity to `judge.base_url`; it never launches a server.
 7. **Place inputs**: recordings under `data/input/calls/`, plus
    `metadata.csv` and (for calibration) `human_ratings.csv`.
 8. **Validate**: `python -m callqa validate-inputs` — fails with a problem
@@ -181,7 +191,8 @@ the bank server by `scripts/download_models.py`.
 | CUDA OOM (ASR) | set `asr.compute_type: int8` in config |
 | CUDA OOM (vLLM) | use an AWQ/GPTQ model, lower `--max-model-len`, `--gpu-memory-utilization 0.9` |
 | "mono recording but no diarizer" / mono files detected | install server deps, `download_models.py --diarization` with `HF_TOKEN` (accept pyannote terms on HF) |
-| vLLM endpoint unreachable | start `scripts/start_vllm.sh`; check `judge.base_url` port; `curl localhost:8000/v1/models` |
+| Judge endpoint *unreachable* | nothing is listening: start the model server; check the port in `judge.base_url` |
+| Judge endpoint *refused (401/403)* | the server is up; `CALLQA_JUDGE__API_KEY` is missing or differs from the server's key |
 | Low ASR confidence (`quality` block flags many segments) | check recording sample rate/noise; confirm `asr.language: he`; consider re-recording setup |
 | ASR model directory missing/empty | run `download_models.py --asr` and check `paths.models_dir` |
 | Call stuck as "already being processed" | previous process died mid-call: the lock is auto-stolen when the pid is dead; otherwise delete the row from the `locks` table in the state DB |
@@ -352,9 +363,19 @@ make test                                        # חבילת הבדיקות
    הסקריפט כותב `models/MODELS_MANIFEST.json` ומעדכן את `judge.model`
    בקובץ `config/config.yaml` כך שיצביע על המודל שהורד.
 5. **מעבר למצב אופליין**: `export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`.
-6. **הפעלת השופט**: `./scripts/start_vllm.sh <model-id-or-path> 8000`
-   (דגלי הכימות מפורטים בכותרת הסקריפט). הצינור רק בודק קישוריות אל
-   `judge.base_url`; הוא לעולם אינו מפעיל את vLLM בעצמו.
+   מודל הדיאריזציה נטען מה-cache של Hugging Face של המשתמש שהריץ את ההורדה,
+   לא מ-`models/`: במכונה אחרת יש להעתיק את ה-cache ולהפנות אליו את `HF_HOME`.
+   `callqa preflight` בודק זאת.
+6. **הפעלת השופט** על כל שרת תואם-OpenAI. עם vLLM המפתח הוא חובה — הסקריפט
+   מסרב לעלות בלעדיו:
+   ```bash
+   export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)      # המפתח של השרת
+   ./scripts/start_vllm.sh <model-id-or-path> 8000
+   export CALLQA_JUDGE__API_KEY=$CALLQA_JUDGE_API_KEY       # העותק של הצינור
+   ```
+   שימו לב לקו התחתון הכפול בשם השני: זו הדריסה של `judge.api_key`. בלעדיו
+   השרת עונה 401. הצינור רק בודק קישוריות אל `judge.base_url`; הוא לעולם
+   אינו מפעיל שרת בעצמו.
 7. **הצבת הקלט**: הקלטות תחת `data/input/calls/`, יחד עם `metadata.csv`
    ו-(לצורך כיול) `human_ratings.csv`.
 8. **ולידציה**: `python -m callqa validate-inputs` — נכשל עם טבלת בעיות
@@ -379,7 +400,8 @@ make test                                        # חבילת הבדיקות
 | CUDA OOM (תמלול) | הגדר `asr.compute_type: int8` בקונפיגורציה |
 | CUDA OOM (vLLM) | השתמש במודל AWQ/GPTQ, הקטן את `--max-model-len`, הוסף `--gpu-memory-utilization 0.9` |
 | "mono recording but no diarizer" / זוהו קבצי מונו | התקן את תלויות השרת, הרץ `download_models.py --diarization` עם `HF_TOKEN` (יש לאשר את תנאי pyannote ב-HF) |
-| נקודת הקצה של vLLM אינה זמינה | הפעל את `scripts/start_vllm.sh`; בדוק את הפורט ב-`judge.base_url`; `curl localhost:8000/v1/models` |
+| נקודת הקצה של השופט *אינה זמינה* | אף שרת לא מאזין: הפעילו את שרת המודל; בדקו את הפורט ב-`judge.base_url` |
+| נקודת הקצה של השופט *סירבה (401/403)* | השרת פעיל; `CALLQA_JUDGE__API_KEY` חסר או שונה מהמפתח של השרת |
 | ביטחון תמלול נמוך (בלוק `quality` מסמן הרבה מקטעים) | בדוק את קצב הדגימה והרעש בהקלטה; ודא `asr.language: he`; שקול לשנות את מערך ההקלטה |
 | תיקיית מודל ה-ASR חסרה או ריקה | הרץ `download_models.py --asr` ובדוק את `paths.models_dir` |
 | שיחה תקועה במצב "already being processed" | תהליך קודם קרס באמצע: הנעילה נגנבת אוטומטית כאשר ה-pid מת; אחרת מחק את השורה מטבלת `locks` במסד המצב |

@@ -77,9 +77,20 @@ class MetadataValidation:
         return not self.problems
 
     def problem_table(self) -> str:
+        """The problems, safe to log.
+
+        A problem quotes the offending value so the operator can find it - and
+        the offending value is a call id or a recording's file name, which is
+        exactly where a customer's number turns up when recordings are named
+        after the caller. Every other error surface in the package already went
+        through sanitize_error; this one printed the value verbatim to the log.
+        The row and column still say where to look.
+        """
+        from callqa.redaction import sanitize_error
+
         lines = [f"{'row':>4}  {'column':<16} problem", f"{'-'*4}  {'-'*16} {'-'*40}"]
         for p in self.problems:
-            lines.append(f"{p.row:>4}  {p.column:<16} {p.problem}")
+            lines.append(f"{p.row:>4}  {p.column:<16} {sanitize_error(p.problem, limit=300)}")
         return "\n".join(lines)
 
 

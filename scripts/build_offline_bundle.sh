@@ -13,8 +13,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p wheels
 
-# Target interpreter for the wheels. Change PY_VERSION to match the server.
-PY_VERSION="${PY_VERSION:-3.11}"
+PY="$(command -v python3 || command -v python)"
+# The Python version the wheels are built for. It defaults to the interpreter
+# running this script - not a hardcoded 3.11, which produced a bundle that
+# install_offline.sh could not install on a 3.12 server even when the bundle
+# was built on that very machine. Set PY_VERSION to target a different server.
+PY_VERSION="${PY_VERSION:-$("$PY" -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')}"
 
 # SEVERAL platform tags, not one, and this is the whole reason the script used
 # to download nothing at all.
@@ -35,7 +39,7 @@ PLATFORMS=(
 )
 
 download() {
-    pip download --only-binary=:all: "${PLATFORMS[@]}" \
+    "$PY" -m pip download --only-binary=:all: "${PLATFORMS[@]}" \
         --python-version "$PY_VERSION" -r "$1" -d wheels/
 }
 
@@ -49,7 +53,7 @@ if [[ "${1:-}" != "--core-only" ]]; then
 fi
 
 # --no-build-isolation on the target needs these present locally.
-pip download --only-binary=:all: "${PLATFORMS[@]}" \
+"$PY" -m pip download --only-binary=:all: "${PLATFORMS[@]}" \
     --python-version "$PY_VERSION" -d wheels/ setuptools wheel
 
 echo

@@ -221,67 +221,118 @@ def main() -> int:
 
     if not any([args.all, args.asr, args.diarization, args.llm, args.ner]):
         parser.error("nothing selected: pass --all or one of --asr/--diarization/--llm/--ner")
+    # Usage errors are caught BEFORE any download. `--all` without
+    # `--llm-model` used to be discovered only after the 1.6 GB ASR model had
+    # already come down.
+    if (args.all or args.llm) and not args.llm_model:
+        parser.error("--all/--llm need --llm-model <hf-model-id> (candidates in --help)")
 
     _banner()
     models_dir: Path = args.models_dir
     models_dir.mkdir(parents=True, exist_ok=True)
     token = os.environ.get("HF_TOKEN")
 
-    try:
-        if args.all or args.asr:
-            model_id, path = _snapshot(
-                ASR_MODEL_ID, models_dir / "ivrit-whisper-large-v3-turbo-ct2"
-            )
-            _record(models_dir, "asr", model_id, path)
+    # Each model is its own step, and one failing does not stop the others.
+    # With `--all` and no HF_TOKEN, the gated diarization step used to
+    # `return 1` - silently skipping the JUDGE model after it, the one model
+    # without which the pipeline produces no scores at all, while its message
+    # named only diarization as outstanding.
+    steps = []
+    if args.all or args.asr:
+        steps.append(("asr", lambda: _download_asr(models_dir)))
+    if args.all or args.diarization:
+        steps.append(("diarization", lambda: _download_diarization(models_dir, token)))
+    if args.all or args.llm:
+        steps.append(("llm", lambda: _download_llm(models_dir, args.llm_model, token)))
+    if args.ner:
+        steps.append(("ner", lambda: _download_ner(models_dir, token)))
 
-        if args.all or args.diarization:
-            if not token:
-                if args.all:
-                    print("\nNOTE: --diarization needs HF_TOKEN. The ASR model above")
-                    print("      downloaded fine; re-run with --diarization once the")
-                    print("      token is set.")
-                print("ERROR: --diarization requires the HF_TOKEN environment variable.")
-                print("Accept the model conditions once on huggingface.co:")
-                print(f"  {DIARIZATION_MODEL_ID}")
-                return 1
-            model_id, path = _snapshot(
-                DIARIZATION_MODEL_ID, models_dir / DIARIZATION_MODEL_ID.replace("/", "--"), token
-            )
-            _record(models_dir, "diarization", model_id, path)
-            cache = _warm_diarization_cache(DIARIZATION_MODEL_ID, token)
-            if cache:
-                _update_manifest(models_dir, {
-                    "role": "diarization_cache",
-                    "model_id": DIARIZATION_MODEL_ID,
-                    "local_path": str(cache),
-                    "size_bytes": _dir_size(cache),
-                    "downloaded_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                })
+    outcomes: list[tuple[str, str | None]] = []
+    for role, run in steps:
+        try:
+            run()
+            outcomes.append((role, None))
+        except SystemExit:
+            raise                        # huggingface_hub missing: nothing else can work
+        except Exception as exc:  # noqa: BLE001 - reported per model, below
+            outcomes.append((role, _explain(exc, role)))
+            print(f"   FAILED: {role}")
 
-        if args.all or args.llm:
-            if not args.llm_model:
-                print("ERROR: --llm requires --llm-model <hf-model-id>.")
-                print("Candidates by VRAM budget are listed in --help.")
-                return 1
-            model_id, path = _snapshot(
-                args.llm_model, models_dir / args.llm_model.replace("/", "--"), token
-            )
-            _record(models_dir, "llm", model_id, path)
-            # The LOCAL PATH, not the repo id: snapshot_download(local_dir=...)
-            # deliberately bypasses the Hugging Face cache, so an offline
-            # machine asked to serve the repo id has nowhere to resolve it
-            # from and vLLM fails at startup.
-            _write_llm_into_config(str(path))
-
-        if args.ner:
-            model_id, path = _snapshot(NER_MODEL_ID, models_dir / "dictabert-ner", token)
-            _record(models_dir, "ner", model_id, path)
-    except ImportError:
-        print("ERROR: huggingface_hub is not installed (pip install huggingface_hub).")
+    print()
+    print("=" * 72)
+    for role, problem in outcomes:
+        print(f"  {'OK    ' if problem is None else 'FAILED'}  {role}")
+        if problem:
+            for line in problem.splitlines():
+                print(f"          {line}")
+    print("=" * 72)
+    if any(problem for _, problem in outcomes):
+        print("Some models did not download. Fix the above and re-run the failed ones;")
+        print("models that succeeded are recorded and will not be fetched again.")
         return 1
-
     print("Done. Set HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 before running the pipeline.")
     return 0
+
+
+def _explain(exc: Exception, role: str) -> str:
+    """What went wrong, in terms of what to DO about it.
+
+    Only ImportError used to be handled, and it always printed "huggingface_hub
+    is not installed" - a gated 401, a mistyped model id, a full disk and a
+    dropped connection all escaped as raw tracebacks instead.
+    """
+    import errno
+
+    name = type(exc).__name__
+    text = str(exc)
+    if name == "GatedRepoError" or " 401" in text or " 403" in text:
+        return ("the model is GATED: accept its conditions once on huggingface.co with\n"
+                "the account behind HF_TOKEN, then re-run. (A 401/403 here never means\n"
+                "the model is missing.)")
+    if name == "RepositoryNotFoundError" or " 404" in text:
+        return "no such model id on Hugging Face - check the spelling."
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        return "the disk is full. The models need ~25 GB in total."
+    return f"{name}: {text[:300]}"
+
+
+def _download_asr(models_dir: Path) -> None:
+    model_id, path = _snapshot(ASR_MODEL_ID, models_dir / "ivrit-whisper-large-v3-turbo-ct2")
+    _record(models_dir, "asr", model_id, path)
+
+
+def _download_diarization(models_dir: Path, token: str | None) -> None:
+    if not token:
+        raise RuntimeError(
+            "needs HF_TOKEN. This model is gated: accept its conditions once on\n"
+            f"https://huggingface.co/{DIARIZATION_MODEL_ID} then set HF_TOKEN in .env.\n"
+            "Only mono recordings need it; stereo ones run without it.")
+    model_id, path = _snapshot(
+        DIARIZATION_MODEL_ID, models_dir / DIARIZATION_MODEL_ID.replace("/", "--"), token)
+    _record(models_dir, "diarization", model_id, path)
+    cache = _warm_diarization_cache(DIARIZATION_MODEL_ID, token)
+    if cache:
+        _update_manifest(models_dir, {
+            "role": "diarization_cache",
+            "model_id": DIARIZATION_MODEL_ID,
+            "local_path": str(cache),
+            "size_bytes": _dir_size(cache),
+            "downloaded_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        })
+
+
+def _download_llm(models_dir: Path, llm_model: str, token: str | None) -> None:
+    model_id, path = _snapshot(llm_model, models_dir / llm_model.replace("/", "--"), token)
+    _record(models_dir, "llm", model_id, path)
+    # The LOCAL PATH, not the repo id: snapshot_download(local_dir=...)
+    # deliberately bypasses the Hugging Face cache, so an offline machine asked
+    # to serve the repo id has nowhere to resolve it from and vLLM fails.
+    _write_llm_into_config(str(path))
+
+
+def _download_ner(models_dir: Path, token: str | None) -> None:
+    model_id, path = _snapshot(NER_MODEL_ID, models_dir / "dictabert-ner", token)
+    _record(models_dir, "ner", model_id, path)
 
 
 if __name__ == "__main__":

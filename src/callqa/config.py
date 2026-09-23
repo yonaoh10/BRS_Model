@@ -82,6 +82,17 @@ class AudioConfig(StrictModel):
     vad: Literal["silero", "energy"] = "silero"
     min_speech_ms: int = Field(default=250, ge=0)
 
+    @model_validator(mode="after")
+    def _silero_rate(self) -> AudioConfig:
+        # Silero only knows 8 and 16 kHz. Caught here, at config load, rather
+        # than on the first call of a batch.
+        if self.vad == "silero" and self.target_sample_rate not in (8000, 16000):
+            raise ValueError(
+                f"audio.vad=silero supports target_sample_rate 8000 or 16000, "
+                f"not {self.target_sample_rate}"
+            )
+        return self
+
 
 class ASRConfig(StrictModel):
     # faster_whisper = in-process on the machine running the pipeline. mock =

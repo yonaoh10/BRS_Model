@@ -78,3 +78,23 @@ def test_compare_flags_the_right_regressions() -> None:
     # a change within tolerance is not a regression
     tiny = _report(redaction_recall_mean=0.99)
     assert compare(tiny, good) == []
+
+
+def test_evaluation_leaves_no_raw_transcripts_behind(tmp_path, monkeypatch) -> None:
+    """The harness runs the whole pipeline into a temporary tree, and that tree
+    holds RAW, unredacted transcripts. It was never deleted: harmless on the
+    synthetic set, and customer transcripts left in /tmp on every run once
+    pointed at the real golden set it exists for."""
+    import tempfile
+
+    from callqa.config import Config
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    config = Config()
+    config.run.mock = True
+    config.audio.vad = "energy"
+    config.asr.engine = "mock"
+    config.judge.engine = "mock"
+    evaluate(config)
+    leftovers = [p for p in tmp_path.iterdir() if p.name.startswith("callqa-eval-")]
+    assert not leftovers, f"raw evaluation tree left behind: {leftovers}"

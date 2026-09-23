@@ -169,3 +169,30 @@ def test_the_env_example_only_names_variables_the_code_reads() -> None:
     real = _readable_env_names() | {"HF_TOKEN"}
     keys = set(parse_env_file((REPO / ".env.example").read_text(encoding="utf-8")))
     assert keys <= real, f"stale keys in .env.example: {sorted(keys - real)}"
+
+
+_SCRIPT_CALL_RE = re.compile(r"(?:python3?\s+)?(scripts/[\w-]+\.(?:py|sh))([^\n`|]*)")
+_FLAG_RE = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]*)")
+
+
+@pytest.mark.parametrize("doc", DOCS, ids=_ids)
+def test_every_script_flag_a_document_shows_exists(doc: Path) -> None:
+    """A documented `--flag` the script does not accept is a command that fails
+    on the first try. It nearly shipped in the very commit that added this:
+    `prepare_real_call.py --input`, for a script whose flag is `--mono`.
+
+    Checked against the script's source text, which is where argparse flags and
+    shell case-labels both live; fenced blocks are included, since that is
+    where commands are copied from."""
+    text = doc.read_text(encoding="utf-8")
+    unknown: set[str] = set()
+    for script, rest in _SCRIPT_CALL_RE.findall(text):
+        path = REPO / script
+        if not path.exists():
+            continue                    # the path test reports a missing script
+        source = path.read_text(encoding="utf-8", errors="replace")
+        for flag in _FLAG_RE.findall(rest):
+            if f'"{flag}"' not in source and f"'{flag}'" not in source \
+                    and f"{flag})" not in source and f"{flag}=" not in source:
+                unknown.add(f"{script} {flag}")
+    assert not unknown, f"{_ids(doc)} shows script flags that do not exist: {sorted(unknown)}"

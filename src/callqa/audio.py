@@ -295,6 +295,9 @@ def energy_vad(
     return [s for s in merged if s.duration >= min_len]
 
 
+SILERO_RATES = frozenset({8000, 16000})
+
+
 def silero_vad(wav_path: Path, min_speech_ms: int = 250) -> list[VADSegment]:
     """Silero VAD (lazy import; weights ship inside the silero-vad wheel).
 
@@ -308,10 +311,21 @@ def silero_vad(wav_path: Path, min_speech_ms: int = 250) -> list[VADSegment]:
     from silero_vad import get_speech_timestamps, load_silero_vad
 
     model = _get_silero_model(load_silero_vad)
-    samples, _ = _read_wav(wav_path)
+    samples, rate = _read_wav(wav_path)
+    # Silero was trained at 8 and 16 kHz only, and get_speech_timestamps
+    # assumes 16 kHz unless told otherwise. The rate used to be read and thrown
+    # away, so `audio.target_sample_rate: 8000` produced timestamps off by 2x -
+    # and not merely rescaled: the window size is chosen from the rate, so
+    # detection itself degraded and whole stretches of speech were lost.
+    if rate not in SILERO_RATES:
+        raise AudioError(
+            f"silero VAD supports {sorted(SILERO_RATES)} Hz, but {wav_path.name} is "
+            f"{rate} Hz. Set audio.target_sample_rate to 16000, or audio.vad to energy."
+        )
     audio = torch.from_numpy(samples[:, 0].copy())
     stamps = get_speech_timestamps(
-        audio, model, return_seconds=True, min_speech_duration_ms=min_speech_ms
+        audio, model, sampling_rate=rate, return_seconds=True,
+        min_speech_duration_ms=min_speech_ms,
     )
     return [VADSegment(start=float(s["start"]), end=float(s["end"])) for s in stamps]
 

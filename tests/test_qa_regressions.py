@@ -1097,3 +1097,51 @@ class TestEgressLogHygiene:
             assert "/v1/private" not in msgs                    # full path not disclosed
         finally:
             monkeypatch.delenv("CALLQA_JUDGE__BASE_URL", raising=False)
+
+
+def test_a_metadata_problem_does_not_print_a_customer_number_to_the_log(tmp_path: Path) -> None:
+    """Recordings named after the caller put the caller's number in the file
+    name, and a validation problem quoted it verbatim into the log - the one
+    error surface in the package that skipped sanitize_error."""
+    csv = tmp_path / "metadata.csv"
+    csv.write_text("call_id,banker_id,file_name\n"
+                   "C1,B1,../0521234567.wav\n", encoding="utf-8")
+    table = load_metadata(csv).problem_table()
+    assert "0521234567" not in table
+    assert "file_name" in table                   # still says where to look
+
+
+def test_concurrent_workers_load_the_asr_model_once(monkeypatch, tmp_path: Path) -> None:
+    """`run --max-workers N` shares one Engines across N threads, and the ASR
+    model is loaded lazily with a multi-second call between the check and the
+    assignment. Unsynchronised, workers arriving together each loaded it -
+    ~1.5 GB apiece on a GPU sized for one."""
+    import sys
+    import threading
+    import time
+    import types
+
+    from callqa.asr.faster_whisper_engine import FasterWhisperEngine
+    from callqa.config import ASRConfig
+
+    loads = []
+
+    class SlowModel:
+        def __init__(self, *a, **k) -> None:
+            loads.append(1)
+            time.sleep(0.2)                       # the window the race lives in
+
+    monkeypatch.setitem(sys.modules, "faster_whisper",
+                        types.SimpleNamespace(WhisperModel=SlowModel))
+    engine = FasterWhisperEngine.__new__(FasterWhisperEngine)
+    engine.config = ASRConfig()
+    engine._model_dir = tmp_path
+    engine._model = None
+    engine._load_lock = threading.Lock()
+
+    threads = [threading.Thread(target=lambda: engine.model) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(loads) == 1, f"the model was loaded {len(loads)} times"

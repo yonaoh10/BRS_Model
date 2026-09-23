@@ -49,11 +49,28 @@ class VLLMJudge:
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status != 200:
-                    raise VLLMJudgeError(f"vLLM /models returned HTTP {resp.status}")
+                    raise VLLMJudgeError(f"judge /models returned HTTP {resp.status}")
+        except urllib.error.HTTPError as exc:
+            # Caught BEFORE URLError, which it subclasses. An HTTP status means
+            # the server is up and answered; reporting it as "unreachable, start
+            # it" sent the operator to restart a server that was running fine
+            # and was simply refusing a missing or wrong API key.
+            if exc.code in (401, 403):
+                raise VLLMJudgeError(
+                    f"the judge endpoint at {self.config.base_url} is running but "
+                    f"refused the request (HTTP {exc.code}): the API key is missing "
+                    "or wrong. Set CALLQA_JUDGE__API_KEY to the key the server was "
+                    "started with."
+                ) from exc
+            raise VLLMJudgeError(
+                f"the judge endpoint at {self.config.base_url} answered HTTP "
+                f"{exc.code} to GET /models; check that judge.base_url ends in /v1."
+            ) from exc
         except (urllib.error.URLError, OSError) as exc:
             raise VLLMJudgeError(
-                f"vLLM endpoint unreachable at {self.config.base_url}. "
-                "Start it with scripts/start_vllm.sh."
+                f"judge endpoint unreachable at {self.config.base_url}: nothing is "
+                "listening there. Start your model server (scripts/start_vllm.sh is "
+                "one example) and check judge.base_url."
             ) from exc
         logger.info("vLLM endpoint reachable at %s", self.config.base_url)
 
