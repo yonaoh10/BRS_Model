@@ -13,6 +13,12 @@ import json
 import sys
 from pathlib import Path
 
+from callqa.portable import configure_stdio
+
+# The call's error text quotes the judge in Hebrew, and CI redirects stdout to
+# a cp1252 stream - the same trap every shipped entry point already handles.
+configure_stdio()
+
 log = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
 call_id = sys.argv[2]
 out = Path("data/output")
