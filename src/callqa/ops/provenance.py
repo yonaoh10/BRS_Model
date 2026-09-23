@@ -29,6 +29,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 def git_sha() -> str:
     """The commit SHA (with a -dirty suffix if the tree is modified), or 'none'
     when this is not a git checkout — the normal air-gapped deployment case."""
+    # The .git check is not redundant with the rev-parse below. `git -C <dir>`
+    # walks UP until it finds a repository, so an extracted release unpacked
+    # anywhere inside somebody else's checkout would stamp THAT repository's
+    # commit onto every run manifest: a provenance record that is confidently,
+    # silently wrong. No .git of our own means no sha.
+    if not (_REPO_ROOT / ".git").exists():
+        return "none"
     try:
         head = subprocess.run(
             ["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"],

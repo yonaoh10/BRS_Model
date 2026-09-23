@@ -38,6 +38,32 @@ class CallMetrics(BaseModel):
     redaction: dict = Field(default_factory=dict)
 
 
+# What each number in a report actually means, carried INSIDE the report.
+#
+# On the synthetic golden set the references are the mock pipeline's own
+# output, and the mock ASR emits the reference text verbatim. So WER, CER,
+# role accuracy and QWK are 0.0 / 1.0 / 1.0 by construction and will stay
+# there however good or bad the real system becomes. They are regression
+# sentinels - they detect a CHANGE from known-good - and they are not accuracy
+# measurements. Only a real, human-labelled golden set can produce those.
+#
+# Redaction recall and precision are the exception, and the reason the
+# distinction is worth writing down rather than leaving in a code comment: the
+# gold identifiers are hand-labelled independently of the detector, so those
+# two are genuine measurements even here.
+#
+# This ships in every report because a bare "wer_mean: 0.0" in a JSON file is
+# read by a bank as "this system transcribes perfectly". It does not.
+SYNTHETIC_SET_NOTE = (
+    "On the synthetic golden set, wer/cer/role_accuracy/judge_qwk are REGRESSION "
+    "SENTINELS, not accuracy: the references are the mock pipeline's own output, "
+    "so these are 0.0/1.0 by construction and only move when behaviour changes. "
+    "redaction_recall and redaction_precision ARE real measurements - the gold "
+    "identifiers are hand-labelled independently of the detector. Point "
+    "eval.golden_dir at a human-labelled set of real calls to measure accuracy."
+)
+
+
 class EvalReport(BaseModel):
     created_at: str
     n_calls: int
@@ -51,6 +77,9 @@ class EvalReport(BaseModel):
     judge_qwk: float | None = None
     calls: list[CallMetrics] = Field(default_factory=list)
     fingerprint: dict = Field(default_factory=dict)
+    # "synthetic" unless a --golden-dir of real, labelled calls was supplied.
+    golden_set: str = "synthetic"
+    what_these_numbers_mean: str = SYNTHETIC_SET_NOTE
 
 
 def _load_references(golden_dir: Path) -> dict:
@@ -76,8 +105,9 @@ def evaluate(config: Config, golden_dir: Path | None = None) -> EvalReport:
     rubric = load_rubric()
 
     work = Path(tempfile.mkdtemp(prefix="callqa-eval-"))
-    input_dir = golden_dir if (golden_dir / "calls").exists() else work / "input"
-    if input_dir == work / "input":
+    is_real_golden_set = (golden_dir / "calls").exists()
+    input_dir = golden_dir if is_real_golden_set else work / "input"
+    if not is_real_golden_set:
         _generate_synthetic_inputs(input_dir)
     out_dir = work / "output"
 
@@ -148,6 +178,11 @@ def evaluate(config: Config, golden_dir: Path | None = None) -> EvalReport:
         judge_qwk=judge_qwk,
         calls=call_metrics,
         fingerprint=fingerprint(eval_config, rubric.sha256),
+        golden_set="real" if is_real_golden_set else "synthetic",
+        what_these_numbers_mean=(
+            "Measured against a supplied golden set of labelled calls."
+            if is_real_golden_set else SYNTHETIC_SET_NOTE
+        ),
     )
 
 

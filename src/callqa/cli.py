@@ -564,8 +564,27 @@ def cmd_eval(args: argparse.Namespace) -> int:
           f"precision {report.redaction_precision_mean}  F1 {report.redaction_f1_mean}")
     print(f"  judge QWK {report.judge_qwk}")
     print(f"  report: {report_path}")
+    if report.golden_set == "synthetic":
+        # Printed every time, not once in a doc nobody opens: these numbers are
+        # quoted in status reports, and "WER 0.0" reads as an accuracy claim.
+        print("\n  NOTE: synthetic golden set. WER/CER/role/QWK are regression "
+              "sentinels,\n        not accuracy - the references are the mock "
+              "pipeline's own output.\n        Redaction recall/precision ARE "
+              "real (gold identifiers are hand-labelled).")
 
     if args.set_baseline:
+        # A baseline is a claim that some exact version of the system produced
+        # these numbers. Blessing one from a modified working tree records a
+        # commit that never contained the code that was measured, so the claim
+        # cannot be checked by anybody, ever. The previous baseline shipped
+        # with git_sha "...-dirty" for exactly this reason.
+        sha = report.fingerprint.get("git_sha", "none")
+        if sha.endswith("-dirty") and not args.force:
+            print("refusing to bless a baseline from a modified working tree: the "
+                  f"fingerprint would record {sha}, which is not a version anyone "
+                  "can check out.\nCommit first, or pass --force if you know why "
+                  "you want an unverifiable baseline.", file=sys.stderr)
+            return EXIT_FAILED
         baseline_path = DEFAULT_GOLDEN.parent / "baseline.json"
         atomic_write_model(baseline_path, report)
         print(f"baseline updated: {baseline_path}")
