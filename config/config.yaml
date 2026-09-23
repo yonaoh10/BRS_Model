@@ -57,3 +57,16 @@ judge:
 reporting:
   group_comparison: median
   language: he
+
+# How long RAW, PII-bearing artifacts live before `callqa retention --apply`
+# destroys them: raw transcripts, raw audio, and the original recordings the
+# `watch` driver moved into input/processed/ and input/failed/. Redacted
+# transcripts, redacted audio, scores and reports are never touched. Set this
+# to the bank's policy; `callqa retention` (no flag) lists what would go.
+retention:
+  raw_days: 90
+
+monitoring:
+  # Machine cost per GPU-hour, for the cost line in each run manifest.
+  # 0 = report GPU-hours only, no currency figure.
+  gpu_cost_per_hour: 0.0

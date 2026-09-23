@@ -40,7 +40,7 @@ from callqa.ops.provenance import dir_sha256  # noqa: E402 - the one canonical h
 
 ASR_MODEL_ID = "ivrit-ai/whisper-large-v3-turbo-ct2"  # Apache-2.0
 DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"  # CC-BY-4.0; accept terms on HF
-NER_MODEL_ID = "dicta-il/dictabert-ner"  # optional
+NER_MODEL_ID = "dicta-il/dictabert-ner"  # optional; licence recorded from its card at download
 
 
 def _banner() -> None:

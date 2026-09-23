@@ -12,7 +12,13 @@ terms of each must be reviewed before deployment:
   ivrit-ai/whisper-large-v3-turbo-ct2          Apache-2.0
   pyannote/speaker-diarization-community-1     CC-BY-4.0 (weights),
                                                MIT (pyannote.audio code)
+  dicta-il/dictabert-ner (optional, NER)       see its model card
   the judge LLM                                varies by the model chosen
+
+The licence each model's own card declares is recorded, at download time, in
+models/MODELS_MANIFEST.json. Several candidate judge models ship under
+bespoke community licences with usage restrictions rather than OSI
+open-source licences; the one actually chosen must be reviewed.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
