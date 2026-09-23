@@ -103,11 +103,17 @@ def _hf_hub_cache() -> Path:
     without importing it (it is deliberately not a runtime dependency)."""
     import os
 
-    if os.environ.get("HF_HUB_CACHE"):
-        return Path(os.environ["HF_HUB_CACHE"])
+    def expand(value: str) -> Path:
+        # huggingface_hub expands both: HF_HOME=%LOCALAPPDATA%\hf in .env works
+        # at run time, so preflight has to read it the same way.
+        return Path(os.path.expandvars(os.path.expanduser(value)))
+
+    for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        if os.environ.get(name):
+            return expand(os.environ[name])
     home = os.environ.get("HF_HOME") or os.path.join(
         os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "huggingface")
-    return Path(home) / "hub"
+    return expand(home) / "hub"
 
 
 def _diarization_check(config: Config) -> Check:

@@ -7,19 +7,27 @@ launches vLLM itself; it only checks connectivity at startup.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
+import socket
+import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
-from callqa.config import JudgeConfig
+from callqa.config import LOOPBACK_HOSTS, JudgeConfig
 from callqa.judge.base import JudgeRequest
 
 logger = logging.getLogger(__name__)
 
 
 class VLLMJudgeError(RuntimeError):
+    pass
+
+
+class _StillLoading(Exception):
     pass
 
 
@@ -33,6 +41,14 @@ class VLLMJudge:
                 "judge.model is still the placeholder. Set the served model id in "
                 "config/config.yaml (see scripts/download_models.py --llm)."
             )
+        host = (urlparse(config.base_url).hostname or "").lower()
+        # A server on this machine is never reached through a proxy. Python
+        # applies the Windows system proxy (set by group policy on most bank
+        # desktops) to every URL, and its "<local>" bypass only covers names
+        # without a dot - so 127.0.0.1 went to the corporate proxy. Remote
+        # servers follow the system's proxy settings, as the browser does.
+        handlers = [urllib.request.ProxyHandler({})] if host in LOOPBACK_HOSTS else []
+        self._open = urllib.request.build_opener(*handlers).open
 
     def _headers(self) -> dict[str, str]:
         # A real User-Agent, because CDNs in front of hosted endpoints
@@ -43,11 +59,45 @@ class VLLMJudge:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         return headers
 
-    def check_connectivity(self) -> None:
+    def _refuse_public_endpoint(self) -> None:
+        """Transcripts stay inside the bank's network unless told otherwise."""
+        if self.config.allow_public_endpoint:
+            return
+        host = urlparse(self.config.base_url).hostname or ""
+        try:
+            addresses = {info[4][0] for info in socket.getaddrinfo(host, None)}
+        except OSError:
+            return            # unresolvable: the connection fails on its own
+        public = sorted(a for a in addresses
+                        if ipaddress.ip_address(a.split("%")[0]).is_global)
+        if public:
+            raise VLLMJudgeError(
+                f"judge.base_url points at {host}, a public internet address ({public[0]}). "
+                "Transcripts do not leave the bank's network: use the bank's own judge "
+                "server, or set judge.allow_public_endpoint: true if this is really "
+                "intended. Nothing was sent.")
+
+    def check_connectivity(self, wait_for_loading: float = 180.0) -> None:
+        self._refuse_public_endpoint()
         url = f"{self.config.base_url.rstrip('/')}/models"
+        deadline = time.monotonic() + wait_for_loading
+        while True:
+            try:
+                self._models_listing(url)
+                return
+            except _StillLoading:
+                if time.monotonic() >= deadline:
+                    raise VLLMJudgeError(
+                        f"the judge server at {self.config.base_url} is still loading its "
+                        f"model after {wait_for_loading:.0f}s. Wait for it to finish and "
+                        "run again.") from None
+                logger.info("judge server is loading its model; waiting ...")
+                time.sleep(5)
+
+    def _models_listing(self, url: str) -> None:
         req = urllib.request.Request(url, headers=self._headers(), method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with self._open(req, timeout=10) as resp:
                 if resp.status != 200:
                     raise VLLMJudgeError(f"judge /models returned HTTP {resp.status}")
                 listing = resp.read()
@@ -56,6 +106,11 @@ class VLLMJudge:
             # the server is up and answered; reporting it as "unreachable, start
             # it" sent the operator to restart a server that was running fine
             # and was simply refusing a missing or wrong API key.
+            if exc.code == 503:
+                # llama-server answers 503 "Loading model" until its model is
+                # in memory - a minute or two for a 4 GB file an antivirus is
+                # scanning. That is not a wrong URL.
+                raise _StillLoading() from exc
             if exc.code in (401, 403):
                 raise VLLMJudgeError(
                     f"the judge endpoint at {self.config.base_url} is running but "
@@ -215,6 +270,14 @@ class VLLMJudge:
         r"maximum context length is (\d+) tokens and your request has (\d+) input tokens"
     )
 
+    @staticmethod
+    def _llamacpp_budget(detail: str) -> tuple[int, int] | None:
+        """llama.cpp's form of the same 400: a JSON error of type
+        exceed_context_size_error carrying n_ctx and n_prompt_tokens."""
+        ctx = re.search(r'"n_ctx"\s*:\s*(\d+)', detail)
+        used = re.search(r'"n_prompt_tokens"\s*:\s*(\d+)', detail)
+        return (int(ctx.group(1)), int(used.group(1))) if ctx and used else None
+
     def _chat(self, messages: list[dict[str, str]], response_format: dict,
               max_tokens: int | None = None) -> str:
         payload = {
@@ -232,9 +295,7 @@ class VLLMJudge:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(
-                req, timeout=self.config.request_timeout_sec
-            ) as resp:
+            with self._open(req, timeout=self.config.request_timeout_sec) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             # The response body is where vLLM says WHY (context length,
@@ -248,8 +309,10 @@ class VLLMJudge:
             # fixed max_tokens eventually no longer fits the model context.
             # vLLM's 400 names the exact budget - shrink to it and resend.
             budget = self._CTX_BUDGET_RE.search(detail)
-            if budget and max_tokens is None:
-                ctx, used = int(budget.group(1)), int(budget.group(2))
+            ctx_used = ((int(budget.group(1)), int(budget.group(2))) if budget
+                        else self._llamacpp_budget(detail))
+            if ctx_used and max_tokens is None:
+                ctx, used = ctx_used
                 available = ctx - used - 16
                 if available >= 512:
                     logger.info("max_tokens %d does not fit (%d input / %d ctx); "

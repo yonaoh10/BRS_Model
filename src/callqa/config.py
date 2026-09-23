@@ -19,7 +19,9 @@ from callqa.resources import load_yaml
 ENV_PREFIX = "CALLQA_"
 ENV_NESTED_DELIMITER = "__"
 
-LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"}
+# Not 0.0.0.0: it is what a server's "listening on" line prints, not an
+# address anything can connect to (Windows refuses it outright).
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def validate_endpoint(url: str, field_name: str) -> str:
@@ -102,6 +104,8 @@ class ASRConfig(StrictModel):
     model_dir: str = "{models_dir}/ivrit-whisper-large-v3-turbo-ct2"
     language: str = "he"
     compute_type: str = "float16"
+    # auto = the GPU when one can actually run CTranslate2, else the CPU.
+    device: Literal["auto", "cpu", "cuda"] = "auto"
     word_timestamps: bool = True
     vad_filter: bool = True
     low_confidence_logprob: float = -1.0
@@ -171,6 +175,11 @@ class JudgeConfig(StrictModel):
     request_timeout_sec: float = Field(default=600.0, gt=0)
     # Transcript token budget (approx.) before the long-call chunking rule kicks in.
     max_transcript_chars: int = Field(default=24000, gt=0)
+    # A judge endpoint on the PUBLIC internet is refused unless this is set:
+    # redacted transcripts are still customer conversations, and a mistyped or
+    # injected base_url must not quietly send them to a hosted API. Checked
+    # when the connection is first made (the name is resolved then).
+    allow_public_endpoint: bool = False
     # Optional bearer token sent as `Authorization: Bearer ...` (vLLM --api-key,
     # or any remote OpenAI-compatible endpoint). Prefer the env var
     # CALLQA_JUDGE__API_KEY over writing secrets into config.yaml.

@@ -998,7 +998,7 @@ class TestRound3JudgeProse:
         def fake_urlopen(req, timeout=0):
             yield io.BytesIO(_json.dumps(body).encode("utf-8"))
 
-        with mock.patch.object(vj.urllib.request, "urlopen", fake_urlopen), \
+        with mock.patch.object(judge, "_open", fake_urlopen), \
              pytest.raises(vj.VLLMJudgeError, match="no text content"):
             judge._chat([{"role": "user", "content": "x"}], None)
 

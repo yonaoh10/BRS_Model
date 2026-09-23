@@ -170,6 +170,7 @@ CALLQA_JUDGE__MODEL=<שם המודל שהשרת מדווח>
 .venv\Scripts\python scripts\start_llama_server.py models\dicta-il--dictalm2.0-instruct-GGUF\dictalm2.0-instruct.Q4_K_M.gguf
 ```
 
+- מוסיפים ל־`.env` את השורה `CALLQA_JUDGE__REQUEST_TIMEOUT_SEC=3600`: על מעבד, שיחה אחת יכולה לקחת יותר מ־10 דקות.
 - הסקריפט קורא את המפתח מ־`.env` בעצמו, ומאזין רק למחשב המקומי (127.0.0.1).
 - אם מופיעה הודעה שהפורט תפוס (למשל כי משתמש אחר באותו שרת VDI כבר מריץ שרת כזה), מריצים עם `--port 8001` ומוסיפים ל־`.env` את השורה `CALLQA_JUDGE__BASE_URL=http://127.0.0.1:8001/v1`.
 - לפני שנשלח תמלול, התוכנה מוודאת שהשרת שעונה לה מריץ את המודל שהוגדר לה, כדי ששיחות לא יישלחו לשרת של מישהו אחר.
@@ -493,6 +494,7 @@ The recordings themselves never go to the server. Only the transcript, after the
 .venv\Scripts\python scripts\start_llama_server.py models\dicta-il--dictalm2.0-instruct-GGUF\dictalm2.0-instruct.Q4_K_M.gguf
 ```
 
+- Add the line `CALLQA_JUDGE__REQUEST_TIMEOUT_SEC=3600` to `.env`: on a CPU, one call can take more than 10 minutes.
 - The script reads the key from `.env` itself, and listens on this machine only (127.0.0.1).
 - If it says the port is in use (for example because another user of the same VDI host already runs such a server), run it with `--port 8001` and add `CALLQA_JUDGE__BASE_URL=http://127.0.0.1:8001/v1` to `.env`.
 - Before any transcript is sent, the program checks that the server answering it serves the model it was configured with, so calls are never sent to someone else's server.

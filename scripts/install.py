@@ -229,14 +229,20 @@ def main(argv: list[str] | None = None) -> int:
     _say(f"Linked the project into the environment ({pth.name}).")
     if verify(python) != 0:
         return _fail("the environment was built but callqa does not import in it.")
-    if args.server and _run([str(python), "-c", ENGINE_CHECK]) != 0:
-        hint = ""
-        if IS_WINDOWS:
-            hint = (" On Windows this is almost always a missing Microsoft Visual C++ "
-                    "2015-2022 Redistributable (x64) - msvcp140.dll, which torch and "
-                    "ctranslate2 need and Python does not ship. Installing it needs admin "
-                    "rights: ask IT for vc_redist.x64.exe, then run this again.")
-        return _fail("the model engines are installed but do not load." + hint)
+    if args.server:
+        check = subprocess.run([str(python), "-c", ENGINE_CHECK], capture_output=True,
+                               encoding="utf-8", errors="replace",
+                               env=dict(os.environ, PYTHONUTF8="1"))
+        print(check.stdout, end="")
+        if check.returncode != 0:
+            print(check.stderr[-2000:], file=sys.stderr)
+            hint = ""
+            if IS_WINDOWS and ("DLL" in check.stderr or "msvcp" in check.stderr.lower()):
+                hint = (" A DLL failed to load: on Windows that is almost always a missing "
+                        "Microsoft Visual C++ 2015-2022 Redistributable (x64), which torch "
+                        "and ctranslate2 need and Python does not ship. Installing it needs "
+                        "admin rights: ask IT for vc_redist.x64.exe, then run this again.")
+            return _fail("the model engines are installed but do not load (see above)." + hint)
 
     run = r".venv\Scripts\python" if IS_WINDOWS else ".venv/bin/python"
     if venv != ROOT / ".venv":

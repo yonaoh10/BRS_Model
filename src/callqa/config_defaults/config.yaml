@@ -28,7 +28,8 @@ asr:
   # must stay in SINGLE quotes - inside double quotes a backslash is an escape.
   model_dir: '{models_dir}/ivrit-whisper-large-v3-turbo-ct2'  # PLACEHOLDER - populated by scripts/download_models.py
   language: he            # MUST be forced; never autodetect
-  compute_type: float16   # use int8 on CPU
+  compute_type: float16   # GPU; on a machine without a usable GPU int8 is used automatically
+  device: auto            # auto | cpu | cuda
   word_timestamps: true
   vad_filter: true
 

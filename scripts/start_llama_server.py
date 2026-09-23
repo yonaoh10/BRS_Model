@@ -5,6 +5,8 @@ r"""Serve the judge LLM with llama.cpp - the way to run it on Windows.
 
     --port N        default 8000 (judge.base_url is http://localhost:8000/v1)
     --threads N     CPU threads for generation (default: llama.cpp's choice)
+    --ctx-size N    context window in tokens (default 16384: a long call's
+                    transcript, the rubric and a full scorecard must all fit)
     --server PATH   llama-server executable, if it is not under tools/ or on PATH
 
 vLLM, the server scripts/start_vllm.sh starts, runs only on Linux with an
@@ -54,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("model", type=Path, help="the .gguf file")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--threads", type=int, default=None)
+    parser.add_argument("--ctx-size", type=int, default=16384)
     parser.add_argument("--server", type=Path, default=None)
     args = parser.parse_args(argv)
 
@@ -96,7 +99,10 @@ def main(argv: list[str] | None = None) -> int:
         probe.close()
 
     cmd = [server, "--model", str(args.model), "--host", "127.0.0.1",
-           "--port", str(args.port), "--ctx-size", "8192", "--jinja"]
+           "--port", str(args.port), "--ctx-size", str(args.ctx_size),
+           # One request at a time gets the WHOLE context; with the default
+           # slots the window is divided between parallel requests.
+           "--parallel", "1", "--jinja"]
     if args.threads:
         cmd += ["--threads", str(args.threads)]
     print(f"Serving {args.model.name} at http://127.0.0.1:{args.port}/v1 (Ctrl+C stops it)",

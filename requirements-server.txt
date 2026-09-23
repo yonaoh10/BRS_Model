@@ -3,7 +3,10 @@
 # All of these are imported lazily; the callqa package imports cleanly without them.
 faster-whisper==1.1.1
 silero-vad==6.2.1
-ctranslate2==4.5.0
+# 4.6.2, not 4.5.0: on Windows 4.5.0 imports pkg_resources at startup, which
+# current setuptools no longer ships - ASR failed on every call. 4.6.2 keeps
+# manylinux2014 wheels (glibc 2.17), so older Linux servers still install it.
+ctranslate2==4.6.2
 presidio-analyzer==2.2.357
 presidio-anonymizer==2.2.357
 # 4.x is required for the community-1 pipeline and its exclusive output.

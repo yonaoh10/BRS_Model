@@ -108,3 +108,14 @@ def test_telephony_wav_is_read_without_ffmpeg(tmp_path: Path, monkeypatch) -> No
     assert rate == 16000 and data.shape[1] == 1 and abs(len(data) / rate - 3.0) < 0.1
     window = audio_mod._decode_stereo_window(src, 0.0, 3.0)
     assert window is not None and window.shape[1] == 2
+
+
+def test_device_choice_never_asks_a_cpu_for_float16(monkeypatch) -> None:  # noqa: ANN001
+    from callqa.asr import faster_whisper_engine as fw
+
+    _fake_ct2(monkeypatch, gpus=0)
+    assert fw.choose_device("auto", "float16") == ("cpu", "int8")
+    assert fw.choose_device("cpu", "float16") == ("cpu", "int8")
+    assert fw.choose_device("cuda", "float16") == ("cuda", "float16")   # the operator's call
+    monkeypatch.setattr(fw, "_cuda_usable", lambda: True)
+    assert fw.choose_device("auto", "float16") == ("cuda", "float16")

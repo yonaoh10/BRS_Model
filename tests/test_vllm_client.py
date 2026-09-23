@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -156,7 +158,7 @@ def test_a_refused_api_key_is_not_reported_as_an_unreachable_server() -> None:
     refused = urllib.error.HTTPError("http://x/v1/models", 401, "Unauthorized",
                                      {}, io.BytesIO(b""))
     judge = VLLMJudge(JudgeConfig(base_url="http://127.0.0.1:8000/v1", model="m"))
-    with mock.patch("urllib.request.urlopen", side_effect=refused):
+    with mock.patch.object(judge, "_open", side_effect=refused):
         with pytest.raises(VLLMJudgeError, match="API key") as err:
             judge.check_connectivity()
     assert "unreachable" not in str(err.value)
@@ -171,3 +173,56 @@ def test_a_server_serving_another_model_gets_no_transcript(fake_server) -> None:
         judge.check_connectivity()
     same_file = VLLMJudge(JudgeConfig(model="models\\x\\test-model", base_url=base_url))
     same_file.check_connectivity()                  # a path to the served model is fine
+
+
+def test_a_local_judge_is_never_reached_through_a_proxy(monkeypatch) -> None:
+    """Windows applies the system proxy to every URL, and its <local> bypass
+    misses 127.0.0.1 - judge requests went to the corporate proxy."""
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+    judge = VLLMJudge(JudgeConfig(model="m", base_url="http://127.0.0.1:8000/v1"))
+    handlers = judge._open.__self__.handlers
+    assert not any(isinstance(h, urllib.request.ProxyHandler) and h.proxies for h in handlers)
+    # ...whereas the default opener, which it replaced, would have used it:
+    default = urllib.request.build_opener().handlers
+    assert any(isinstance(h, urllib.request.ProxyHandler) and h.proxies for h in default)
+
+
+def test_a_public_judge_endpoint_is_refused_before_anything_is_sent(monkeypatch) -> None:
+    import socket
+
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda host, port: [(None, None, None, "", ("8.8.8.8", 0))])
+    judge = VLLMJudge(JudgeConfig(model="m", base_url="https://api.example.com/v1"))
+    with pytest.raises(VLLMJudgeError, match="public internet"):
+        judge.check_connectivity()
+    allowed = VLLMJudge(JudgeConfig(model="m", base_url="https://api.example.com/v1",
+                                    allow_public_endpoint=True))
+    allowed._refuse_public_endpoint()                 # explicitly allowed: no refusal
+
+
+def test_a_judge_still_loading_its_model_is_waited_for(fake_server, monkeypatch) -> None:
+    """llama-server answers 503 until its model is loaded; that is not a wrong URL."""
+    import io
+
+    _server, base_url = fake_server
+    judge = VLLMJudge(JudgeConfig(model="test-model", base_url=base_url))
+    real_open = judge._open
+    calls = {"n": 0}
+
+    def loading_then_up(req, timeout=0):  # noqa: ANN001
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError(req.full_url, 503, "Loading model", {},
+                                         io.BytesIO(b'{"message":"Loading model"}'))
+        return real_open(req, timeout=timeout)
+
+    monkeypatch.setattr(judge, "_open", loading_then_up)
+    monkeypatch.setattr("callqa.judge.vllm_judge.time.sleep", lambda s: None)
+    judge.check_connectivity()
+    assert calls["n"] == 2
+
+
+def test_llama_cpp_context_overflow_shrinks_max_tokens() -> None:
+    detail = ('{"error":{"code":400,"message":"the request exceeds the available context '
+              'size","type":"exceed_context_size_error","n_prompt_tokens":9000,"n_ctx":16384}}')
+    assert VLLMJudge._llamacpp_budget(detail) == (16384, 9000)

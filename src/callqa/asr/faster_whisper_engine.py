@@ -8,6 +8,7 @@ scripts/download_models.py on the bank server (never downloaded here).
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from pathlib import Path
 
@@ -20,6 +21,41 @@ logger = logging.getLogger(__name__)
 
 # Half-precision types CTranslate2 only computes on a CUDA GPU.
 _GPU_ONLY_COMPUTE = {"float16", "int8_float16", "bfloat16", "int8_bfloat16"}
+
+
+def _cuda_usable() -> bool:
+    """Can CTranslate2 really run on a GPU here? A device count only needs the
+    NVIDIA driver; a Windows (vGPU) desktop often has the driver and not the
+    CUDA 12 cuBLAS / cuDNN 9 libraries, and the model then fails to load."""
+    try:
+        import ctranslate2
+
+        if ctranslate2.get_cuda_device_count() <= 0:
+            return False
+    except (ImportError, AttributeError, RuntimeError):
+        return False
+    if sys.platform == "win32":
+        import ctypes
+
+        for dll in ("cublas64_12.dll", "cudnn_ops64_9.dll"):
+            try:
+                ctypes.WinDLL(dll)
+            except OSError:
+                logger.warning("an NVIDIA GPU is present but %s is not: ASR runs on the "
+                               "CPU (install the CUDA 12 / cuDNN 9 runtime to use it)", dll)
+                return False
+    return True
+
+
+def choose_device(device: str, compute_type: str) -> tuple[str, str]:
+    """(device, compute_type) that will actually load on this machine."""
+    if device == "auto":
+        device = "cuda" if _cuda_usable() else "cpu"
+    if device == "cpu" and compute_type in _GPU_ONLY_COMPUTE:
+        logger.warning("no usable CUDA GPU: asr.compute_type=%s needs one; using int8 on "
+                       "the CPU (set asr.compute_type: int8 to silence this)", compute_type)
+        compute_type = "int8"
+    return device, compute_type
 
 
 def _usable_compute_type(requested: str) -> str:
@@ -129,9 +165,11 @@ class FasterWhisperEngine:
             from faster_whisper import WhisperModel  # lazy import
 
             # local_files_only guards against any accidental network access.
+            device, compute_type = choose_device(self.config.device, self.config.compute_type)
             self._model = WhisperModel(
                 str(self._model_dir),
-                compute_type=_usable_compute_type(self.config.compute_type),
+                device=device,
+                compute_type=compute_type,
                 local_files_only=True,
             )
             logger.info("faster-whisper model loaded from %s", self._model_dir)

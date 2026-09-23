@@ -407,7 +407,11 @@ def location_risk(path: Path) -> str | None:
     return None
 
 
-_OWNER_ONLY_SIDS = {"S-1-5-18", "S-1-5-32-544"}          # SYSTEM, Administrators
+# SYSTEM, Administrators, and two placeholders that always mean the object's
+# own owner: OWNER RIGHTS (Python 3.12.4+ puts it on every mkdtemp folder) and
+# CREATOR OWNER (inherit-only; becomes whoever creates a child - who must
+# already have access to create one).
+_OWNER_ONLY_SIDS = {"S-1-5-18", "S-1-5-32-544", "S-1-3-4", "S-1-3-0"}
 
 
 def _allowed_sids(path: Path) -> list[str] | None:  # pragma: no cover - Windows only
