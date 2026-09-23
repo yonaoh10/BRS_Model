@@ -12,8 +12,11 @@ read-only and deletable.
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
+
+from callqa.ingestion import _read_text_any_encoding
 
 
 class ReviewError(ValueError):
@@ -37,7 +40,7 @@ def _existing_verdicts(ratings_csv: Path) -> set[tuple[str, str]]:
     pairs: set[tuple[str, str]] = set()
     if not ratings_csv.exists():
         return pairs
-    with ratings_csv.open(encoding="utf-8-sig", newline="") as fh:
+    with io.StringIO(_read_text_any_encoding(ratings_csv), newline="") as fh:
         for row in csv.DictReader(fh):
             cid, rater = (row.get("call_id") or "").strip(), (row.get("rater_id") or "").strip()
             if cid and rater:
@@ -80,7 +83,7 @@ def record_review(ratings_csv: Path, call_id: str, rater_id: str,
     # The file has a header only if its first line is one.
     existing_header = None
     if ratings_csv.exists() and ratings_csv.stat().st_size > 0:
-        with ratings_csv.open(encoding="utf-8-sig", newline="") as fh:
+        with io.StringIO(_read_text_any_encoding(ratings_csv), newline="") as fh:
             existing_header = next(csv.reader(fh), None)
     has_header = bool(existing_header)
     if has_header:  # align to the file's own column order

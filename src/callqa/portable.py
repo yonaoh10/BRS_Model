@@ -112,8 +112,12 @@ def exit_when_process_ends(pid: int) -> None:
             _kernel32.WaitForSingleObject(handle, _INFINITE)
             os._exit(0)
     else:
+        is_parent = os.getppid() == pid
+
         def _wait() -> None:
-            while os.getppid() == pid:
+            # A dead parent shows as reparenting at once; any other process as
+            # its pid disappearing.
+            while pid_alive(pid) and (not is_parent or os.getppid() == pid):
                 time.sleep(2.0)
             os._exit(0)
     threading.Thread(target=_wait, name="parent-watch", daemon=True).start()

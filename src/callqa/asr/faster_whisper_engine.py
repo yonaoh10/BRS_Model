@@ -18,6 +18,32 @@ from callqa.models import Speaker, Transcript, TranscriptSegment, VADSegment, Wo
 logger = logging.getLogger(__name__)
 
 
+# Half-precision types CTranslate2 only computes on a CUDA GPU.
+_GPU_ONLY_COMPUTE = {"float16", "int8_float16", "bfloat16", "int8_bfloat16"}
+
+
+def _usable_compute_type(requested: str) -> str:
+    """The shipped default (float16) is for the GPU server. On a machine with
+    no CUDA GPU - every bank VDI desktop - CTranslate2 refuses it with
+    "Requested float16 compute type, but the target device or backend do not
+    support efficient float16 computation", and every call failed at ASR
+    until someone found the one config line to change. int8 is what the CPU
+    runs best; the substitution is logged, never silent."""
+    if requested not in _GPU_ONLY_COMPUTE:
+        return requested
+    try:
+        import ctranslate2  # lazy: comes with faster-whisper
+
+        if ctranslate2.get_cuda_device_count() > 0:
+            return requested
+    except (ImportError, AttributeError, RuntimeError):
+        return requested     # cannot tell; let the engine report its own error
+    logger.warning("no CUDA GPU on this machine: asr.compute_type=%s needs one; "
+                   "using int8 on the CPU (set asr.compute_type: int8 to silence this)",
+                   requested)
+    return "int8"
+
+
 class FasterWhisperEngine:
     name = "faster_whisper"
 
@@ -102,7 +128,7 @@ class FasterWhisperEngine:
             # local_files_only guards against any accidental network access.
             self._model = WhisperModel(
                 str(self._model_dir),
-                compute_type=self.config.compute_type,
+                compute_type=_usable_compute_type(self.config.compute_type),
                 local_files_only=True,
             )
             logger.info("faster-whisper model loaded from %s", self._model_dir)

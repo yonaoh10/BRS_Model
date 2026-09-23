@@ -79,6 +79,12 @@ DOCS = _tracked_docs()
 _OPTIONAL_DIRS = ("dashboard",)
 
 
+def _as_posix(span: str) -> str:
+    """The Windows instructions write `scripts\\install.py`; it is the same file."""
+    span = span.replace("\\", "/")
+    return span[2:] if span.startswith("./") else span
+
+
 def _resolves(candidate: str) -> bool:
     # Written by a run, so absent from a fresh checkout by design.
     if candidate.startswith(("data/", "models/", "wheels/", "logs/")):
@@ -130,7 +136,7 @@ def _ids(path: Path) -> str:
 def test_every_repo_file_a_document_points_at_exists(doc: Path) -> None:
     text = doc.read_text(encoding="utf-8")
     missing = sorted({
-        span for span in _CODE_SPAN_RE.findall(text)
+        span for span in map(_as_posix, _CODE_SPAN_RE.findall(text))
         if _PATH_RE.match(span) and not _resolves(span)
     })
     assert not missing, f"{_ids(doc)} points at files that do not exist: {missing}"
@@ -171,7 +177,7 @@ def test_the_env_example_only_names_variables_the_code_reads() -> None:
     assert keys <= real, f"stale keys in .env.example: {sorted(keys - real)}"
 
 
-_SCRIPT_CALL_RE = re.compile(r"(?:python3?\s+)?(scripts/[\w-]+\.(?:py|sh))([^\n`|]*)")
+_SCRIPT_CALL_RE = re.compile(r"(scripts[\\/][\w-]+\.(?:py|sh))([^\n`|]*)")
 _FLAG_RE = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]*)")
 
 
@@ -187,6 +193,7 @@ def test_every_script_flag_a_document_shows_exists(doc: Path) -> None:
     text = doc.read_text(encoding="utf-8")
     unknown: set[str] = set()
     for script, rest in _SCRIPT_CALL_RE.findall(text):
+        script = _as_posix(script)
         path = REPO / script
         if not path.exists():
             continue                    # the path test reports a missing script

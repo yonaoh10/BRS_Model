@@ -13,12 +13,19 @@ Usage:
     python scripts/download_models.py --llm --llm-model <hf-model-id>
     python scripts/download_models.py --ner              # optional
 
+    # Windows / no GPU: ONE quantized file for llama.cpp instead of the full model
+    python scripts/download_models.py --llm --llm-model dicta-il/dictalm2.0-instruct-GGUF \
+        --llm-gguf dictalm2.0-instruct.Q4_K_M.gguf
+
 LLM candidates by VRAM budget (pass the chosen id via --llm-model):
   ~16-24 GB : dicta-il/dictalm2.0-instruct          (7B, fp16 ~16GB; Hebrew-tuned)
   ~24 GB    : a 12-27B instruct model quantized AWQ/GPTQ
               (e.g. google/gemma-3-27b-it with AWQ quantization)
   >=48 GB   : meta-llama/Llama-3.3-70B-Instruct AWQ (gated; needs HF_TOKEN)
 Pick the largest model that fits; use --max-model-len 8192 in vLLM either way.
+No NVIDIA GPU (a Windows VDI desktop): a 4-bit GGUF of the 7B model (~4.4 GB)
+served by llama.cpp on the CPU - see scripts/start_llama_server.py. Slow
+(minutes per call), but it runs on any machine with 16 GB of memory.
 
 After each download a MODELS_MANIFEST.json is written into the models dir;
 the pipeline uses it (and the model directories) to fail fast with a clear
@@ -37,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from callqa.ops.provenance import dir_sha256  # noqa: E402 - the one canonical hasher
+from callqa.portable import configure_stdio  # noqa: E402
 
 ASR_MODEL_ID = "ivrit-ai/whisper-large-v3-turbo-ct2"  # Apache-2.0
 DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"  # CC-BY-4.0; accept terms on HF
@@ -51,7 +59,8 @@ def _banner() -> None:
     print("=" * 72)
 
 
-def _snapshot(model_id: str, target: Path, token: str | None = None) -> tuple[str, Path]:
+def _snapshot(model_id: str, target: Path, token: str | None = None,
+              allow_patterns: list[str] | None = None) -> tuple[str, Path]:
     try:
         from huggingface_hub import snapshot_download
     except ImportError:
@@ -68,7 +77,8 @@ def _snapshot(model_id: str, target: Path, token: str | None = None) -> tuple[st
         ) from None
 
     print(f"-> downloading {model_id} into {target} ...")
-    path = snapshot_download(model_id, local_dir=target, token=token)
+    path = snapshot_download(model_id, local_dir=target, token=token,
+                             allow_patterns=allow_patterns)
     return model_id, Path(path)
 
 
@@ -181,6 +191,10 @@ def _write_llm_into_config(model_id: str) -> None:
     Edits the one line rather than reserialising the file. Round-tripping it
     through yaml.safe_dump deleted every comment in it, and those comments are
     how the bank's operators know what the settings mean.
+
+    The path arrives with forward slashes (Path.as_posix), which Windows
+    accepts: inside a double-quoted YAML string a Windows backslash is an
+    escape character, and "models\\Qwen..." made config.yaml unreadable.
     """
     config_path = Path("config/config.yaml")
     if not config_path.exists():
@@ -216,8 +230,11 @@ def main() -> int:
     parser.add_argument("--ner", action="store_true", help="optional DictaBERT-NER")
     parser.add_argument("--llm-model", default=None,
                         help="HF model id for the judge LLM (see candidates in --help)")
+    parser.add_argument("--llm-gguf", default=None, metavar="FILE",
+                        help="download only this .gguf file from --llm-model (for llama.cpp)")
     parser.add_argument("--models-dir", default="models", type=Path)
     args = parser.parse_args()
+    configure_stdio()
 
     if not any([args.all, args.asr, args.diarization, args.llm, args.ner]):
         parser.error("nothing selected: pass --all or one of --asr/--diarization/--llm/--ner")
@@ -243,7 +260,8 @@ def main() -> int:
     if args.all or args.diarization:
         steps.append(("diarization", lambda: _download_diarization(models_dir, token)))
     if args.all or args.llm:
-        steps.append(("llm", lambda: _download_llm(models_dir, args.llm_model, token)))
+        steps.append(("llm", lambda: _download_llm(models_dir, args.llm_model, token,
+                                                   args.llm_gguf)))
     if args.ner:
         steps.append(("ner", lambda: _download_ner(models_dir, token)))
 
@@ -321,13 +339,26 @@ def _download_diarization(models_dir: Path, token: str | None) -> None:
         })
 
 
-def _download_llm(models_dir: Path, llm_model: str, token: str | None) -> None:
-    model_id, path = _snapshot(llm_model, models_dir / llm_model.replace("/", "--"), token)
+def _download_llm(models_dir: Path, llm_model: str, token: str | None,
+                  gguf: str | None = None) -> None:
+    target = models_dir / llm_model.replace("/", "--")
+    if gguf:
+        # One quantized file, not the repository: a GGUF repo holds a dozen
+        # quantizations of the same model, 3-15 GB each.
+        _snapshot(llm_model, target, token, allow_patterns=[gguf])
+        path = target / gguf
+        if not path.is_file():
+            raise RuntimeError(f"{llm_model} has no file named {gguf}. The .gguf file "
+                               f"names are listed at https://huggingface.co/{llm_model}")
+        _record(models_dir, "llm", llm_model, target)
+        _write_llm_into_config(path.as_posix())
+        return
+    model_id, path = _snapshot(llm_model, target, token)
     _record(models_dir, "llm", model_id, path)
     # The LOCAL PATH, not the repo id: snapshot_download(local_dir=...)
     # deliberately bypasses the Hugging Face cache, so an offline machine asked
     # to serve the repo id has nowhere to resolve it from and vLLM fails.
-    _write_llm_into_config(str(path))
+    _write_llm_into_config(path.as_posix())
 
 
 def _download_ner(models_dir: Path, token: str | None) -> None:

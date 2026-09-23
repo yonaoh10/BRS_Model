@@ -57,15 +57,15 @@ jobs:
           set -eux
           git archive --format=tar --prefix=extract/ HEAD | tar -x -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP/extract"
-          pip install --no-deps -e .
+          # Exactly the README's steps: the installer builds .venv, and every
+          # command after it runs with that interpreter.
+          python scripts/install.py
           # The suite too, not just the pipeline: the deployment instructions
           # tell the engineer to run pytest from the extract, and a test that
           # shells out to git fails to COLLECT there while passing here.
-          python -m pytest -q
-          python scripts/generate_sample_data.py
-          python -m callqa run --mock
-          python -m callqa report --mock
-          python -m callqa preflight --mock
+          .venv/bin/python -m pytest -q
+          .venv/bin/python scripts/first_run.py --no-dashboard
+          .venv/bin/python -m callqa preflight --mock
           test -s data/output/reports/index.html
 
   # The hand-off documentation states that `rm -rf dashboard/` is supported.
@@ -142,12 +142,14 @@ jobs:
           $dest = Join-Path $env:RUNNER_TEMP "בדיקה עם רווח"
           Expand-Archive -Path "$env:RUNNER_TEMP\repo.zip" -DestinationPath $dest
           Set-Location (Join-Path $dest "BRS_Model-main")
-          python -m venv .venv
-          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-          .\.venv\Scripts\python.exe -m pip install -e .
-          .\.venv\Scripts\python.exe -m pytest -q
-          .\.venv\Scripts\python.exe scripts/generate_sample_data.py
-          .\.venv\Scripts\python.exe -m callqa run --mock
-          .\.venv\Scripts\python.exe -m callqa report --mock
-          .\.venv\Scripts\python.exe -m callqa preflight --mock
+          # The offline path: a bundle built on a Windows machine with internet,
+          # then an install that must not touch the network (--no-index).
+          python scripts/build_offline_bundle.py --core-only
+          python scripts/install.py
+          .\.venv\Scripts\python -m pytest -q
+          .\.venv\Scripts\python scripts\first_run.py --no-dashboard
+          .\.venv\Scripts\python -m callqa preflight --mock
           if (-not (Test-Path data\output\reports\index.html)) { throw "no index.html" }
+          # A Scheduled Task writes stdout to a file, in the ANSI code page.
+          .\.venv\Scripts\python -m callqa run --mock --force *> run.log
+          if ($LASTEXITCODE -ne 0) { Get-Content run.log; throw "run with redirected output failed" }

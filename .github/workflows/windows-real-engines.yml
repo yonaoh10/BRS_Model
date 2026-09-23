@@ -1,0 +1,140 @@
+name: Windows real engines
+
+# The CI workflow proves the pipeline on Windows with MOCK engines. This one
+# proves the REAL engines on Windows: the bank's desktops are Microsoft VDI,
+# and "the model stack installs and runs there" is a claim that has to be
+# exercised, not assumed. Everything a VDI user without admin rights would do
+# is done here the same way: the installer, ffmpeg and llama.cpp unzipped into
+# tools/, models fetched with the project's own downloader, the judge started
+# with the project's own launcher, a stereo call built with the project's own
+# script, and the call processed by the real ASR, VAD, NER, redaction and an
+# LLM judge answering over the OpenAI protocol on 127.0.0.1.
+#
+# Deliberately NOT tested here: pyannote diarization, whose model is gated
+# behind a Hugging Face licence acceptance a CI runner cannot give. Its Windows
+# input path (audio passed in memory, no torchcodec decoding) is unit-tested
+# below with the real torch installed. The judge is a 0.5B model so a CPU
+# runner answers in seconds; it proves the protocol and structured output, not
+# the quality of the scores.
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+
+jobs:
+  real-engines:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
+      JUDGE_REPO: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+      JUDGE_FILE: qwen2.5-0.5b-instruct-q4_k_m.gguf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install with the model engines (scripts/install.py --server)
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          python scripts/install.py --server
+          .\.venv\Scripts\python -m pip install huggingface_hub
+
+      - name: Tools a user without admin rights unzips into tools/
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Force tools | Out-Null
+          gh release download latest --repo BtbN/FFmpeg-Builds --pattern "ffmpeg-master-latest-win64-lgpl.zip" --dir $env:RUNNER_TEMP
+          Expand-Archive "$env:RUNNER_TEMP\ffmpeg-master-latest-win64-lgpl.zip" -DestinationPath tools
+          gh release download --repo ggml-org/llama.cpp --pattern "*-bin-win-cpu-x64.zip" --dir $env:RUNNER_TEMP
+          Get-ChildItem "$env:RUNNER_TEMP\*-bin-win-cpu-x64.zip" | ForEach-Object { Expand-Archive $_.FullName -DestinationPath tools\llama }
+          .\.venv\Scripts\python -c "from callqa.portable import find_executable as f; p = f('ffmpeg'); print('ffmpeg:', p); assert p and 'tools' in p"
+
+      - name: Models, with the project's downloader
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          .\.venv\Scripts\python scripts\download_models.py --asr --ner --llm --llm-model $env:JUDGE_REPO --llm-gguf $env:JUDGE_FILE
+
+      - name: The GGUF file the README tells VDI users to download exists
+        run: |
+          .\.venv\Scripts\python -c "from huggingface_hub import list_repo_files; f = [x for x in list_repo_files('dicta-il/dictalm2.0-instruct-GGUF') if x.endswith('.gguf')]; print(f); assert 'dictalm2.0-instruct.Q4_K_M.gguf' in f, 'README names a file that is not there'"
+
+      - name: Judge key in .env, as the README says
+        run: |
+          .\.venv\Scripts\python -c "import secrets, pathlib; pathlib.Path('.env').write_text('CALLQA_JUDGE__API_KEY=' + secrets.token_hex(32) + '\n', encoding='utf-8')"
+
+      - name: Start the judge with scripts/start_llama_server.py
+        run: |
+          $ErrorActionPreference = "Stop"
+          $gguf = Get-ChildItem -Recurse models -Filter $env:JUDGE_FILE | Select-Object -First 1
+          Start-Process -FilePath .\.venv\Scripts\python.exe -ArgumentList "scripts\start_llama_server.py", "`"$($gguf.FullName)`"" -RedirectStandardOutput llama.out.log -RedirectStandardError llama.err.log
+          $key = (Get-Content .env | Select-String "CALLQA_JUDGE__API_KEY=").ToString().Split("=")[1]
+          $up = $false
+          foreach ($i in 1..90) {
+            try { Invoke-RestMethod -Uri http://127.0.0.1:8000/v1/models -Headers @{Authorization = "Bearer $key"} | Out-Null; $up = $true; break } catch { Start-Sleep -Seconds 2 }
+          }
+          if (-not $up) { Get-Content llama.out.log, llama.err.log; throw "llama-server did not come up" }
+          # The key is enforced: the server answers call material only to the pipeline.
+          $status = 0
+          try { Invoke-WebRequest -Uri http://127.0.0.1:8000/v1/chat/completions -Method Post -Body '{"messages":[{"role":"user","content":"hi"}]}' -ContentType application/json | Out-Null; $status = 200 } catch { $status = $_.Exception.Response.StatusCode.value__ }
+          if ($status -ne 401) { throw "llama-server accepted a request without the API key (status $status)" }
+          Write-Host "judge is up and refuses requests without the key"
+
+      - name: Two speech tracks (Windows' own text-to-speech)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Add-Type -AssemblyName System.Speech
+          $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
+          function Say($path, $ssml) {
+            $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+            $s.SetOutputToWaveFile($path, $fmt)
+            $s.SpeakSsml("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>$ssml</speak>")
+            $s.Dispose()
+          }
+          Say "$env:RUNNER_TEMP\banker.wav" "Good morning, this is Dana from the bank. How can I help you today?<break time='7s'/>Of course. For your security, can you please confirm your date of birth?<break time='7s'/>Thank you. I have updated the address on your account. Is there anything else I can do for you?<break time='6s'/>Have a wonderful day, goodbye."
+          Say "$env:RUNNER_TEMP\customer.wav" "<break time='5s'/>Hi, I moved last month and I need to update my home address please.<break time='7s'/>Sure, it is the fourth of March, nineteen eighty.<break time='8s'/>No, that is everything. Thank you very much."
+
+      - name: Build the stereo call with scripts/prepare_real_call.py
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          .\.venv\Scripts\python scripts\prepare_real_call.py --call-id WIN001 --banker-track "$env:RUNNER_TEMP\banker.wav" --customer-track "$env:RUNNER_TEMP\customer.wav"
+
+      - name: Preflight and a REAL run (ASR, VAD, NER, redaction, judge)
+        env:
+          CALLQA_REDACTION__NER: "true"
+          CALLQA_JUDGE__MAX_RETRIES: "1"
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          .\.venv\Scripts\python -m callqa preflight
+          $PSNativeCommandUseErrorActionPreference = $false
+          .\.venv\Scripts\python -m callqa run -v *> run.log
+          $code = $LASTEXITCODE
+          Get-Content run.log -Tail 60
+          $PSNativeCommandUseErrorActionPreference = $true
+          .\.venv\Scripts\python -m callqa report
+          .\.venv\Scripts\python .github\check_real_run.py run.log WIN001
+
+      - name: The suite, with the real engine libraries installed
+        if: always()
+        run: .\.venv\Scripts\python -m pytest -q
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-real-run
+          path: |
+            run.log
+            llama.out.log
+            llama.err.log
+            data/output/reports/
+            data/output/results/
+            data/output/redacted/
+          if-no-files-found: warn

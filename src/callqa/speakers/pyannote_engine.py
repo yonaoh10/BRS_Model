@@ -118,13 +118,33 @@ class LazyPyannoteDiarizer:
             # Telling the model there are exactly two parties is the single
             # cheapest accuracy win available on a two-party call.
             kwargs["num_speakers"] = self.config.num_speakers
-        output = pipeline(str(wav_path), **kwargs)
+        output = pipeline(_in_memory(wav_path), **kwargs)
         segments = _segments_from_output(output, prefer_exclusive=self.config.exclusive)
         if not segments:
             logger.warning("call_id=%s: diarization returned no speech", call_id)
         logger.info("diarization done: call_id=%s segments=%d speakers=%d",
                     call_id, len(segments), len({s.label for s in segments}))
         return segments
+
+
+def _in_memory(wav_path: Path) -> dict:
+    """The recording as the {"waveform", "sample_rate"} dict pyannote accepts.
+
+    Given a PATH, pyannote.audio 4 decodes it with torchcodec, which needs the
+    FFmpeg shared libraries at run time - present on a Linux server with
+    ffmpeg installed, absent on a Windows desktop, where every mono call then
+    failed with "torchcodec is not installed correctly". The stage-2 WAV is
+    plain 16-bit PCM the standard library reads, so decoding happens here, the
+    same way on every OS, and torchcodec is never asked to.
+    """
+    import numpy as np
+    import torch
+
+    from callqa.audio import _read_wav
+
+    samples, rate = _read_wav(Path(wav_path))
+    waveform = torch.from_numpy(np.ascontiguousarray(samples.T, dtype=np.float32))
+    return {"waveform": waveform, "sample_rate": rate}
 
 
 def _from_pretrained_with_token(pipeline_cls, model: str, token: str | None):  # noqa: ANN001,ANN202

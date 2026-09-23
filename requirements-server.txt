@@ -1,5 +1,5 @@
 # Bank-server engine dependencies (GPU / model-serving machine only).
-# Installed on top of requirements.txt by scripts/install_offline.sh --server.
+# Installed on top of requirements.txt by `scripts/install.py --server`.
 # All of these are imported lazily; the callqa package imports cleanly without them.
 faster-whisper==1.1.1
 silero-vad==6.2.1

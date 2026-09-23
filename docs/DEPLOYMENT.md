@@ -43,12 +43,45 @@ Two integration points are worth knowing before you plan:
 
 | | Requirement | Notes |
 |---|---|---|
-| OS | Linux (x86-64) or macOS | Developed on both. Windows is untested. |
+| OS | Windows 10/11 (x64) or Linux (x86-64); macOS also works | Windows needs no admin rights and no WSL; see §2.1. CI runs the suite on Windows and Linux, and the real engines on Windows. |
 | Python | 3.11 or 3.12 | Pinned in `pyproject.toml`; CI covers both. |
-| ffmpeg | Required for real recordings | Not needed for §3. Needed to read `.m4a`, `.mp3`, and anything that is not plain WAV. |
+| ffmpeg | Only for recordings that are not plain WAV | Not needed for §3. Unzipped into `tools/` on Windows, no install; see §2.1. |
 | Disk | ~40 GB | ~25 GB models, the rest for working data. `callqa preflight` refuses to start a batch under 1 GiB free. |
 | RAM | 16 GB | For transcription and diarization. |
-| GPU | Needed only for the judge | Transcription runs acceptably on CPU; the language model does not. See §4. |
+| GPU | Optional | Everything runs on the CPU. Transcription is acceptable there; a CPU judge takes minutes per call. See §5. |
+
+### 2.1 Windows and Microsoft VDI
+
+The bank's desktops are VDI, so this is a first-class target, and CI proves it
+on a real Windows machine on every change: the full test suite, the README's
+install steps from a GitHub ZIP unpacked into a folder whose path contains a
+space and Hebrew, an offline install from a Windows wheels bundle, and a real
+call through the real ASR, VAD, NER and an llama.cpp judge
+(`.github/workflows/windows-real-engines.yml`). What differs from Linux:
+
+- **Nothing needs admin rights.** Python comes from python.org's per-user
+  installer; `scripts/install.py` builds `.venv` inside the project; ffmpeg and
+  llama.cpp are zip files unzipped into `tools/`, where the program looks for
+  them (so does `CALLQA_FFMPEG_DIR`, if they live elsewhere).
+- **No activation.** Every command runs `.venv\Scripts\python` directly, so
+  PowerShell's execution policy, which usually blocks `Activate.ps1`, never
+  comes into it. Nothing in the project is a `.ps1`, `.bat` or `.sh` a Windows
+  user has to run.
+- **Where the folder lives matters.** Under the user profile
+  (`C:\Users\<name>\...`), which persists on non-persistent VDI and is private
+  to the user. Not in Desktop, Documents or OneDrive, which are commonly synced
+  to the cloud (the project holds raw transcripts until retention deletes them),
+  and not on a network share, where SQLite's locking is unreliable.
+- **File privacy.** POSIX file modes do not exist on Windows. The folders that
+  hold raw audio and transcripts are restricted with `icacls` to the current
+  user, SYSTEM and Administrators, and everything created inside inherits that,
+  so other users of a multi-session host cannot read them.
+- **No GPU.** A GPU-only `asr.compute_type` (the shipped `float16`) switches to
+  `int8` on a machine without CUDA, with a log line. The judge runs under
+  llama.cpp on the CPU (§5).
+- **Application control.** If AppLocker or WDAC blocks programs in the user
+  profile, IT has to allow Python and `llama-server.exe` - or the judge is
+  served from a machine where that is already allowed (§5).
 
 ---
 
@@ -57,17 +90,19 @@ Two integration points are worth knowing before you plan:
 This proves the install is correct. It needs no models, no GPU and no network,
 and it takes seconds.
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate     # recommended; see below
-pip install -r requirements.txt
-pip install -e .
-./scripts/first_run.sh
+```
+py -3.12 scripts\install.py                     # Linux: python3 scripts/install.py
+.venv\Scripts\python scripts\first_run.py      # Linux: .venv/bin/python scripts/first_run.py
 ```
 
-Use a virtual environment. Debian 12, Ubuntu 24.04 and RHEL 9 mark the system
-Python "externally managed" and refuse `pip install` into it outright, and RHEL
-ships no bare `pip` at all. On an air-gapped machine, `scripts/install_offline.sh`
-creates the environment for you from the wheels bundle (§4.3).
+`scripts/install.py` creates a virtual environment in `.venv`, installs the
+pinned requirements into it, and links the project's `src/` into it. It is the
+same command on every OS, online or offline (it installs from `wheels/` when
+that folder is present, §4.3). A virtual environment is not optional: Debian
+12, Ubuntu 24.04 and RHEL 9 refuse `pip install` into the system Python. It
+does not use `pip install -e .`, because that writes the project's absolute
+path into a file Python 3.11/3.12 read back in the ANSI code page, which breaks
+on a Windows path containing Hebrew; a relative path does not.
 
 It generates six synthetic calls, runs the complete pipeline over them in mock
 mode, writes reports, and starts the local dashboard. If
@@ -76,9 +111,9 @@ except the models is working.
 
 Run the test suite too — it is fast and needs nothing extra:
 
-```bash
-python -m pytest -q          # the full suite, about a minute
-ruff check src tests scripts dashboard
+```
+.venv\Scripts\python -m pytest -q          # the full suite, about a minute
+.venv\Scripts\python -m ruff check src tests scripts dashboard
 ```
 
 > **Mock mode is not a demo mode.** It is the same pipeline with deterministic
@@ -113,9 +148,10 @@ This is the single most common thing to get stuck on. The download fails with a
 
 ### 4.2 Download
 
-```bash
-pip install huggingface_hub                 # only needed for this step
-python scripts/download_models.py --all --llm-model <your-choice>
+```
+py -3.12 scripts\install.py --server                  # the model engines
+.venv\Scripts\python -m pip install huggingface_hub   # only needed for this step
+.venv\Scripts\python scripts\download_models.py --all --llm-model <your-choice>
 ```
 
 | Role | Model | Approx. size |
@@ -129,6 +165,7 @@ Pick the largest judge model that fits the GPU you have:
 
 | VRAM | Candidate |
 |---|---|
+| none (CPU, e.g. VDI) | `dicta-il/dictalm2.0-instruct-GGUF`, one file: `--llm-gguf dictalm2.0-instruct.Q4_K_M.gguf` (4-bit, ~4.4 GB, served by llama.cpp) |
 | 16–24 GB | `dicta-il/dictalm2.0-instruct` (7B, Hebrew-tuned) |
 | ~24 GB | a 12–27B instruct model, AWQ/GPTQ quantized |
 | ≥48 GB | a 70B instruct model, AWQ quantized |
@@ -140,22 +177,29 @@ That file is what your compliance team should be shown; see §9.
 ### 4.3 Air-gapped target
 
 If the machine that runs the pipeline has no internet at all, run the download
-on a connected machine and move the artifacts across:
+on a connected machine and move the artifacts across. **The connected machine
+must have the same OS and Python version as the target**: pip decides which
+dependencies a package needs by asking the machine it runs on, so a Windows
+bundle built on Linux lacks the Windows-only packages and fails.
 
-```bash
-./scripts/build_offline_bundle.sh      # pinned wheels into wheels/
-python scripts/download_models.py --all --llm-model <your-choice>
-# transfer: the repository, wheels/, models/, and the Hugging Face cache
+```
+py -3.12 scripts\build_offline_bundle.py          # pinned wheels into wheels\
+py -3.12 scripts\install.py --server
+.venv\Scripts\python -m pip install huggingface_hub
+.venv\Scripts\python scripts\download_models.py --all --llm-model <your-choice>
+# transfer: the project folder with wheels\ and models\ (not .venv), and the Hugging Face cache
 ```
 
-Then on the target: `./scripts/install_offline.sh`, and set `HF_HUB_OFFLINE=1`
-and `TRANSFORMERS_OFFLINE=1` in the service environment. The pipeline never
-downloads, so these only guard against a library trying to phone home.
+Then on the target: `py -3.12 scripts\install.py --server` (it sees `wheels/`
+and installs with `--no-index`), and put `HF_HUB_OFFLINE=1` and
+`TRANSFORMERS_OFFLINE=1` in `.env`. The pipeline never downloads, so these only
+guard against a library trying to phone home.
 
 **The diarization model is the one that does not live in `models/`.** pyannote
 loads through the *Hugging Face cache* of whichever user ran the download
-(`~/.cache/huggingface/hub` by default). Copy that directory across and point
-`HF_HOME` at its parent in the service environment. `callqa preflight` checks
+(`~/.cache/huggingface/hub` by default; on Windows
+`C:\Users\<name>\.cache\huggingface\hub`). Copy that directory across and
+point `HF_HOME` at its parent, in `.env` or the service environment. `callqa preflight` checks
 exactly this and says where it looked. Stereo recordings never need it; mono
 and dual-mono ones cannot be processed without it.
 
@@ -168,10 +212,31 @@ The judge is **an OpenAI-compatible HTTP client and nothing more**. It sends
 or assume any particular server, and it will work against vLLM, TGI,
 llama.cpp's server, or an internal inference gateway the bank already runs.
 
-`scripts/start_vllm.sh` is a worked example, not a requirement:
+Two worked examples, neither a requirement. First generate a key and put it
+in `.env` as `CALLQA_JUDGE__API_KEY=<key>`:
+
+```
+.venv\Scripts\python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+**Windows, or any machine without a GPU: llama.cpp.** Unzip the Windows CPU
+build (`llama-<version>-bin-win-cpu-x64.zip` from
+https://github.com/ggml-org/llama.cpp/releases) into `tools/`, then:
+
+```
+.venv\Scripts\python scripts\start_llama_server.py models\<repo>\<file>.gguf
+```
+
+It reads the key from `.env` (so the two sides cannot disagree), passes it to
+the server through the environment rather than the command line, and binds to
+127.0.0.1. llama.cpp enforces the same JSON schema the judge sends, so the
+structured-output guarantee holds. Expect minutes per call on a CPU: this is a
+working deployment, not a fast one.
+
+**A Linux server with an NVIDIA GPU: vLLM.**
 
 ```bash
-export CALLQA_JUDGE_API_KEY=$(openssl rand -hex 32)     # the SERVER's key
+export CALLQA_JUDGE_API_KEY=<the key>     # the SERVER's copy of the key
 ./scripts/start_vllm.sh models/<your-judge-model> 8000
 ```
 
@@ -199,7 +264,9 @@ Two things that bite:
 
 - **Set an API key.** An unauthenticated inference server on a bank network
   answers anyone who can reach the port, and what it answers with is built from
-  call transcripts. `start_vllm.sh` refuses to start without one.
+  call transcripts. Both launchers refuse to start without one. A server on
+  another machine must be reached over `https://`; plain `http://` is accepted
+  only for 127.0.0.1/localhost.
 - **Raise the proxy timeout.** A 27B model takes several minutes on a long call.
   Many reverse proxies cut a request at ~100 seconds, which surfaces as a
   confusing gateway error rather than a timeout.
@@ -277,6 +344,10 @@ data. Budget roughly 20–30 calls, transcribed and scored by a human QA reviewe
 
 **What it stores, and where** — all under `data/output/`:
 
+On Linux every artifact is written mode 0600 and the raw-audio folders 0700.
+On Windows, where those modes do not exist, the output folders are restricted
+with `icacls` to the current user, SYSTEM and Administrators (§2.1).
+
 | Artifact | Contains PII? | Lifetime |
 |---|---|---|
 | `transcripts/*.json` (raw) | **yes** | `retention.raw_days`, default 90 |
@@ -348,9 +419,14 @@ id, and masks it in validation messages, but it cannot rename your files.
 
 | Symptom | Cause |
 |---|---|
+| `'py' is not recognized`, or `python` opens the Microsoft Store | Python is not installed for this user, or not on PATH. §2.1 / README step 1. Use `py -3.12`. |
+| `running scripts is disabled on this system` | Someone ran `Activate.ps1`. Not needed: call `.venv\Scripts\python` directly. |
+| `this is Python 3.13` from `scripts/install.py` | The pinned wheels exist for 3.11 and 3.12. Install 3.12 and run `py -3.12 scripts\install.py`. |
+| `wheels/ holds Linux wheels` (or the reverse) | The offline bundle was built on the wrong OS. Build it on a machine with the target's OS and Python. §4.3. |
+| Garbled Hebrew in `metadata.csv` or `human_ratings.csv` | Both are read in UTF-8, cp1255 or UTF-16 automatically; if it is still garbled, save again from Excel as **CSV UTF-8**. |
 | 403 downloading the diarization model | Its licence has not been accepted on the HF account behind `HF_TOKEN`. §4.1. |
 | `could not find rubric.yaml` | Running from outside the project directory. Pass `--config`, or set `CALLQA_CONFIG_DIR`. |
-| Every call exits `2` on ingestion | ffmpeg is missing and the recordings are not plain WAV. |
+| Every call exits `2` on ingestion | ffmpeg is missing and the recordings are not plain WAV. On Windows unzip it into `tools/` (README step 8). |
 | Judge times out | Raise `judge.request_timeout_sec` and the reverse proxy's timeout. §5. |
 | Judge *refused* (401/403) | The server is running; `CALLQA_JUDGE__API_KEY` is missing or differs from the key the server was started with. |
 | "redaction.ner is on, but DictaBERT-NER could not be loaded" | Working as designed: NER was requested and is missing. `download_models.py --ner`, or set `redaction.ner: false`. |

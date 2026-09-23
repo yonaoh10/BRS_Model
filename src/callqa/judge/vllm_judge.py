@@ -69,8 +69,8 @@ class VLLMJudge:
         except (urllib.error.URLError, OSError) as exc:
             raise VLLMJudgeError(
                 f"judge endpoint unreachable at {self.config.base_url}: nothing is "
-                "listening there. Start your model server (scripts/start_vllm.sh is "
-                "one example) and check judge.base_url."
+                "listening there. Start your model server (scripts/start_llama_server.py "
+                "and scripts/start_vllm.sh are examples) and check judge.base_url."
             ) from exc
         logger.info("vLLM endpoint reachable at %s", self.config.base_url)
 

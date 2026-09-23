@@ -29,8 +29,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -38,6 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from callqa.ingestion import sanitize_call_id  # noqa: E402
+from callqa.portable import configure_stdio, find_executable, run_text  # noqa: E402
 
 COLUMNS = ["call_id", "banker_id", "file_name", "call_date", "call_type",
            "banker_channel", "banker_name"]
@@ -45,17 +44,15 @@ SAMPLE_RATE = "16000"
 
 
 def _ffmpeg(args: list[str]) -> None:
-    proc = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *args],
-                          capture_output=True, text=True)
+    proc = run_text([find_executable("ffmpeg") or "ffmpeg", "-y", "-loglevel", "error", *args])
     if proc.returncode != 0:
         raise SystemExit(f"ffmpeg failed:\n{proc.stderr.strip()}")
 
 
 def _duration(path: Path) -> float:
-    proc = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=nk=1:nw=1", str(path)],
-        capture_output=True, text=True)
+    proc = run_text(
+        [find_executable("ffprobe") or "ffprobe", "-v", "error", "-show_entries",
+         "format=duration", "-of", "default=nk=1:nw=1", str(path)])
     if proc.returncode != 0:
         raise SystemExit(f"ffprobe failed on {path}:\n{proc.stderr.strip()}")
     return float(proc.stdout.strip())
@@ -130,8 +127,10 @@ def main() -> int:
     ap.add_argument("--input-dir", type=Path, default=REPO_ROOT / "data" / "input")
     args = ap.parse_args()
 
-    if not shutil.which("ffmpeg"):
-        print("ERROR: ffmpeg not found on PATH", file=sys.stderr)
+    configure_stdio()
+    if not find_executable("ffmpeg"):
+        print("ERROR: ffmpeg not found (on PATH, in tools/, or in CALLQA_FFMPEG_DIR)",
+              file=sys.stderr)
         return 2
     call_id = sanitize_call_id(args.call_id)
     if call_id != call_id:

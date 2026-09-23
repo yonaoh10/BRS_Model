@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -35,10 +34,11 @@ DEFAULT_MODEL = REPO_ROOT / "models" / "ivrit-whisper-large-v3-turbo-ct2"
 
 
 def audio_duration(path: Path) -> float:
-    proc = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=nk=1:nw=1", str(path)],
-        capture_output=True, text=True)
+    from callqa.portable import find_executable, run_text
+
+    proc = run_text(
+        [find_executable("ffprobe") or "ffprobe", "-v", "error", "-show_entries",
+         "format=duration", "-of", "default=nk=1:nw=1", str(path)])
     if proc.returncode != 0:
         raise SystemExit(f"ffprobe failed on {path}:\n{proc.stderr.strip()}")
     return float(proc.stdout.strip())

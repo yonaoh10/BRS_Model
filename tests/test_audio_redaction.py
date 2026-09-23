@@ -9,6 +9,7 @@ whole justification for serving audio at all.
 
 from __future__ import annotations
 
+import os
 import wave
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from callqa.audio import _read_wav
 from callqa.audio_redaction import AUDIO_PAD_SEC, produce_redacted_audio
 from callqa.models import AudioArtifact, CallInput, DialogTranscript, DialogTurn, Word
 from callqa.pipeline import process_call
+from callqa.portable import private_to_owner
 from callqa.state import StateDB
 
 RATE = 16000
@@ -278,9 +280,15 @@ def test_pipeline_writes_redacted_audio_and_sidecar(processed) -> None:  # noqa:
     wav, sidecar = _audio_paths(workspace, call)
     assert wav.is_file() and sidecar.is_file()
     assert wav.read_bytes()[:4] == b"RIFF"
-    # written 0600 inside a 0700 dir
-    assert (wav.stat().st_mode & 0o777) == 0o600
-    assert (wav.parent.stat().st_mode & 0o777) == 0o700
+    if os.name == "nt":
+        # chmod means nothing there: the folder's permissions are replaced by
+        # owner + SYSTEM + Administrators, and the WAV inherits them.
+        assert private_to_owner(wav.parent)
+        assert private_to_owner(wav)
+    else:
+        # written 0600 inside a 0700 dir
+        assert (wav.stat().st_mode & 0o777) == 0o600
+        assert (wav.parent.stat().st_mode & 0o777) == 0o700
 
 
 def test_missing_sidecar_is_regenerated_without_force(processed) -> None:  # noqa: ANN001

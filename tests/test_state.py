@@ -43,13 +43,17 @@ def test_lock_refuses_second_acquire(tmp_path: Path) -> None:
 
 def test_stale_lock_from_dead_pid_is_stolen(tmp_path: Path) -> None:
     db = StateDB(tmp_path / "state.db")
-    import os
     import sqlite3
+    import time
 
+    from callqa.portable import hostname
+
+    # A FRESH lock, so only the dead pid can make it stale (an old one would be
+    # stolen by age and prove nothing about the liveness check).
     with sqlite3.connect(db.db_path) as conn:
         conn.execute(
-            "INSERT INTO locks (call_id, pid, hostname, acquired_at) VALUES (?, ?, ?, 0)",
-            ("C1", 999999999, os.uname().nodename),
+            "INSERT INTO locks (call_id, pid, hostname, acquired_at) VALUES (?, ?, ?, ?)",
+            ("C1", 999999999, hostname(), time.time()),
         )
     db.acquire_lock("C1")  # dead pid -> stolen, no exception
     db.release_lock("C1")

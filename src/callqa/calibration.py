@@ -8,6 +8,7 @@ on doubly-rated calls, MAE, and 5x5 confusion matrices.
 from __future__ import annotations
 
 import csv
+import io
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -91,7 +92,11 @@ def load_human_ratings(
     if not path.exists():
         raise CalibrationError(f"human ratings file not found: {path}")
     ratings: dict[str, list[dict[str, int]]] = {}
-    with path.open(newline="", encoding="utf-8-sig") as fh:
+    # Filled in by a human in Excel, which on a Hebrew Windows saves "CSV" as
+    # cp1255 unless "CSV UTF-8" is chosen: read it the way metadata.csv is read.
+    from callqa.ingestion import _read_text_any_encoding
+
+    with io.StringIO(_read_text_any_encoding(path), newline="") as fh:
         reader = csv.DictReader(fh)
         missing = [d for d in dimension_ids if d not in (reader.fieldnames or [])]
         if missing:
