@@ -49,11 +49,24 @@ _DOCUMENTED_PLACEHOLDERS = {"CALLQA_SECTION__FIELD"}
 
 def _tracked_docs() -> list[Path]:
     """Only documents that ship. An untracked working note is not a deliverable
-    and must not be able to fail the build."""
-    out = subprocess.run(["git", "-C", str(REPO), "ls-files", "*.md"],
-                         capture_output=True, text=True, check=True).stdout.split()
-    docs = [REPO / rel for rel in out]
-    assert docs, "no tracked documentation found to check"
+    and must not be able to fail the build.
+
+    Falls back to globbing when git cannot answer, which is not a corner case:
+    a release is unpacked from an archive and has no .git at all, and the
+    deployment instructions tell the engineer to run this suite there. Asking
+    git unconditionally made the whole suite fail to COLLECT on exactly the
+    machine it was written to reassure.
+    """
+    try:
+        listed = subprocess.run(["git", "-C", str(REPO), "ls-files", "*.md"],
+                                capture_output=True, text=True, check=True).stdout.split()
+        docs = [REPO / rel for rel in listed if (REPO / rel).exists()]
+    except (OSError, subprocess.SubprocessError):
+        docs = []
+    if not docs:
+        docs = sorted([*REPO.glob("*.md"), *REPO.glob("docs/*.md"),
+                       *REPO.glob("dashboard/*.md")])
+    assert docs, "no documentation found to check"
     return docs
 
 

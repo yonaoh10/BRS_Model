@@ -52,7 +52,12 @@ jobs:
           git archive --format=tar --prefix=extract/ HEAD | tar -x -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP/extract"
           pip install -e .
+          # The suite too, not just the pipeline: the deployment instructions
+          # tell the engineer to run pytest from the extract, and a test that
+          # shells out to git fails to COLLECT there while passing here.
+          python -m pytest -q
           python scripts/generate_sample_data.py
           python -m callqa run --mock
           python -m callqa report --mock
+          python -m callqa preflight --mock
           test -s data/output/reports/index.html
