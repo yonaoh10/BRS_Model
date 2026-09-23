@@ -29,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 IS_WINDOWS = os.name == "nt"
 
+if IS_WINDOWS:
+    # CreateProcess and shutil.which search the CURRENT folder before PATH;
+    # a planted ffmpeg.exe in whatever folder the program was started from
+    # would run on customer audio. This switches that search off (Vista+).
+    os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
+
+# Children never get a console window of their own: under a Scheduled Task
+# or pythonw each ffmpeg/icacls call flashed one up, and closing the
+# diarization worker's window killed it.
+CHILD_FLAGS = subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0
+
 
 # -- identity ---------------------------------------------------------------
 
@@ -92,6 +103,66 @@ def pid_alive(pid: int) -> bool:
         return code.value == _STILL_ACTIVE
     finally:
         _kernel32.CloseHandle(handle)
+
+
+def started_after(pid: int, moment: float) -> bool:
+    """Did the process now holding `pid` start after `moment` (epoch seconds)?
+
+    Windows hands a dead process's pid to a new one within minutes. A lock
+    recorded by a crashed run then names a live pid - someone's browser tab -
+    and looked held for six hours. A process younger than the lock cannot be
+    the one that took it. False when unknown (never steals on a guess); POSIX
+    pids are not reused that quickly, so there it is always False.
+    """
+    if not IS_WINDOWS or pid <= 0:
+        return False
+    handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        times = [wintypes.FILETIME() for _ in range(4)]
+        _kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [
+            ctypes.POINTER(wintypes.FILETIME)] * 4
+        _kernel32.GetProcessTimes.restype = wintypes.BOOL
+        if not _kernel32.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return False
+        created = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        # FILETIME: 100 ns ticks since 1601-01-01.
+        return created / 1e7 - 11644473600 > moment + 1.0
+    finally:
+        _kernel32.CloseHandle(handle)
+
+
+def disable_console_quick_edit() -> None:
+    """Stop a stray click from freezing a long `watch`/`run` (Windows).
+
+    With QuickEdit on - the Windows 10 console default - one click in the
+    window starts a text selection, and from then on every write to the
+    console BLOCKS until the selection is cleared: the pipeline stopped at its
+    next log line, silently, for as long as nobody pressed Esc.
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        _kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+        _kernel32.GetStdHandle.restype = wintypes.HANDLE
+        _kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        _kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        handle = _kernel32.GetStdHandle(-10 & 0xFFFFFFFF)          # STD_INPUT_HANDLE
+        mode = wintypes.DWORD()
+        if _kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            extended_flags, quick_edit = 0x0080, 0x0040
+            _kernel32.SetConsoleMode(handle, (mode.value | extended_flags) & ~quick_edit)
+    except (OSError, AttributeError):  # no console (Scheduled Task): nothing to do
+        pass
+
+
+def is_network_path(path: Path) -> bool:
+    """A UNC path or a mapped network drive (Windows)."""
+    if not IS_WINDOWS:
+        return False
+    risk = location_risk(path)
+    return bool(risk) and "OneDrive" not in risk
 
 
 def exit_when_process_ends(pid: int) -> None:
@@ -196,7 +267,7 @@ def remove_tree(path: Path) -> bool:
 
 
 _PRIVATE_DONE: set[str] = set()
-_PRIVATE_LOCK = threading.Lock()
+_PRIVATE_LOCK = threading.RLock()
 
 
 def _current_user_sid() -> str | None:  # pragma: no cover - Windows only
@@ -260,25 +331,34 @@ def make_private_dir(path: Path) -> None:
         logger.warning("not changing the permissions of a drive root (%s)", resolved)
         return
     key = str(resolved).lower()
+    # Held for the whole icacls run: with `run --max-workers N`, the threads
+    # that arrived second used to return at once and start writing customer
+    # audio into the folder while it still had its old permissions.
     with _PRIVATE_LOCK:
         if key in _PRIVATE_DONE:
             return
-        _PRIVATE_DONE.add(key)
+        if _restrict_with_icacls(path):
+            _PRIVATE_DONE.add(key)
+
+
+def _restrict_with_icacls(path: Path) -> bool:  # pragma: no cover - Windows only
     sid = _current_user_sid()
     if sid is None:
         logger.warning("could not determine the current user's SID; %s keeps its "
                        "inherited permissions", path)
-        return
+        return False
     cmd = [_icacls(), str(path), "/inheritance:r", "/grant:r",
            f"*{sid}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "/Q"]
     try:
         proc = run_text(cmd, timeout=60, encoding="oem")
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("could not restrict permissions on %s: %s", path, exc)
-        return
+        return False
     if proc.returncode != 0:
         logger.warning("could not restrict permissions on %s: %s", path,
                        (proc.stdout + proc.stderr).strip()[:300])
+        return False
+    return True
 
 
 def make_private_root(path: Path) -> None:
@@ -455,12 +535,24 @@ def find_executable(name: str) -> str | None:
         candidates += [base / exe, base / "bin" / exe]
     tools = project_root() / "tools"
     if tools.is_dir():
-        candidates += [tools / exe, tools / "bin" / exe]
-        candidates += sorted(tools.glob(f"*/{exe}")) + sorted(tools.glob(f"*/bin/{exe}"))
+        # Any depth up to four: Explorer's "Extract All" nests a zip's own top
+        # folder inside a folder of the same name.
+        for depth in range(4):
+            candidates += sorted(tools.glob("/".join(["*"] * depth + [exe])))
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
-    return shutil.which(name)
+    if not IS_WINDOWS:
+        return shutil.which(name)
+    # PATH only - not the current folder, and only a real .exe (PATHEXT would
+    # let an ffmpeg.bat or .com planted earlier in PATH win).
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        if folder.strip() in ("", "."):
+            continue
+        candidate = Path(folder.strip().strip('"')) / exe
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def run_text(cmd: list[str], timeout: float | None = None, encoding: str = "utf-8",
@@ -473,8 +565,9 @@ def run_text(cmd: list[str], timeout: float | None = None, encoding: str = "utf-
     own console tools (icacls) write the OEM code page instead: encoding="oem".
     Undecodable bytes are replaced, never raised.
     """
+    kwargs.setdefault("stdin", subprocess.DEVNULL)      # never the operator's console
     return subprocess.run(cmd, capture_output=True, encoding=encoding, errors="replace",
-                          timeout=timeout, **kwargs)
+                          timeout=timeout, creationflags=CHILD_FLAGS, **kwargs)
 
 
 # -- console ----------------------------------------------------------------

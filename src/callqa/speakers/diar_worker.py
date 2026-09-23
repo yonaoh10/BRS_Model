@@ -52,6 +52,7 @@ def main(argv: list[str]) -> int:
     # operator thinks the job is gone.
     exit_when_process_ends(_pipeline_pid())
     configure_stdio()
+    os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "0")    # no telemetry, ever
     if len(argv) != 3:
         print("usage: diar_worker <wav> <call_id> <out_json> (config on stdin)",
               file=sys.stderr)

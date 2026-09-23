@@ -45,6 +45,13 @@ MacBook Pro עם **Intel i7‑9750H (6 ליבות) וללא כרטיס גרפי*
 `generate_sample_data.py`, שהם צלילים ולא דיבור, ולכן ה-VAD מסנן אותם ומתקבל
 מספר שאינו מייצג דבר. הקלטה מבוימת מוכנה לשימוש עם `prepare_real_call.py`:
 
+> **ב־Windows** הפקודות במסמך הזה כתובות בתחביר של Linux. ההתאמה:
+> `python` ← `.venv\Scripts\python` · `~/rec/` ← `%USERPROFILE%\rec\` ·
+> שורה שמסתיימת ב־`\` ← כותבים את הפקודה כולה בשורה אחת ·
+> `export HF_TOKEN=...` ← שורה `HF_TOKEN=...` בקובץ `.env` ·
+> `echo $?` ← `echo %ERRORLEVEL%` · `open` ← `start` ·
+> `grep -o '████' <קובץ> | wc -l` ← `findstr /c:"████" <קובץ>`.
+
 ```bash
 pip install faster-whisper
 python scripts/download_models.py --asr

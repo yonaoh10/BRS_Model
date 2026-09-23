@@ -65,6 +65,11 @@ jobs:
           # shells out to git fails to COLLECT there while passing here.
           .venv/bin/python -m pytest -q
           .venv/bin/python scripts/first_run.py --no-dashboard
+          test -s data/demo/output/reports/index.html
+          test ! -e data/input      # the demo never touches the real folders
+          .venv/bin/python scripts/generate_sample_data.py
+          .venv/bin/python -m callqa run --mock
+          .venv/bin/python -m callqa report --mock
           .venv/bin/python -m callqa preflight --mock
           test -s data/output/reports/index.html
 
@@ -148,6 +153,11 @@ jobs:
           python scripts/install.py
           .\.venv\Scripts\python -m pytest -q
           .\.venv\Scripts\python scripts\first_run.py --no-dashboard
+          if (-not (Test-Path data\demo\output\reports\index.html)) { throw "no demo index.html" }
+          if (Test-Path data\input) { throw "the demo wrote into data\input" }
+          .\.venv\Scripts\python scripts\generate_sample_data.py
+          .\.venv\Scripts\python -m callqa run --mock
+          .\.venv\Scripts\python -m callqa report --mock
           .\.venv\Scripts\python -m callqa preflight --mock
           if (-not (Test-Path data\output\reports\index.html)) { throw "no index.html" }
           # A Scheduled Task writes stdout to a file, in the ANSI code page.

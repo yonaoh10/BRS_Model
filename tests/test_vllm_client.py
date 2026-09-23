@@ -160,3 +160,14 @@ def test_a_refused_api_key_is_not_reported_as_an_unreachable_server() -> None:
         with pytest.raises(VLLMJudgeError, match="API key") as err:
             judge.check_connectivity()
     assert "unreachable" not in str(err.value)
+
+
+def test_a_server_serving_another_model_gets_no_transcript(fake_server) -> None:
+    """On a shared Windows host a colleague's judge can hold the port. Its
+    /models names its own file, and the pipeline refuses before sending data."""
+    _server, base_url = fake_server
+    judge = VLLMJudge(JudgeConfig(model="C:/Users/me/models/mine.gguf", base_url=base_url))
+    with pytest.raises(VLLMJudgeError, match="Nothing was sent"):
+        judge.check_connectivity()
+    same_file = VLLMJudge(JudgeConfig(model="models\\x\\test-model", base_url=base_url))
+    same_file.check_connectivity()                  # a path to the served model is fine

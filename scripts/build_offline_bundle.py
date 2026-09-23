@@ -70,16 +70,19 @@ def main(argv: list[str] | None = None) -> int:
     args.dest.mkdir(parents=True, exist_ok=True)
     platform_args = [a for tag in PLATFORMS[sys.platform] for a in ("--platform", tag)]
     requirements = ["requirements.txt"] + ([] if args.core_only else ["requirements-server.txt"])
-    for req in requirements:
-        print(f"Downloading {req} for {sys.platform}, Python {version} ...", flush=True)
-        code = subprocess.call(
-            [sys.executable, "-m", "pip", "download", "--only-binary=:all:", *platform_args,
-             "--python-version", version, "-r", str(ROOT / req), "-d", str(args.dest)],
-            env=dict(os.environ, PYTHONUTF8="1", PIP_DISABLE_PIP_VERSION_CHECK="1"))
-        if code != 0:
-            print(f"\nERROR: downloading {req} failed (see pip's message above).",
-                  file=sys.stderr)
-            return 1
+    # One resolution over both files, exactly as scripts/install.py installs
+    # them - two separate downloads could each pick a different version of a
+    # shared dependency, and the offline install then chose between them.
+    print(f"Downloading {' + '.join(requirements)} for {sys.platform}, Python {version} ...",
+          flush=True)
+    code = subprocess.call(
+        [sys.executable, "-m", "pip", "download", "--only-binary=:all:", *platform_args,
+         "--python-version", version, *(a for r in requirements for a in ("-r", str(ROOT / r))),
+         "-d", str(args.dest)],
+        env=dict(os.environ, PYTHONUTF8="1", PIP_DISABLE_PIP_VERSION_CHECK="1"))
+    if code != 0:
+        print("\nERROR: the download failed (see pip's message above).", file=sys.stderr)
+        return 1
 
     wheels = sorted(args.dest.glob("*.whl"))
     size = sum(w.stat().st_size for w in wheels)

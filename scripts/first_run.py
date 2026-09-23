@@ -10,6 +10,11 @@ any model is downloaded and without a GPU. Takes seconds, needs no network.
 If this passes, the software is installed correctly and the only thing
 standing between you and real calls is the models (docs/DEPLOYMENT.md).
 
+It works in its own folder, data/demo/, never in data/input and data/output:
+run again after real recordings are in place, a mock run there would have
+marked them processed - with mock transcripts and scores - and the next real
+run would have skipped them.
+
     --no-dashboard   stop after the reports instead of opening the dashboard
 """
 
@@ -22,12 +27,20 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+DEMO = ROOT / "data" / "demo"
+
+# The demo's own folders, as config overrides for every step it runs.
+DEMO_ENV = {
+    "CALLQA_PATHS__INPUT_DIR": str(DEMO / "input"),
+    "CALLQA_PATHS__OUTPUT_DIR": str(DEMO / "output"),
+    "CALLQA_PATHS__STATE_DB": str(DEMO / "callqa_state.db"),
+}
 
 
 def _step(*args: str) -> int:
     print(f"\n> python {' '.join(args)}", flush=True)
     return subprocess.call([sys.executable, *args], cwd=ROOT,
-                           env=dict(os.environ, PYTHONUTF8="1"))
+                           env=dict(os.environ, PYTHONUTF8="1", **DEMO_ENV))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,8 +67,8 @@ def main(argv: list[str] | None = None) -> int:
         print("note: ffmpeg was not found. This run does not need it; real MP3/M4A "
               "recordings do. See 'ffmpeg' in README.md (no admin rights needed).")
 
-    if not (ROOT / "data" / "input" / "metadata.csv").is_file():
-        if _step("scripts/generate_sample_data.py") != 0:
+    if not (DEMO / "input" / "metadata.csv").is_file():
+        if _step("scripts/generate_sample_data.py", "--input-dir", str(DEMO / "input")) != 0:
             return 1
     for cmd in (("-m", "callqa", "run", "--mock"), ("-m", "callqa", "report", "--mock")):
         if _step(*cmd) != 0:
@@ -65,14 +78,15 @@ def main(argv: list[str] | None = None) -> int:
     # agreement); it is run to prove it works, not for its verdict.
     _step("-m", "callqa", "calibrate", "--mock")
 
-    index = ROOT / "data" / "output" / "reports" / "index.html"
+    index = DEMO / "output" / "reports" / "index.html"
     print(f"\nFirst run OK. Reports: {index}")
     dashboard = ROOT / "dashboard" / "server.py"
     if args.no_dashboard or not dashboard.is_file():
         return 0
     print("Starting the dashboard (Ctrl+C to stop) ...", flush=True)
     try:
-        return subprocess.call([sys.executable, str(dashboard)], cwd=ROOT)
+        return subprocess.call([sys.executable, str(dashboard), "--output-dir",
+                                str(DEMO / "output")], cwd=ROOT)
     except KeyboardInterrupt:
         return 0
 

@@ -106,6 +106,13 @@ WhisperX), והקטע נחתך בכל נקודה שבה הדובר מתחלף. �
 
 ## התקנה והרצה
 
+> **ב־Windows** הפקודות במסמך הזה כתובות בתחביר של Linux. ההתאמה:
+> `python` ← `.venv\Scripts\python` · `~/rec/` ← `%USERPROFILE%\rec\` ·
+> שורה שמסתיימת ב־`\` ← כותבים את הפקודה כולה בשורה אחת ·
+> `export HF_TOKEN=...` ← שורה `HF_TOKEN=...` בקובץ `.env` ·
+> `echo $?` ← `echo %ERRORLEVEL%` · `open` ← `start` ·
+> `grep -o '████' <קובץ> | wc -l` ← `findstr /c:"████" <קובץ>`.
+
 ```bash
 pip install "pyannote.audio==4.0.7"   # הגרסה הנעולה ב-requirements-server.txt
 

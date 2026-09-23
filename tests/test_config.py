@@ -19,7 +19,7 @@ def test_defaults_load_without_file() -> None:
 def test_repo_config_file_loads() -> None:
     config = load_config("config/config.yaml")
     assert config.asr.engine == "faster_whisper"
-    assert config.judge.base_url.startswith("http://localhost")
+    assert config.judge.base_url.startswith("http://127.0.0.1")
     # {models_dir} placeholder is interpolated.
     assert "{models_dir}" not in config.asr.model_dir
 

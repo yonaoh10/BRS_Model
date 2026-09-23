@@ -44,7 +44,9 @@ def _stage_seconds(db_path: Path, call_id: str, call_start: float) -> dict[str, 
         with sqlite3.connect(str(db_path)) as conn:
             rows = conn.execute(
                 "SELECT stage, completed_at FROM stages WHERE call_id=? AND status='done' "
-                "ORDER BY completed_at", (call_id,)).fetchall()
+                # rowid breaks ties: Windows' clock ticks every 15.6 ms, so
+                # fast stages share a timestamp and sorted by name instead.
+                "ORDER BY completed_at, rowid", (call_id,)).fetchall()
     except sqlite3.Error:  # pragma: no cover - defensive
         return {}
     out: dict[str, float] = {}

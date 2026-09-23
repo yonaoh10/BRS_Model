@@ -75,6 +75,26 @@ def main(argv: list[str] | None = None) -> int:
               "tools/ (see the top of this script), or pass --server.", file=sys.stderr)
         return 2
 
+    # Refuse a port someone else holds. On a shared (multi-session) host,
+    # llama-server would fail to bind and exit, while a colleague's server on
+    # that port kept answering - and the pipeline's model check is then the
+    # only thing between this user's calls and it.
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        probe.bind(("127.0.0.1", args.port))
+    except OSError:
+        print(f"ERROR: port {args.port} is already in use on this machine - perhaps by "
+              "another user's judge. Start with --port <another>, and set "
+              f"CALLQA_JUDGE__BASE_URL=http://127.0.0.1:<that port>/v1 in .env.",
+              file=sys.stderr)
+        return 2
+    finally:
+        probe.close()
+
     cmd = [server, "--model", str(args.model), "--host", "127.0.0.1",
            "--port", str(args.port), "--ctx-size", "8192", "--jinja"]
     if args.threads:

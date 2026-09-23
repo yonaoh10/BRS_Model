@@ -196,7 +196,10 @@ def test_every_script_flag_a_document_shows_exists(doc: Path) -> None:
         script = _as_posix(script)
         path = REPO / script
         if not path.exists():
-            continue                    # the path test reports a missing script
+            # Inside a fenced block the path test never sees it, so it is
+            # reported here: a copied command naming a deleted script fails.
+            unknown.add(f"{script} (no such script)")
+            continue
         source = path.read_text(encoding="utf-8", errors="replace")
         for flag in _FLAG_RE.findall(rest):
             if f'"{flag}"' not in source and f"'{flag}'" not in source \

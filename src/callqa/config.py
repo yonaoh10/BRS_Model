@@ -159,7 +159,7 @@ class JudgeConfig(StrictModel):
     # gateway. The pipeline never launches, manages or assumes a specific
     # server; it only calls `base_url` and checks that it answers.
     engine: Literal["vllm", "mock"] = "vllm"
-    base_url: str = "http://localhost:8000/v1"
+    base_url: str = "http://127.0.0.1:8000/v1"
     model: str = "<LLM_MODEL_ID_PLACEHOLDER>"
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2500, gt=0)

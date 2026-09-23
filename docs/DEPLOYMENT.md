@@ -138,9 +138,9 @@ conditions:
 Then create a read token at https://huggingface.co/settings/tokens and put it in
 `.env`:
 
-```bash
-cp .env.example .env
-# edit .env:  HF_TOKEN=hf_...
+```
+copy .env.example .env          # Linux: cp .env.example .env
+notepad .env                    # set  HF_TOKEN=hf_...
 ```
 
 This is the single most common thing to get stuck on. The download fails with a
@@ -240,6 +240,27 @@ export CALLQA_JUDGE_API_KEY=<the key>     # the SERVER's copy of the key
 ./scripts/start_vllm.sh models/<your-judge-model> 8000
 ```
 
+**One GPU server for many VDI desktops.** The pipeline runs on each desktop
+(transcription, diarization and redaction are CPU work, about 6 minutes for a
+3-minute call) and only the judge runs on the GPU machine. `start_vllm.sh`
+binds 127.0.0.1; to serve the desktops, bind it where the bank's HTTPS
+termination can reach it (`CALLQA_VLLM_HOST`) and publish it only over
+`https://` - the pipeline refuses plain `http://` to anything but loopback.
+Give it a stable name with `--served-model-name callqa-judge` (extra flags
+pass through to vLLM), and on each desktop put in `.env`:
+
+```
+CALLQA_JUDGE__BASE_URL=https://<server>/v1
+CALLQA_JUDGE__MODEL=callqa-judge
+CALLQA_JUDGE__API_KEY=<the key>
+```
+
+Python on Windows trusts the Windows certificate store, so a certificate from
+the bank's internal CA needs nothing extra on the desktops. A 7B judge on a CPU
+(llama.cpp, README step 6.3) is a way to see the whole chain work on one
+desktop; the project's own measurement put 7B-class models below the quality
+bar for Hebrew evidence (`docs/performance_he.md`).
+
 Then point the pipeline at whatever you started, and give it the same key:
 
 ```yaml
@@ -249,7 +270,7 @@ judge:
   model: "<the model id the server reports>"
 ```
 
-```bash
+```
 # .env (or the service environment) - never in the YAML
 CALLQA_JUDGE__API_KEY=<the same value>
 ```
@@ -282,15 +303,15 @@ environment, never in the YAML.
 
 Check the environment before committing a batch to it:
 
-```bash
-python -m callqa preflight          # config, models, hashes, endpoint, disk, inputs
+```
+.venv\Scripts\python -m callqa preflight     # config, models, hashes, endpoint, disk, inputs, location, privacy
 ```
 
 Then one real call:
 
-```bash
-python -m callqa process --audio data/input/calls/<recording>.wav
-echo "exit: $?"
+```
+.venv\Scripts\python -m callqa process --audio data\input\calls\<recording>.wav
+echo exit: %ERRORLEVEL%          # cmd.exe;  PowerShell: $LASTEXITCODE;  bash: $?
 ```
 
 ---
@@ -310,7 +331,7 @@ echo "exit: $?"
 | `callqa eval` | Scores the whole system against a golden set. **Read §8 before quoting its numbers.** |
 | `callqa retention` | Deletes raw PII-bearing artifacts past the retention window, with an audit log. |
 
-The optional dashboard is `python dashboard/server.py`. It binds to 127.0.0.1
+The optional dashboard is `.venv\Scripts\python dashboard\server.py`. It binds to 127.0.0.1
 only, requires a session token, and is read-only. **The entire `dashboard/`
 directory can be deleted** with no effect on the pipeline; a test enforces that
 the core never imports it.
@@ -364,7 +385,14 @@ than it does.
 **What leaves the machine:** one thing only — the judge request, to the
 `judge.base_url` you configured, containing the **redacted** transcript. Nothing
 else makes a network call at runtime. `grep -rn "urllib\|http" src/callqa/` will
-show you every client in the code.
+show you every client in the code. Two third-party libraries would otherwise
+phone home, and the CLI switches both off before anything loads:
+pyannote.audio 4 sends usage telemetry to `otel.pyannote.ai` by default
+(`PYANNOTE_METRICS_ENABLED=0`), and huggingface_hub revalidates cached models
+online (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`). An operator who sets any
+of these explicitly keeps their value. Before the first transcript is sent the
+judge client checks that the server serves the configured model: on a shared
+Windows host a colleague's server can hold the same port.
 
 **PII handling:** masking happens in one place (`src/callqa/redaction.py`) and
 everything downstream — the judge prompt, reports, logs, results JSON, the
@@ -403,7 +431,7 @@ id, and masks it in validation messages, but it cannot rename your files.
 **Licences:**
 
 - This software: see `LICENSE` (proprietary, single client).
-- Dependencies: run `python scripts/license_inventory.py -o licences.md` **on
+- Dependencies: run `.venv\Scripts\python scripts\license_inventory.py -o licences.md` **on
   the deployed machine**. It reads what is actually installed and flags anything
   copyleft, restricted or undeclared. A list written by hand would be out of
   date; this is not.

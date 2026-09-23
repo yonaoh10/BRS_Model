@@ -49,7 +49,9 @@ redaction:
 
 judge:
   engine: vllm            # vllm | mock
-  base_url: "http://localhost:8000/v1"
+  # 127.0.0.1, not "localhost": on Windows localhost resolves to [::1] first,
+  # and the local judge server listens on 127.0.0.1 only.
+  base_url: "http://127.0.0.1:8000/v1"
   model: "<LLM_MODEL_ID_PLACEHOLDER>"   # decided on server per available VRAM; see scripts/download_models.py
   temperature: 0.0
   max_tokens: 2500

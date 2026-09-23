@@ -43,3 +43,8 @@ scratchpad/
 
 # Internal working notes for the AI assistant; not part of the deliverable.
 HANDOVER.md
+
+# Third-party programs a user unzips next to the project (ffmpeg, llama.cpp)
+# and quantized models: hundreds of MB that never belong in version control.
+tools/
+*.gguf

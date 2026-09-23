@@ -37,6 +37,7 @@ import logging
 import os
 import re
 import secrets
+import socket
 import statistics
 import sys
 import threading
@@ -51,6 +52,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from callqa.dotenv import load_dotenv  # noqa: E402
 from callqa.ingestion import CALL_ID_RE  # noqa: E402
+from callqa.portable import configure_stdio  # noqa: E402
 
 logger = logging.getLogger("callqa.dashboard")
 
@@ -203,6 +205,26 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- http layer
+
+class _ExclusiveServer(ThreadingHTTPServer):
+    """A listener nobody else can share.
+
+    http.server sets SO_REUSEADDR, which on POSIX only allows a quick restart
+    but on Windows lets ANY other process - another user's, on a multi-session
+    VDI host - bind the very same 127.0.0.1 port, after which Windows does not
+    define which of the two receives a connection: requests, and the session
+    token in their URL, could go to someone else. Windows gets
+    SO_EXCLUSIVEADDRUSE instead, and no reuse.
+    """
+
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            self.socket.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        super().server_bind()
+
 
 def _audio_is_current(output_dir: Path, call_id: str) -> bool:
     """Is the silenced WAV at least as new as the redacted transcript?
@@ -481,6 +503,7 @@ def main() -> int:
                         help="interface to listen on. Only ever change this inside a "
                              "container whose port is published to 127.0.0.1 on the host.")
     args = parser.parse_args()
+    configure_stdio()
     load_dotenv()
 
     logging.basicConfig(level=logging.INFO,
@@ -502,7 +525,13 @@ def main() -> int:
     if args.bind != "127.0.0.1":
         logger.warning("listening on %s: make sure this port is only reachable from "
                        "this machine", args.bind)
-    server = ThreadingHTTPServer((args.bind, args.port), Handler)
+    try:
+        server = _ExclusiveServer((args.bind, args.port), Handler)
+    except OSError as exc:
+        print(f"port {args.port} is already in use on this machine ({exc.strerror}). On a "
+              "shared (multi-session) host that may be another user's dashboard. Pick "
+              "another port with --port.", file=sys.stderr)
+        return 2
     url = f"http://127.0.0.1:{args.port}/?t={Handler.token}"
     print("\n  Call-QA dashboard is running.")
     print(f"  Open: {url}")

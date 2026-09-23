@@ -156,6 +156,36 @@ def _ner_check(config: Config) -> Check:
                  "scripts/download_models.py --ner, or set redaction.ner: false.")
 
 
+def _decoder_check() -> Check:
+    """What will read recordings that are not plain PCM WAV."""
+    from callqa.audio import have_pyav
+    from callqa.portable import find_executable
+
+    ffmpeg = find_executable("ffmpeg")
+    if ffmpeg:
+        return Check("audio decoder", True, False, f"ffmpeg at {ffmpeg}")
+    if have_pyav():
+        return Check("audio decoder", True, False,
+                     "PyAV (installed with the engines) - mp3, m4a and telephony WAV work")
+    return Check("audio decoder", False, False,
+                 "neither ffmpeg nor PyAV: only plain PCM WAV can be read. Unzip ffmpeg "
+                 "into tools/, or install requirements-server.txt.")
+
+
+def _vc_runtime_check() -> Check:  # pragma: no cover - Windows only
+    """torch and ctranslate2 need msvcp140.dll, which Python does not ship and
+    installing needs admin rights - so it is found out here, not at call 1."""
+    import ctypes
+
+    try:
+        ctypes.WinDLL("msvcp140.dll")
+        return Check("Visual C++ runtime", True, True, "msvcp140.dll present")
+    except OSError:
+        return Check("Visual C++ runtime", False, True,
+                     "msvcp140.dll is missing: the model engines cannot load. Ask IT to "
+                     "install the Microsoft Visual C++ 2015-2022 Redistributable (x64).")
+
+
 def _reachable(name: str, build) -> Check:  # noqa: ANN001
     try:
         build().check_connectivity()
@@ -168,7 +198,9 @@ def _engine_checks(config: Config, deep: bool) -> list[Check]:
     if config.run.mock or (config.asr.engine == "mock" and config.judge.engine == "mock"):
         return [Check("engines", True, False,
                       "mock engines — no models or endpoints required")]
-    checks: list[Check] = []
+    checks: list[Check] = [_decoder_check()]
+    if IS_WINDOWS:
+        checks.append(_vc_runtime_check())
     if config.asr.engine == "faster_whisper":
         checks.append(_verify_local_model(config, "asr", Path(config.asr.model_dir), deep))
     if config.speakers.mode != "stereo":

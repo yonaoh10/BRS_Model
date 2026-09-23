@@ -115,8 +115,11 @@ class FasterWhisperEngine:
             import os
             import sys
 
-            if sys.platform == "darwin":
-                # Intel macOS: ctranslate2 and torch each bundle libiomp5, and
+            if sys.platform in ("darwin", "win32"):
+                # Windows too: the ctranslate2 and torch wheels each ship
+                # their own libiomp5md.dll, and the second to initialise in
+                # one process aborts with OMP Error #15 unless told this is
+                # expected. Intel macOS: ctranslate2 and torch each bundle libiomp5, and
                 # once torch is resident (silero VAD runs before ASR on every
                 # fresh call) importing faster_whisper aborts the interpreter
                 # with OMP Error #15. This is Intel's own documented workaround;

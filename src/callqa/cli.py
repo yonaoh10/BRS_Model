@@ -11,7 +11,7 @@ import os
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 from callqa.config import Config, load_config
@@ -26,6 +26,7 @@ from callqa.models import (
 from callqa.portable import (
     IS_WINDOWS,
     configure_stdio,
+    disable_console_quick_edit,
     held_open_for_writing,
     make_private_root,
     move,
@@ -34,6 +35,9 @@ from callqa.portable import (
 from callqa.resources import find_config
 
 logger = logging.getLogger("callqa")
+
+# robocopy marks a file it is still copying with a 1980-01-01 timestamp.
+_ROBOCOPY_IN_PROGRESS = 315619200.0     # 1980-01-02T00:00:00Z
 
 # Everything probe_audio can read. Watching only .wav/.mp3 left an .m4a sitting
 # in the drop directory forever: not processed, not quarantined, not logged.
@@ -198,7 +202,8 @@ def _call_input(
 def cmd_process(args: argparse.Namespace) -> int:
     """One call through the full pipeline; exit code 0/1/2."""
     config = _load_config(args)
-    audio_path = Path(args.audio)
+    # expanduser: cmd.exe and PowerShell do not expand "~" for a program.
+    audio_path = Path(args.audio).expanduser()
     if not audio_path.exists():
         logger.error("audio file not found: %s", audio_path)
         return EXIT_FAILED
@@ -267,9 +272,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     recorder = _run_recorder(config, "run")
     results: list[CallResult] = []
     max_workers = config.run.max_workers
+    disable_console_quick_edit()
     if max_workers > 1:
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            results = list(pool.map(lambda c: _record_call(recorder, c, engines, state), calls))
+        # Timed waits, not pool.map: on Windows an untimed wait cannot be
+        # interrupted, so Ctrl+C did nothing until every call had finished.
+        pool = ThreadPoolExecutor(max_workers=max_workers)
+        futures = [pool.submit(_record_call, recorder, c, engines, state) for c in calls]
+        try:
+            pending = set(futures)
+            while pending:
+                _done, pending = wait(pending, timeout=1.0)
+        except KeyboardInterrupt:
+            pool.shutdown(wait=False, cancel_futures=True)
+            logger.error("interrupted: calls not yet started were cancelled; "
+                         "rerun to resume")
+            raise
+        pool.shutdown()
+        results = [f.result() for f in futures]
     else:
         results = [_record_call(recorder, c, engines, state) for c in calls]
     if recorder is not None:
@@ -362,7 +381,8 @@ def watch_loop(
                 continue
             if now - prev[1] < config.watch.stable_seconds:
                 continue
-            if held_open_for_writing(path):
+            if held_open_for_writing(path) or stat.st_mtime < _ROBOCOPY_IN_PROGRESS:
+                # robocopy stamps a file 1980-01-01 until its copy completes.
                 logger.info("%s is still being written; waiting", path.name)
                 continue
             # Stable: process it (sequential, one call at a time).
@@ -401,6 +421,7 @@ def watch_loop(
 def cmd_watch(args: argparse.Namespace) -> int:
     config = _load_config(args)
     engines = _build_engines(config)
+    disable_console_quick_edit()
     logger.info(
         "watching %s (poll=%.0fs, stable=%.0fs)",
         config.paths.input_dir / "calls",
@@ -808,6 +829,14 @@ def main(argv: list[str] | None = None) -> int:
     # First of all: a Hebrew message printed to a redirected stream on Windows
     # (a Scheduled Task, `> log.txt`) otherwise raises UnicodeEncodeError.
     configure_stdio()
+    # The runtime never downloads and never reports home - enforced, not just
+    # documented. pyannote.audio 4 sends usage telemetry to otel.pyannote.ai
+    # on every pipeline load unless told not to (HF_HUB_OFFLINE does not stop
+    # it), and huggingface_hub revalidates a cached model online by default.
+    # setdefault: an operator who deliberately sets one keeps their value.
+    for name, value in (("PYANNOTE_METRICS_ENABLED", "0"), ("HF_HUB_OFFLINE", "1"),
+                        ("TRANSFORMERS_OFFLINE", "1"), ("HF_HUB_DISABLE_TELEMETRY", "1")):
+        os.environ.setdefault(name, value)
     if IS_WINDOWS and _started_in_system_folder():
         print("callqa was started in the Windows system folder, so its data folders "
               "would be created there. Run it from the project folder - in Task "

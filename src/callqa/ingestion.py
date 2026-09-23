@@ -299,6 +299,34 @@ def _probe_with_ffprobe(audio_path: Path) -> dict | None:
         return None
 
 
+def _have_pyav() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("av") is not None
+
+
+def _probe_with_pyav(audio_path: Path) -> dict | None:
+    """The same answer ffprobe gives, from PyAV (installed with the model
+    engines, FFmpeg included): mp3/m4a, and telephony WAV (G.711 mu-law/A-law),
+    which the standard library's wave module refuses."""
+    if not _have_pyav():
+        return None
+    try:
+        import av
+
+        with av.open(str(audio_path)) as container:
+            stream = container.streams.audio[0]
+            ctx = stream.codec_context
+            channels = getattr(ctx, "channels", None) or len(ctx.layout.channels)
+            duration = (float(stream.duration * stream.time_base) if stream.duration
+                        else (container.duration or 0) / 1_000_000)
+            return {"streams": [{"channels": channels, "sample_rate": ctx.sample_rate,
+                                 "codec_name": ctx.name, "duration": duration}],
+                    "format": {"duration": duration}}
+    except Exception:  # noqa: BLE001 - "could not probe" is reported by the caller
+        return None
+
+
 def _probe_with_wave(audio_path: Path) -> dict | None:
     """Dependency-free fallback for .wav files (used when ffprobe is absent)."""
     if audio_path.suffix.lower() != ".wav":
@@ -340,11 +368,13 @@ def probe_audio(call: CallInput) -> CallMeta:
             raise IngestionError(
                 f"unsupported audio extension '{suffix}' (expected .wav/.mp3)"
             )
-        if not find_executable("ffmpeg"):
+        if not find_executable("ffmpeg") and not _have_pyav():
             raise IngestionError(
-                f"'{suffix}' needs ffmpeg, which is not installed; convert to .wav first"
+                f"'{suffix}' needs ffmpeg (unzip it into tools/) or the model engines "
+                "(requirements-server.txt), neither of which is here"
             )
-    info = _probe_with_ffprobe(call.audio_path) or _probe_with_wave(call.audio_path)
+    info = (_probe_with_ffprobe(call.audio_path) or _probe_with_wave(call.audio_path)
+            or _probe_with_pyav(call.audio_path))
     if info is None or not info.get("streams"):
         raise IngestionError(f"could not probe audio file: {call.audio_path.name}")
     stream = info["streams"][0]

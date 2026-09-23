@@ -71,6 +71,9 @@ class LazyPyannoteDiarizer:
     def _load_locked(self):  # noqa: ANN202
         if self._pipeline is not None:
             return self._pipeline
+        # Before the import: pyannote.audio 4 sends usage telemetry to
+        # otel.pyannote.ai unless this is set, offline mode or not.
+        os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "0")
         try:
             from pyannote.audio import Pipeline
         except ImportError as exc:

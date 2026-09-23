@@ -42,6 +42,7 @@ from callqa.models import (
     ScoreCard,
     TranscriptBundle,
 )
+from callqa.portable import CHILD_FLAGS
 from callqa.redaction import sanitize_error
 from callqa.reporting.call_report import render_call_report
 from callqa.speakers.stereo import (
@@ -190,6 +191,7 @@ class _EarlyDiarization:
                     [sys.executable, "-m", "callqa.speakers.diar_worker",
                      str(wav), call_id, str(out_path)],
                     stdin=subprocess.PIPE, stdout=log, stderr=log, env=env,
+                    creationflags=CHILD_FLAGS,
                 )
             assert proc.stdin is not None
             proc.stdin.write(config.speakers.model_dump_json().encode("utf-8"))

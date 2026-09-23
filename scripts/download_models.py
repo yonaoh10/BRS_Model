@@ -43,6 +43,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from callqa.dotenv import load_dotenv  # noqa: E402
 from callqa.ops.provenance import dir_sha256  # noqa: E402 - the one canonical hasher
 from callqa.portable import configure_stdio  # noqa: E402
 
@@ -235,6 +236,10 @@ def main() -> int:
     parser.add_argument("--models-dir", default="models", type=Path)
     args = parser.parse_args()
     configure_stdio()
+    # README step 5 puts HF_TOKEN in .env; without this the token there was
+    # ignored and the gated download failed with a 401.
+    load_dotenv()
+    os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "0")    # no telemetry from here either
 
     if not any([args.all, args.asr, args.diarization, args.llm, args.ner]):
         parser.error("nothing selected: pass --all or one of --asr/--diarization/--llm/--ner")
@@ -311,6 +316,15 @@ def _explain(exc: Exception, role: str) -> str:
         return "no such model id on Hugging Face - check the spelling."
     if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
         return "the disk is full. The models need ~25 GB in total."
+    if "certificate verify failed" in text.lower() or "SSLError" in name:
+        # A bank network typically inspects TLS; Python's own certificate
+        # store does not know the bank's root, the browser's does.
+        return ("the network re-signs HTTPS traffic with the bank's own certificate, which\n"
+                "Python does not trust. Export the bank's root certificate as a .pem file\n"
+                "(IT has it) and add REQUESTS_CA_BUNDLE=<path to it> to .env, then re-run.")
+    if "ProxyError" in name or "proxy" in text.lower():
+        return ("the connection needs the bank's proxy. Add HTTPS_PROXY=http://<proxy>:<port>\n"
+                "to .env (IT has the address), then re-run.")
     return f"{name}: {text[:300]}"
 
 

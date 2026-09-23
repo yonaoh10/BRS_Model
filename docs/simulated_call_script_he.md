@@ -18,6 +18,13 @@
 ב‑`docs/diarization_he.md`. אפשר להקליט את השיחה במכשיר אחד, בכל פורמט
 ש‑ffmpeg פותח (m4a של אייפון כולל), ולהריץ:
 
+> **ב־Windows** הפקודות במסמך הזה כתובות בתחביר של Linux. ההתאמה:
+> `python` ← `.venv\Scripts\python` · `~/rec/` ← `%USERPROFILE%\rec\` ·
+> שורה שמסתיימת ב־`\` ← כותבים את הפקודה כולה בשורה אחת ·
+> `export HF_TOKEN=...` ← שורה `HF_TOKEN=...` בקובץ `.env` ·
+> `echo $?` ← `echo %ERRORLEVEL%` · `open` ← `start` ·
+> `grep -o '████' <קובץ> | wc -l` ← `findstr /c:"████" <קובץ>`.
+
 ```bash
 python -m callqa process --audio ~/rec/call.m4a --call-id REAL001 --banker-id B900
 ```

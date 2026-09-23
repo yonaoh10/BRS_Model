@@ -8,6 +8,7 @@ VAD engines: 'energy' (dependency-free, default in mock) and 'silero'
 
 from __future__ import annotations
 
+import functools
 import logging
 import subprocess
 import wave
@@ -17,7 +18,7 @@ import numpy as np
 
 from callqa.config import Config
 from callqa.models import AudioArtifact, CallInput, CallMeta, VADSegment
-from callqa.portable import find_executable, make_private_dir, run_text
+from callqa.portable import CHILD_FLAGS, find_executable, make_private_dir, run_text
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,54 @@ def _have_ffmpeg() -> bool:
 
 
 def _run_ffmpeg(args: list[str]) -> None:
-    proc = run_text([_ffmpeg() or "ffmpeg", "-y", "-v", "error", *args])
+    # -nostdin: ffmpeg otherwise reads keys from the operator's console, and a
+    # "q" typed into a running `watch` window ended the conversion early - a
+    # truncated call, scored as if whole. The timeout is a hang guard only.
+    try:
+        proc = run_text([_ffmpeg() or "ffmpeg", "-nostdin", "-y", "-v", "error", *args],
+                        timeout=1800)
+    except subprocess.TimeoutExpired:
+        raise AudioError("ffmpeg did not finish within 30 minutes") from None
     if proc.returncode != 0:
         raise AudioError(f"ffmpeg failed: {proc.stderr.strip()[:500]}")
+
+
+def have_pyav() -> bool:
+    """PyAV (`av`) comes with faster-whisper and carries FFmpeg's decoders
+    inside its wheel - on Windows too - so a machine with the model engines
+    can read mp3, m4a and telephony (G.711) WAV with no ffmpeg.exe at all."""
+    import importlib.util
+
+    return importlib.util.find_spec("av") is not None
+
+
+@functools.lru_cache(maxsize=2)
+def _decode_with_pyav(path: str, mtime: float, size: int, rate: int) -> np.ndarray:
+    """The whole file as float32 (n_samples, n_channels<=2) at `rate`.
+
+    Cached (by path, mtime and size) because the channel probe asks for six
+    windows of the same file and PyAV cannot cheaply seek every container.
+    """
+    import av
+
+    with av.open(path) as container:
+        stream = container.streams.audio[0]
+        ctx = stream.codec_context
+        channels = getattr(ctx, "channels", None) or len(ctx.layout.channels) or 1
+        layout = "stereo" if channels >= 2 else "mono"
+        resampler = av.AudioResampler(format="s16", layout=layout, rate=rate)
+        chunks = [out.to_ndarray().reshape(-1)
+                  for frame in container.decode(stream)
+                  for out in resampler.resample(frame)]
+        chunks += [out.to_ndarray().reshape(-1) for out in resampler.resample(None)]
+    pcm = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.int16)
+    width = 2 if layout == "stereo" else 1
+    return pcm[: (pcm.size // width) * width].reshape(-1, width).astype(np.float32) / 32768.0
+
+
+def decode_with_pyav(path: Path, rate: int) -> np.ndarray:
+    st = path.stat()
+    return _decode_with_pyav(str(path), st.st_mtime, st.st_size, rate)
 
 
 def _read_wav(path: Path) -> tuple[np.ndarray, int]:
@@ -99,10 +145,16 @@ def _extract_channel(
             _run_ffmpeg(["-i", str(src), "-af", pan, "-ar", str(target_rate), str(dst)])
         _restrict(dst)
         return
-    # Pure-Python fallback (WAV inputs only).
-    if src.suffix.lower() != ".wav":
-        raise AudioError("ffmpeg is required for non-WAV inputs")
-    data, rate = _read_wav(src)
+    # Pure-Python fallback: plain PCM WAV with the standard library, anything
+    # else (mp3, m4a, telephony G.711 WAV) through PyAV when it is installed.
+    try:
+        data, rate = _read_wav(src)
+    except (wave.Error, EOFError, AudioError) as exc:
+        if not have_pyav():
+            raise AudioError(
+                f"{src.suffix or 'this'} audio needs ffmpeg or the model engines "
+                f"(requirements-server.txt): {exc}") from exc
+        data, rate = decode_with_pyav(src, target_rate), target_rate
     mono = data.mean(axis=1) if channel is None else data[:, min(channel, data.shape[1] - 1)]
     _write_wav(dst, _resample_linear(mono, rate, target_rate), target_rate)
     _restrict(dst)
@@ -148,11 +200,12 @@ def _decode_stereo_window(
     if _have_ffmpeg():
         try:
             proc = subprocess.run(
-                [_ffmpeg() or "ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
+                [_ffmpeg() or "ffmpeg", "-nostdin", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
                  "-i", str(src), "-ac", "2", "-ar", str(rate), "-f", "s16le", "-"],
-                capture_output=True,
+                capture_output=True, stdin=subprocess.DEVNULL, timeout=600,
+                creationflags=CHILD_FLAGS,
             )
-        except OSError as exc:
+        except (OSError, subprocess.TimeoutExpired) as exc:
             # `shutil.which` found something; exec failed anyway. A broken
             # symlink, a binary for the wrong architecture, a PATH entry on a
             # filesystem mounted noexec, or an ffmpeg removed between the check
@@ -167,14 +220,21 @@ def _decode_stereo_window(
         if data.size < 2:
             return None
         return data[: (data.size // 2) * 2].reshape(-1, 2)
-    if src.suffix.lower() != ".wav":
-        return None
     try:
+        if src.suffix.lower() != ".wav":
+            raise AudioError("not a WAV")
         data, src_rate = _read_wav(src)
     except _UNDECODABLE as exc:
-        logger.warning("could not decode %s for channel probing (%s: %s)",
-                       src.name, type(exc).__name__, exc)
-        return None
+        if not have_pyav():
+            logger.warning("could not decode %s for channel probing (%s: %s)",
+                           src.name, type(exc).__name__, exc)
+            return None
+        try:
+            data, src_rate = decode_with_pyav(src, rate), rate
+        except Exception as av_exc:  # noqa: BLE001 - fail closed, as for ffmpeg
+            logger.warning("could not decode %s for channel probing (%s)",
+                           src.name, type(av_exc).__name__)
+            return None
     if data.shape[1] < 2:
         return None
     lo = int(start * src_rate)

@@ -50,6 +50,7 @@ class VLLMJudge:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status != 200:
                     raise VLLMJudgeError(f"judge /models returned HTTP {resp.status}")
+                listing = resp.read()
         except urllib.error.HTTPError as exc:
             # Caught BEFORE URLError, which it subclasses. An HTTP status means
             # the server is up and answered; reporting it as "unreachable, start
@@ -72,7 +73,37 @@ class VLLMJudge:
                 "listening there. Start your model server (scripts/start_llama_server.py "
                 "and scripts/start_vllm.sh are examples) and check judge.base_url."
             ) from exc
+        self._check_it_serves_our_model(listing)
         logger.info("vLLM endpoint reachable at %s", self.config.base_url)
+
+    def _check_it_serves_our_model(self, listing: bytes) -> None:
+        """Refuse a server that is not serving the configured model.
+
+        Before any transcript is sent. On a multi-session Windows host the
+        loopback interface is shared by everyone logged in: when a colleague's
+        judge already holds the port, ours cannot start, and the pipeline would
+        otherwise send this user's calls to theirs. The model a server reports
+        is the file it was started with, which differs. Compared by the last
+        path component, so a relative and an absolute spelling of one file
+        match; a server that lists nothing is not second-guessed.
+        """
+        try:
+            ids = [str(m.get("id", "")) for m in json.loads(listing).get("data", [])]
+        except (ValueError, AttributeError, TypeError):
+            return
+        ids = [i for i in ids if i]
+        if not ids:
+            return
+
+        def leaf(name: str) -> str:
+            return re.split(r"[\\/]", name.rstrip("\\/"))[-1].casefold()
+
+        if leaf(self.config.model) not in {leaf(i) for i in ids}:
+            raise VLLMJudgeError(
+                f"the judge server at {self.config.base_url} serves {ids}, not "
+                f"judge.model '{self.config.model}'. It may be another user's server "
+                "on the same machine, or judge.model is out of date. Nothing was sent."
+            )
 
     @staticmethod
     def _scorecard_schema(dimension_ids: list[str]) -> dict:

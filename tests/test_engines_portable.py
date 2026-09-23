@@ -67,3 +67,44 @@ def test_pyannote_gets_the_audio_in_memory_not_a_path(tmp_path: Path) -> None:
     assert isinstance(audio, dict) and audio["sample_rate"] == 16000
     assert isinstance(audio["waveform"], torch.Tensor)
     assert tuple(audio["waveform"].shape) == (1, 16000)
+
+
+def _mulaw_stereo_wav(path: Path) -> Path:
+    """A G.711 mu-law stereo WAV - what call recorders export, and a format the
+    standard library's wave module refuses ("unknown format: 7")."""
+    av = pytest.importorskip("av")
+    t = np.arange(8000 * 3) / 8000
+    left = (np.sin(2 * np.pi * 300 * t) * 12000).astype(np.int16)
+    right = (np.sin(2 * np.pi * 700 * t) * 12000).astype(np.int16) * (t > 1.5)
+    interleaved = np.stack([left, right.astype(np.int16)], axis=1).reshape(1, -1)
+    with av.open(str(path), "w", format="wav") as out:
+        stream = out.add_stream("pcm_mulaw", rate=8000, layout="stereo")
+        frame = av.AudioFrame.from_ndarray(interleaved, format="s16", layout="stereo")
+        frame.sample_rate = 8000
+        for packet in stream.encode(frame):
+            out.mux(packet)
+        for packet in stream.encode(None):
+            out.mux(packet)
+    return path
+
+
+def test_telephony_wav_is_read_without_ffmpeg(tmp_path: Path, monkeypatch) -> None:  # noqa: ANN001
+    """No ffmpeg.exe on a VDI desktop: PyAV, installed with the engines, decodes."""
+    from callqa import audio as audio_mod
+    from callqa.ingestion import _probe_with_pyav
+
+    src = _mulaw_stereo_wav(tmp_path / "call.wav")
+    with pytest.raises(wave.Error):
+        wave.open(str(src), "rb")                       # the stdlib alone cannot
+
+    probe = _probe_with_pyav(src)
+    assert probe["streams"][0]["channels"] == 2
+    assert abs(probe["format"]["duration"] - 3.0) < 0.1
+
+    monkeypatch.setattr(audio_mod, "_have_ffmpeg", lambda: False)
+    dst = tmp_path / "left.wav"
+    audio_mod._extract_channel(src, dst, 0, 16000)
+    data, rate = audio_mod._read_wav(dst)
+    assert rate == 16000 and data.shape[1] == 1 and abs(len(data) / rate - 3.0) < 0.1
+    window = audio_mod._decode_stereo_window(src, 0.0, 3.0)
+    assert window is not None and window.shape[1] == 2

@@ -30,6 +30,9 @@ from __future__ import annotations
 import argparse
 import csv
 import io
+import os
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -186,10 +189,16 @@ def main() -> int:
         print("stereo: banker on the left channel, customer on the right")
     else:
         print("mono: speaker attribution will need pyannote (set HF_TOKEN before processing)")
-    print(f"\nnext:\n  python -m callqa validate-inputs\n"
-          f"  python -m callqa process --audio {out} --call-id {call_id} "
-          f"--banker-id {args.banker_id}"
-          + (f" --banker-channel {channel}" if channel else ""))
+    # The interpreter that ran this (the project's .venv), and quoting that
+    # survives a space in the path - a bare `python` pasted into cmd.exe starts
+    # a Python without callqa, or the Microsoft Store.
+    quote = subprocess.list2cmdline if os.name == "nt" else shlex.join
+    process = [sys.executable, "-m", "callqa", "process", "--audio", str(out),
+               "--call-id", call_id, "--banker-id", args.banker_id]
+    if channel:
+        process += ["--banker-channel", channel]
+    print(f"\nnext:\n  {quote([sys.executable, '-m', 'callqa', 'validate-inputs'])}\n"
+          f"  {quote(process)}")
     return 0
 
 

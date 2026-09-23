@@ -106,6 +106,41 @@ def link_project(python: Path) -> Path:
     return pth
 
 
+ENGINE_CHECK = ("import ctranslate2, onnxruntime, torch, faster_whisper; "
+                "print('engines load: torch', torch.__version__, "
+                "'ctranslate2', ctranslate2.__version__)")
+
+
+def _venv_works(python: Path, version: tuple[int, int]) -> bool:
+    try:
+        out = subprocess.run([str(python), "-c", "import sys; print(sys.version_info[:2])"],
+                             capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and out.stdout.strip() == str(version)
+
+
+def _make_project_private() -> None:
+    """Owner-only project folder, on Windows, before anything is added to it.
+
+    Unpacked anywhere but the user's profile (C:\\BRS_Model-main, a D: data
+    disk) the folder inherits "Users: read" and "Authenticated Users: modify":
+    every other user of the machine could read .env's keys and the call data,
+    or put their own ffmpeg.exe into tools/ for this program to run.
+    """
+    sys.path.insert(0, str(ROOT / "src"))
+    try:
+        from callqa.portable import make_private_dir, private_to_owner
+    except ImportError:          # pragma: no cover - the source tree is incomplete
+        return
+    make_private_dir(ROOT)
+    if private_to_owner(ROOT):
+        _say(f"The project folder is private to you (and SYSTEM/Administrators): {ROOT}")
+    else:
+        _say(f"WARNING: could not make {ROOT} private to you. Keep it under your user "
+             "folder (C:\\Users\\<name>), which is private already.")
+
+
 def verify(python: Path) -> int:
     check = ("import callqa, callqa.cli; "
              "from callqa.reporting.common import jinja_env; "
@@ -155,8 +190,17 @@ def main(argv: list[str] | None = None) -> int:
         if problem:
             return _fail(problem)
 
+    if IS_WINDOWS:
+        _make_project_private()
+
     venv = args.venv if args.venv.is_absolute() else Path.cwd() / args.venv
     python = venv_python(venv)
+    if python.exists() and not _venv_works(python, version):
+        # Copied from another machine or user (its pyvenv.cfg points at a
+        # Python that is not here), or built by another Python version.
+        _say(f"The environment at {venv} does not work here; rebuilding it ...")
+        if _run([sys.executable, "-m", "venv", "--clear", str(venv)]) != 0:
+            return _fail(f"could not rebuild {venv}; delete that folder and run this again.")
     if not python.exists():
         _say(f"Creating a virtual environment at {venv} ...")
         code = _run([sys.executable, "-m", "venv", str(venv)])
@@ -172,18 +216,27 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _say("Installing from the package index (set by pip.ini / pip.conf, or PyPI) ...")
 
+    # ONE resolution over both files: resolved one after the other, a pin the
+    # engines disagree with was silently replaced by the second install.
     requirements = [ROOT / "requirements.txt"]
     if args.server:
         requirements.append(ROOT / "requirements-server.txt")
-    for req in requirements:
-        _say(f"  {req.name}")
-        if _run([*pip, "-r", str(req)]) != 0:
-            return _fail(f"installing {req.name} failed (see the pip output above).")
+    _say("  " + " + ".join(r.name for r in requirements))
+    if _run([*pip, *(a for r in requirements for a in ("-r", str(r)))]) != 0:
+        return _fail("installing the requirements failed (see the pip output above).")
 
     pth = link_project(python)
     _say(f"Linked the project into the environment ({pth.name}).")
     if verify(python) != 0:
         return _fail("the environment was built but callqa does not import in it.")
+    if args.server and _run([str(python), "-c", ENGINE_CHECK]) != 0:
+        hint = ""
+        if IS_WINDOWS:
+            hint = (" On Windows this is almost always a missing Microsoft Visual C++ "
+                    "2015-2022 Redistributable (x64) - msvcp140.dll, which torch and "
+                    "ctranslate2 need and Python does not ship. Installing it needs admin "
+                    "rights: ask IT for vc_redist.x64.exe, then run this again.")
+        return _fail("the model engines are installed but do not load." + hint)
 
     run = r".venv\Scripts\python" if IS_WINDOWS else ".venv/bin/python"
     if venv != ROOT / ".venv":

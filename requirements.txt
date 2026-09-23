@@ -10,7 +10,9 @@
 # bank would have had to review, vendor and keep patched for nothing.
 pydantic==2.13.4
 Jinja2==3.1.6
-PyYAML==6.0.1
+# 6.0.3, not 6.0.1: pyannote.audio (via pyannote-database) needs >=6.0.2, and a
+# pin the engines cannot share made pip replace it behind this file's back.
+PyYAML==6.0.3
 numpy==2.4.6
 scikit-learn==1.9.0
 pytest==9.1.1

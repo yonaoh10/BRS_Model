@@ -19,7 +19,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from callqa.portable import hostname as _hostname
-from callqa.portable import pid_alive, replace
+from callqa.portable import is_network_path, pid_alive, replace, started_after
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +97,13 @@ class StateDB:
         # thread pool the connections raced and raised "database is locked",
         # aborting the whole run.
         conn = sqlite3.connect(self.db_path, timeout=30)
+        # WAL needs shared memory between every process using the database,
+        # which a network share cannot give: SQLite documents WAL as unsafe
+        # there. Preflight refuses such a location; if someone runs anyway,
+        # the rollback journal at least stays correct.
+        journal = "DELETE" if is_network_path(self.db_path.parent) else "WAL"
         try:
-            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(f"PRAGMA journal_mode={journal}")
             conn.executescript(_SCHEMA)
             conn.commit()
         finally:
@@ -160,7 +165,8 @@ class StateDB:
     def completed_stages(self, call_id: str) -> list[str]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT stage FROM stages WHERE call_id=? AND status='done' ORDER BY completed_at",
+                "SELECT stage FROM stages WHERE call_id=? AND status='done' "
+                "ORDER BY completed_at, rowid",
                 (call_id,),
             ).fetchall()
         return [r[0] for r in rows]
@@ -194,8 +200,10 @@ class StateDB:
                 ).fetchone()
         if row is not None:
             pid, lock_host = row
+            acquired_at = time.time() - self._lock_age(call_id)
             stale_by_death = (
-                lock_host == hostname and pid != os.getpid() and not _pid_alive(pid)
+                lock_host == hostname and pid != os.getpid()
+                and (not _pid_alive(pid) or started_after(pid, acquired_at))
             )
             # A lock left behind by a container that no longer exists can never
             # be shown dead from here, because the pid belongs to another host.
