@@ -106,3 +106,12 @@ def test_a_reused_pid_does_not_keep_a_dead_lock_alive() -> None:
 
     assert started_after(os.getpid(), time.time() + 60) is False     # not in the future
     assert started_after(os.getpid(), 0.0) is True                   # started after 1970
+
+
+def test_verbose_logging_hides_torchaudio_ffmpeg_probe_tracebacks() -> None:
+    import logging
+
+    from callqa.cli import _setup_logging
+
+    _setup_logging(verbose=True)
+    assert not logging.getLogger("torio._extension.utils").isEnabledFor(logging.DEBUG)

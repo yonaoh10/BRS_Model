@@ -71,6 +71,10 @@ def _setup_logging(verbose: bool = False, log_file: str | None = None) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=handlers,
     )
+    # torchaudio probes for FFmpeg DLLs it is never used for here (audio is
+    # decoded by ffmpeg/PyAV and handed over in memory) and logs every miss as
+    # a DEBUG traceback, which under -v reads like a failure.
+    logging.getLogger("torio").setLevel(logging.INFO)
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
