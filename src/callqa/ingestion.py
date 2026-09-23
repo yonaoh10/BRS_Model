@@ -7,13 +7,13 @@ import io
 import json
 import logging
 import re
-import shutil
 import subprocess
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from callqa.models import CallInput, CallMeta
+from callqa.portable import find_executable, run_text
 
 logger = logging.getLogger(__name__)
 
@@ -204,14 +204,14 @@ def call_input_from_metadata(row: dict[str, str], calls_dir: Path) -> CallInput:
 
 def _probe_with_ffprobe(audio_path: Path) -> dict | None:
     try:
-        proc = subprocess.run(
+        proc = run_text(
             [
-                "ffprobe", "-v", "error", "-select_streams", "a:0",
+                find_executable("ffprobe") or "ffprobe", "-v", "error", "-select_streams", "a:0",
                 "-show_entries", "stream=channels,sample_rate,codec_name,duration",
                 "-show_entries", "format=duration",
                 "-of", "json", str(audio_path),
             ],
-            capture_output=True, text=True, timeout=60,
+            timeout=60,
         )
         if proc.returncode != 0:
             return None
@@ -261,7 +261,7 @@ def probe_audio(call: CallInput) -> CallMeta:
             raise IngestionError(
                 f"unsupported audio extension '{suffix}' (expected .wav/.mp3)"
             )
-        if not shutil.which("ffmpeg"):
+        if not find_executable("ffmpeg"):
             raise IngestionError(
                 f"'{suffix}' needs ffmpeg, which is not installed; convert to .wav first"
             )

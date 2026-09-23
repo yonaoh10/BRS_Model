@@ -9,7 +9,6 @@ VAD engines: 'energy' (dependency-free, default in mock) and 'silero'
 from __future__ import annotations
 
 import logging
-import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -18,6 +17,7 @@ import numpy as np
 
 from callqa.config import Config
 from callqa.models import AudioArtifact, CallInput, CallMeta, VADSegment
+from callqa.portable import find_executable, make_private_dir, run_text
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,16 @@ class AudioError(RuntimeError):
     pass
 
 
+def _ffmpeg() -> str | None:
+    return find_executable("ffmpeg")
+
+
 def _have_ffmpeg() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return _ffmpeg() is not None
 
 
 def _run_ffmpeg(args: list[str]) -> None:
-    proc = subprocess.run(["ffmpeg", "-y", "-v", "error", *args], capture_output=True, text=True)
+    proc = run_text([_ffmpeg() or "ffmpeg", "-y", "-v", "error", *args])
     if proc.returncode != 0:
         raise AudioError(f"ffmpeg failed: {proc.stderr.strip()[:500]}")
 
@@ -144,7 +148,7 @@ def _decode_stereo_window(
     if _have_ffmpeg():
         try:
             proc = subprocess.run(
-                ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
+                [_ffmpeg() or "ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{seconds:.3f}",
                  "-i", str(src), "-ac", "2", "-ar", str(rate), "-f", "s16le", "-"],
                 capture_output=True,
             )
@@ -375,11 +379,7 @@ def prepare_audio(
 ) -> AudioArtifact:
     """Convert / split audio to 16 kHz mono WAV(s) and run VAD per channel."""
     rate = config.audio.target_sample_rate
-    wav_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        wav_dir.chmod(0o700)
-    except OSError:  # pragma: no cover
-        pass
+    make_private_dir(wav_dir)
 
     if meta.channels > 2:
         # Classified from a downmix but extracted with a two-channel pan, so

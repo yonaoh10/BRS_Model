@@ -18,6 +18,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from callqa.portable import hostname as _hostname
+from callqa.portable import pid_alive, replace
+
 logger = logging.getLogger(__name__)
 
 # A lock older than this is assumed abandoned. Processing one call takes
@@ -54,7 +57,7 @@ def atomic_write_text(path: Path, content: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
-        os.replace(tmp_name, path)
+        replace(tmp_name, path)
     except BaseException:
         try:
             os.unlink(tmp_name)
@@ -72,13 +75,10 @@ def atomic_write_json(path: Path, data: object) -> None:
 
 
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    # Never os.kill(pid, 0) here: on Windows signal 0 is CTRL_C_EVENT and any
+    # other value is TerminateProcess - the liveness probe would interrupt or
+    # kill the very process it was asking about.
+    return pid_alive(pid)
 
 
 class StateDB:
@@ -180,7 +180,7 @@ class StateDB:
         A lock whose owning pid is dead (same host) is considered stale and
         is stolen.
         """
-        hostname = os.uname().nodename
+        hostname = _hostname()
         with self._connect() as conn:
             try:
                 conn.execute(
@@ -232,5 +232,5 @@ class StateDB:
         with self._connect() as conn:
             conn.execute(
                 "DELETE FROM locks WHERE call_id=? AND pid=? AND hostname=?",
-                (call_id, os.getpid(), os.uname().nodename),
+                (call_id, os.getpid(), _hostname()),
             )

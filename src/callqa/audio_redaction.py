@@ -35,6 +35,7 @@ import numpy as np
 
 from callqa.audio import _read_wav, _write_wav
 from callqa.models import AudioArtifact, DialogTranscript, RedactedTranscript
+from callqa.portable import make_private_dir, replace
 from callqa.redaction import MASK, TURN_SEPARATOR, TurnSpan, _name_pattern, find_pii
 
 logger = logging.getLogger(__name__)
@@ -228,15 +229,11 @@ def _tmp_path(path: Path) -> Path:
 
 
 def _atomic_write_wav(path: Path, samples: np.ndarray, rate: int) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        path.parent.chmod(0o700)
-    except OSError:  # pragma: no cover - unusual filesystems
-        pass
+    make_private_dir(path.parent)
     tmp = _tmp_path(path)
     try:
         _write_wav(tmp, samples, rate)
-        os.replace(tmp, path)
+        replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)  # never orphan a partial tmp on failure
         raise
@@ -251,7 +248,7 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     tmp = _tmp_path(path)
     try:
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

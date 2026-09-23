@@ -76,7 +76,7 @@ def _label(path: Path, output_dir: Path, input_dir: Path | None) -> str:
     for root, prefix in ((output_dir, ""), (input_dir, "input/")):
         if root is not None:
             try:
-                return prefix + str(path.relative_to(root))
+                return prefix + path.relative_to(root).as_posix()
             except ValueError:
                 continue
     return str(path)                                  # pragma: no cover

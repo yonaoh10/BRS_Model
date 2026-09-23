@@ -27,24 +27,31 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
-import time
 from pathlib import Path
 
+from callqa.portable import configure_stdio, exit_when_process_ends
 
-def _watch_parent(original_ppid: int) -> None:
-    """Exit if the parent dies. macOS has no PR_SET_PDEATHSIG, so a SIGKILL of
-    the pipeline would otherwise orphan this worker - it would run pyannote to
-    completion holding the GPU for minutes after the operator thinks the job is
-    gone. Reparenting to pid 1 (or a changed ppid) is the portable signal."""
-    while True:
-        if os.getppid() != original_ppid:
-            os._exit(0)
-        time.sleep(2.0)
+
+def _pipeline_pid() -> int:
+    """The pipeline process that started this worker.
+
+    Passed explicitly because the direct parent is not always it: inside a
+    Windows virtualenv, .venv\\Scripts\\python.exe is a small launcher that
+    starts the real interpreter as ITS child.
+    """
+    try:
+        return int(os.environ["CALLQA_PARENT_PID"])
+    except (KeyError, ValueError):
+        return os.getppid()
 
 
 def main(argv: list[str]) -> int:
-    threading.Thread(target=_watch_parent, args=(os.getppid(),), daemon=True).start()
+    # Exit if the pipeline dies. macOS has no PR_SET_PDEATHSIG and Windows never
+    # reparents, so a killed pipeline would otherwise orphan this worker - it
+    # would run pyannote to completion holding the GPU for minutes after the
+    # operator thinks the job is gone.
+    exit_when_process_ends(_pipeline_pid())
+    configure_stdio()
     if len(argv) != 3:
         print("usage: diar_worker <wav> <call_id> <out_json> (config on stdin)",
               file=sys.stderr)

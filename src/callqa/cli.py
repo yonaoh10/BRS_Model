@@ -23,6 +23,7 @@ from callqa.models import (
     CallInput,
     CallResult,
 )
+from callqa.portable import configure_stdio
 from callqa.resources import find_config
 
 logger = logging.getLogger("callqa")
@@ -735,6 +736,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # First of all: a Hebrew message printed to a redirected stream on Windows
+    # (a Scheduled Task, `> log.txt`) otherwise raises UnicodeEncodeError.
+    configure_stdio()
     # Before the parser: config overrides come from the environment, and the
     # operator's `.env` is where the endpoint of a GPU box or a judge key lives.
     load_dotenv()

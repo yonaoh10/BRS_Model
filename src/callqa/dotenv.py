@@ -67,7 +67,14 @@ def load_dotenv(explicit: Path | None = None) -> list[str]:
         if path is None or not path.is_file() or path.resolve() in _LOADED:
             continue
         try:
-            values = parse_env_file(path.read_text(encoding="utf-8"))
+            # utf-8-sig: Windows Notepad has written a byte-order mark for
+            # years, and with plain utf-8 it glued itself to the FIRST key -
+            # "\ufeffCALLQA_JUDGE__API_KEY" - which was then silently skipped.
+            values = parse_env_file(path.read_text(encoding="utf-8-sig"))
+        except UnicodeDecodeError:
+            logger.warning("could not read %s: it is not UTF-8. Save it again as "
+                           "UTF-8 (Notepad: File > Save as > Encoding: UTF-8).", path)
+            continue
         except OSError as exc:
             logger.warning("could not read %s: %s", path, exc)
             continue

@@ -19,6 +19,7 @@ from pathlib import Path
 from callqa import __version__
 from callqa.config import Config
 from callqa.judge.prompts import PROMPT_VERSION
+from callqa.portable import run_text
 
 # repo root when this runs from a source checkout (src/callqa/ops/…), so a git
 # sha is available in development; on a tarball/air-gapped deploy there is no
@@ -37,14 +38,11 @@ def git_sha() -> str:
     if not (_REPO_ROOT / ".git").exists():
         return "none"
     try:
-        head = subprocess.run(
-            ["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5)
+        head = run_text(["git", "-C", str(_REPO_ROOT), "rev-parse", "HEAD"], timeout=5)
         if head.returncode != 0:
             return "none"
-        dirty = subprocess.run(
-            ["git", "-C", str(_REPO_ROOT), "status", "--porcelain"],
-            capture_output=True, text=True, timeout=5).stdout.strip()
+        dirty = run_text(["git", "-C", str(_REPO_ROOT), "status", "--porcelain"],
+                         timeout=5).stdout.strip()
         return head.stdout.strip() + ("-dirty" if dirty else "")
     except (OSError, subprocess.SubprocessError):  # pragma: no cover - defensive
         return "none"

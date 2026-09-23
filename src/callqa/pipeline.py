@@ -178,6 +178,7 @@ class _EarlyDiarization:
         log_path = Path(f"{wav}.diar.log")
         out_path.unlink(missing_ok=True)
         env = dict(os.environ)
+        env["CALLQA_PARENT_PID"] = str(os.getpid())
         # Deliberately NOT capping threads: the perf QA measured an explicit
         # 3+3 split at 394 s combined wall vs ~347 s when both engines keep
         # their defaults and let the scheduler arbitrate. The operator's own
