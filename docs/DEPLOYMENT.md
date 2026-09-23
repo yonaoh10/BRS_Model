@@ -234,7 +234,13 @@ https://github.com/ggml-org/llama.cpp/releases) into `tools/`, then:
 
 It reads the key from `.env` (so the two sides cannot disagree), passes it to
 the server through the environment rather than the command line, and binds to
-127.0.0.1. llama.cpp enforces the same JSON schema the judge sends, so the
+127.0.0.1. On a multi-session host, where every logged-in user shares
+127.0.0.1, the pipeline checks the server serves the configured model before
+sending a transcript - but the key itself travels in that first request, so on
+such hosts a judge on a separate machine over HTTPS is the stronger setup.
+Ollama also works (it honours the same JSON schema), provided its context is
+raised to at least 16384 tokens (`PARAMETER num_ctx 16384` in a Modelfile):
+its CPU default is 4096, and it silently truncates a longer prompt. llama.cpp enforces the same JSON schema the judge sends, so the
 structured-output guarantee holds. Expect minutes per call on a CPU: this is a
 working deployment, not a fast one.
 
