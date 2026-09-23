@@ -1,13 +1,14 @@
 {
-  "created_at": "2026-09-23T19:45:31+00:00",
+  "created_at": "2026-09-23T20:45:54+00:00",
   "n_calls": 6,
-  "seconds_total": 3.512,
+  "seconds_total": 3.722,
   "wer_mean": 0.0,
   "cer_mean": 0.0,
   "role_accuracy_mean": 1.0,
   "redaction_recall_mean": 1.0,
   "redaction_precision_mean": 1.0,
   "redaction_f1_mean": 1.0,
+  "redaction_applied_recall_mean": 1.0,
   "judge_qwk": 1.0,
   "calls": [
     {
@@ -20,7 +21,8 @@
         "precision": 1.0,
         "f1": 1.0,
         "gold": 2,
-        "detected": 2
+        "detected": 2,
+        "applied_recall": 1.0
       }
     },
     {
@@ -33,7 +35,8 @@
         "precision": 1.0,
         "f1": 1.0,
         "gold": 3,
-        "detected": 6
+        "detected": 6,
+        "applied_recall": 1.0
       }
     },
     {
@@ -46,7 +49,8 @@
         "precision": 1.0,
         "f1": 1.0,
         "gold": 2,
-        "detected": 2
+        "detected": 2,
+        "applied_recall": 1.0
       }
     },
     {
@@ -59,7 +63,8 @@
         "precision": 1.0,
         "f1": 1.0,
         "gold": 2,
-        "detected": 2
+        "detected": 2,
+        "applied_recall": 1.0
       }
     },
     {
@@ -72,7 +77,8 @@
         "precision": 1.0,
         "f1": 1.0,
         "gold": 3,
-        "detected": 6
+        "detected": 6,
+        "applied_recall": 1.0
       }
     },
     {
@@ -85,15 +91,16 @@
         "precision": 1.0,
         "f1": 1.0,
         "gold": 2,
-        "detected": 2
+        "detected": 2,
+        "applied_recall": 1.0
       }
     }
   ],
   "fingerprint": {
     "code_version": "1.1.0",
-    "git_sha": "79e158b8ccf3661688d6987d06732c41f0422e28",
+    "git_sha": "852bba4502b7a40550f487302b7d2a1925d93127",
     "python": "3.11.15",
-    "config_sha256": "03dfd21aac2d9b5add33e2a0dba91e1c3de081e7d090155e8209463c7fb57395",
+    "config_sha256": "e3cd8a74176fed5c5ca3ec0ed086f39e64cc266c6dee5cb5958ec1b77936a7f3",
     "rubric_sha256": "a309b15ec8a8790e",
     "prompt_version": "1.0.0",
     "models": []
