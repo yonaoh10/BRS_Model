@@ -178,3 +178,86 @@ class JourneyDataset(BaseModel):
     def interactions_of(self, story_key: str) -> list[Interaction]:
         return sorted((i for i in self.interactions if i.story_key == story_key),
                       key=lambda i: (i.at, i.interaction_id))
+
+
+# ----------------------------------------------------------------- analysis
+# What the rules and the language model conclude about contacts and stories.
+
+Basis = Literal["fact", "content", "inference", "none"]
+DecidedBy = Literal["rule", "llm", "llm+rule", "none"]
+
+
+class Evidence(BaseModel):
+    quote_id: str | None = None
+    interaction_id: str
+    line: int | None = None
+    quote: str
+    speaker: str | None = None
+
+
+class Commitment(BaseModel):
+    kind: Literal["callback", "send_document", "execute_action", "check_and_update",
+                  "customer_to_act"]
+    by: Literal["bank", "customer"]
+    when_he: str = ""
+    evidence: Evidence | None = None
+
+
+class InteractionCard(BaseModel):
+    """Task A: what one recorded call or correspondence was about."""
+
+    interaction_id: str
+    topic: str = "other"
+    issue_he: str = ""
+    customer_request_he: str = ""
+    outcome: Literal["resolved", "partially_resolved", "not_resolved", "info_only",
+                     "unknown"] = "unknown"
+    outcome_ev: Evidence | None = None
+    commitments: list[Commitment] = Field(default_factory=list)
+    prior_contact_mentioned: bool = False
+    prior_ev: Evidence | None = None
+    retold: Literal["yes", "partial", "no", "first_contact", "unknown"] = "unknown"
+    retold_ev: Evidence | None = None
+    banker_aware_of_history: Literal["yes", "no", "unclear"] = "unclear"
+    redirect: Literal["none", "internal_transfer", "sent_to_branch",
+                      "sent_to_other_channel"] = "none"
+    frustration: int = Field(default=1, ge=1, le=3)
+    confidence: Literal["high", "medium", "low"] = "low"
+    problems: list[str] = Field(default_factory=list)   # fields dropped by verification
+
+
+class PromiseCheck(BaseModel):
+    made_in: str                     # interaction id
+    kind: str
+    made_at: datetime
+    due: datetime
+    outcome: Literal["kept", "broken", "unknown"]
+    settled_by: str | None = None    # bank_contact / atlas_execute / customer_returned / deadline
+    settled_at: datetime | None = None
+    evidence: Evidence | None = None
+
+
+class ReturnJudgement(BaseModel):
+    interaction_id: str
+    category: str                    # a taxonomy return category id
+    basis: Basis = "none"
+    decided_by: DecidedBy = "none"
+    objective_class: str = ""
+    inferred_category: str | None = None     # from the event sequence, when no content
+    reason_he: str = ""
+    is_break_point: bool = False
+    break_he: str = ""
+    quotes: list[Evidence] = Field(default_factory=list)
+
+
+class StoryVerdict(BaseModel):
+    story_key: str
+    topic: str = "other"
+    status: Literal["closed", "open", "unclear"] = "unclear"
+    status_basis: Basis = "none"
+    status_note_he: str = ""
+    model_status: str | None = None          # the model's opinion when rules decided otherwise
+    headline_he: str = ""
+    narrative_he: str = ""
+    break_point_interaction_id: str | None = None
+    quotes: list[Evidence] = Field(default_factory=list)

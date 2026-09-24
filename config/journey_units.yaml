@@ -1,0 +1,23 @@
+# Units that appear in the Atlas log, and what kind of unit each is. Bankers
+# are always shown by unit kind (and a running code), never by name.
+#
+# kind: center      - the call centre (answers the phone for every branch)
+#       back_office - back-office operations
+#       branch      - a branch; the account's own branch is told apart
+#                     automatically ("סניף החשבון")
+#       other       - a headquarters or specialist unit
+# Any unit number not listed here is taken to be a branch.
+units:
+  "109": {label: "מרכז הבנקאות", kind: center}
+  "136": {label: "תפעול עורפי", kind: back_office}
+  "171": {label: "סניף LIVE עתיד", kind: branch}
+  "176": {label: "סניף LIVE ברק", kind: branch}
+  "177": {label: "סניף LIVE שביט", kind: branch}
+  "308": {label: "אשראי צרכני", kind: other}
+  "296": {label: "מרחב הצפון", kind: other}
+kind_labels:
+  center: "מרכז הבנקאות"
+  back_office: "תפעול עורפי"
+  own_branch: "סניף החשבון"
+  branch: "סניף אחר"
+  other: "יחידת מטה"

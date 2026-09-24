@@ -1,0 +1,41 @@
+# What a customer contacts the bank about, and why a customer came back.
+# Edit the Hebrew freely; keep the ids (they are what the analysis stores).
+
+topics:
+  loans_mortgages:     {label: "הלוואות ומשכנתאות", covers: "בקשת הלוואה, סטטוס אישור, הזרמה/הפקדה, הגדלה, פירעון והחזרים, דחייה, סילוק ופירעון משכנתה"}
+  transfers_payments:  {label: "העברות ותשלומים", covers: "ביצוע העברות ותשלומים, העברות שנחסמו, הגדלת מגבלות/הרשאות העברה ואסמכתאות"}
+  account_service:     {label: "ניהול חשבון, מסמכים ושירות", covers: "השגת בנקאי, בירורי יתרה ותנועות, מסמכים ואישורים, סגירת חשבון, עיקולים, המתנה למענה"}
+  deposits_investments: {label: "פיקדונות, חסכונות והשקעות", covers: "ריבית ותנאי פיקדון, שחרור ומשיכה, שחרור ערבויות, ניירות ערך וייעוץ השקעות"}
+  cards_digital:       {label: "כרטיסים וגישה דיגיטלית", covers: "קוד סודי, הפעלה/הזמנה/ביטול כרטיס, חיובים ומשיכות, כניסה לאפליקציה"}
+  credit_lines:        {label: "מסגרות אשראי וחריגות", covers: "הגדלה או אישור מסגרת בעו\"ש ובכרטיסים, אישורי חריגה זמניים"}
+  fx_international:    {label: "מט\"ח והעברות לחו\"ל", covers: "העברות ותקבולים מול חו\"ל, המרות ועמלות מט\"ח"}
+  cheques:             {label: "צ'קים", covers: "צ'קים שנחזרו, כיסוי צ'ק, ביטול, הזמנת פנקסים"}
+  other:               {label: "אחר", covers: "פנייה ללא תוכן מתועד, או שאינה מתקבצת לנושא בנקאי אחר"}
+
+# Why a contact after the first one happened. "failure" marks the two that
+# count as a handling failure (the headline failure rate).
+return_categories:
+  unclosed_loop:
+    label: "אי-סגירת מעגל טיפול"
+    failure: true
+    definition: "הלקוח חזר כי העניין הקודם לא טופל עד סופו: הבטחה לחזור לא קוימה, פעולה לא בוצעה, מסמך לא נשלח."
+  excessive_runaround:
+    label: "טרטור יתר"
+    failure: true
+    definition: "הלקוח הועבר בין גורמים או ערוצים, נדרש לפנות שוב ושוב או לספר שוב את סיפורו בלי התקדמות."
+  legit_return:
+    label: "חזרה לגיטימית"
+    failure: false
+    definition: "המשך טבעי של תהליך: שלב הבא, מסמך שהלקוח התבקש להביא, אישור שהתקבל."
+  bank_initiated:
+    label: "חזרה ביוזמת הבנק"
+    failure: false
+    definition: "הבנק יזם את הפנייה (שיחה יוצאת או הודעה יוצאת), לא הלקוח."
+  new_topic:
+    label: "פנייה בנושא חדש"
+    failure: false
+    definition: "הפנייה עוסקת בעניין אחר מזה של הפניות הקודמות."
+  unclassifiable:
+    label: "לא ניתן לסיווג"
+    failure: false
+    definition: "אין תוכן מתועד (לא הוקלט, לא נכתב) שמאפשר לקבוע למה הלקוח חזר."
