@@ -140,9 +140,9 @@ def _abandon(a: JourneyAnalysis) -> list[Finding]:
                  if wait is not None and wait.value is not None else "")
         out.append(Finding(
             key="abandon-callback", severity="high" if (cf.value or 0) >= 0.5 else "medium",
-            title=f"אחרי {pct(cf.value, 0)} מהנטישות, הלקוח נאלץ לפנות שוב בעצמו",
+            title=f"אחרי {pct(cf.value, 0)} מהנטישות, הלקוח פנה שוב לפני שמישהו בבנק פתח את החשבון",
             text=(f"ב־{count(cf.k)} מתוך {count(cf.n or 0)} שיחות שננטשו (בסיפורים עם כיסוי אטלס "
-                  f"מלא), הלקוח פנה שוב לפני שבנקאי פתח את החשבון או חזר אליו.{extra}"
+                  f"מלא), הפנייה הבאה הגיעה לפני שבנקאי פתח את החשבון באטלס.{extra}"
                   + _prelim(cf)),
             meaning="חזרה יזומה אחרי נטישה חוסכת את הפנייה הבאה ומראה ללקוח שראו אותו.",
             section="sec-abandon", weight=(cf.value or 0) * 50,
