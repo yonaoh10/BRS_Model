@@ -188,6 +188,7 @@ class FasterWhisperEngine:
             language=self.config.language,  # forced - never autodetect
             word_timestamps=self.config.word_timestamps,
             vad_filter=self.config.vad_filter,
+            beam_size=self.config.beam_size,
         )
         segments: list[TranscriptSegment] = []
         for seg in segments_iter:

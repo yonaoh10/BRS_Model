@@ -112,7 +112,107 @@ def cmd_journey_reveal(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def _nmf_members(target: Path) -> list[tuple[str, bytes]]:
+    """(printable name, bytes) of every .nmf in a file, folder or ZIP."""
+    from callqa.journey.importers.common import AudioSource, shown_file
+
+    if target.is_file() and target.suffix.lower() == ".nmf":
+        return [(shown_file(target.name), target.read_bytes())]
+    source = AudioSource.open(target)
+    return [(shown_file(m), source.read(m)) for m in source.files()
+            if m.lower().endswith(".nmf")]
+
+
+def cmd_nmf_info(args: argparse.Namespace) -> int:
+    """Structure of NICE recordings - never their audio. File names are shown
+    as digests (recorder names are long digit runs)."""
+    from callqa.journey.nmf import NMFError, decode_file, inspect_bytes
+
+    members = _nmf_members(Path(args.target))
+    if args.limit:
+        members = members[: args.limit]
+    if not members:
+        print("no .nmf files found", file=sys.stderr)
+        return EXIT_FAILED
+    bad = 0
+    for name, data in members:
+        print(f"== {name}")
+        try:
+            info = inspect_bytes(data)
+        except NMFError as exc:
+            bad += 1
+            print(f"  unreadable: {exc}")
+            continue
+        for line in info.lines():
+            print("  " + line)
+        if args.probe_decode:
+            try:
+                streams, _ = decode_file(data)
+                for s in streams:
+                    import numpy as np
+                    rms = float(np.sqrt((s.pcm.astype(np.float64) ** 2).mean())) if len(s.pcm) else 0
+                    print(f"  decoded stream {s.stream}: {len(s.pcm) / 8000:.1f} s, "
+                          f"level {rms:.0f}, alignment {s.alignment}")
+            except NMFError as exc:
+                bad += 1
+                print(f"  decode failed: {exc}")
+    print(f"{len(members)} file(s), {bad} with problems")
+    return EXIT_FAILED if bad else EXIT_SUCCESS
+
+
+def cmd_nmf_convert(args: argparse.Namespace) -> int:
+    """NICE recordings to WAV for a listening check, into a folder only the
+    current user can read (the voices are customers')."""
+    import wave
+
+    import numpy as np
+
+    from callqa.journey.nmf import NMFError, decode_file
+    from callqa.portable import make_private_dir
+
+    out = Path(args.out)
+    make_private_dir(out)
+    bad = 0
+    for name, data in _nmf_members(Path(args.target))[: args.limit or None]:
+        try:
+            streams, _ = decode_file(data)
+        except NMFError as exc:
+            bad += 1
+            print(f"{name}: {exc}", file=sys.stderr)
+            continue
+        channels = [s.pcm for s in streams[:2]]
+        n = max(len(c) for c in channels)
+        pcm = np.zeros((n, len(channels)), dtype=np.int16)
+        for i, c in enumerate(channels):
+            pcm[: len(c), i] = c
+        with wave.open(str(out / f"{name}.wav"), "wb") as wf:
+            wf.setnchannels(len(channels))
+            wf.setsampwidth(2)
+            wf.setframerate(8000)
+            wf.writeframes(pcm.tobytes())
+        print(f"{name}.wav: {n / 8000:.1f} s, {len(channels)} channel(s)")
+    return EXIT_FAILED if bad else EXIT_SUCCESS
+
+
+def register_top_level(sub: argparse._SubParsersAction, add_common) -> None:
+    p = sub.add_parser("nmf-info", help="structure of NICE .nmf recordings (never their audio)")
+    p.add_argument("target", help="an .nmf file, a folder, or a ZIP")
+    p.add_argument("--probe-decode", action="store_true",
+                   help="also decode, and print duration and level per stream")
+    p.add_argument("--limit", type=int, default=0, help="only the first N files")
+    add_common(p)
+    p.set_defaults(func=cmd_nmf_info)
+
+    p = sub.add_parser("nmf-convert", help="NICE .nmf recordings to WAV, for a listening check")
+    p.add_argument("target", help="an .nmf file, a folder, or a ZIP")
+    p.add_argument("--out", required=True, help="output folder (made private to this user)")
+    p.add_argument("--limit", type=int, default=0, help="only the first N files")
+    add_common(p)
+    p.set_defaults(func=cmd_nmf_convert)
+
+
 def register(sub: argparse._SubParsersAction, add_common) -> None:
+    register_top_level(sub, add_common)
     journey = sub.add_parser("journey", help="customer journeys: repeat contacts across calls, "
                                              "messages and banker actions")
     jsub = journey.add_subparsers(dest="journey_command", required=True)

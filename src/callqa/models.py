@@ -53,6 +53,9 @@ class CallInput(BaseModel):
     call_type: str | None = None
     banker_channel: Literal["L", "R"] | None = None
     banker_name: str | None = None  # used only for name redaction; never reported
+    # A call assembled from several recorded parts (journey/assemble.py): where
+    # each part sits in the audio, and whether the channels' roles are known.
+    segment_map_path: Path | None = None
 
 
 class CallMeta(BaseModel):
@@ -170,7 +173,9 @@ class DialogTranscript(BaseModel):
     """Stage 4 (speakers) output: merged, time-ordered dialog. RAW text."""
 
     call_id: str
-    attribution_mode: Literal["stereo", "mono_diarized", "mock"]
+    # stereo_inferred: two channels whose roles were checked from what is
+    # said (an assembled recording with no metadata saying which is which).
+    attribution_mode: Literal["stereo", "stereo_inferred", "mono_diarized", "mock"]
     # 1.0 on a stereo recording, where the roles are known rather than
     # inferred. On the mono path, 0.0 means the signals were split evenly.
     role_confidence: float = 1.0
@@ -181,6 +186,11 @@ class DialogTranscript(BaseModel):
     banker_index: int | None = None
     role_signals: list[RoleSignalRecord] = Field(default_factory=list)
     diarization: DiarizationQualityRecord | None = None
+    # An assembled stereo call whose channels turned out the other way round.
+    roles_swapped: bool = False
+    # Parts of a multi-part call whose own evidence disagrees with the call's
+    # banker/customer decision (the diarization may have flipped there).
+    segment_role_conflicts: list[int] = Field(default_factory=list)
 
 
 class RedactedTurn(BaseModel):

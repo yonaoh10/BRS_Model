@@ -286,6 +286,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     engines = _build_engines(config)
     calls = [_call_input(calls_dir / row["file_name"], config) for row in validation.rows.values()]
+    failed_assembly: list[CallResult] = []
+    if validation.segments:
+        calls, failed_assembly = _assemble_multi_part(calls, validation.segments, calls_dir, config)
 
     # One StateDB shared across the pool: it is thread-safe (a connection per
     # operation), and building one per worker made every worker re-assert the
@@ -315,6 +318,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         results = [f.result() for f in futures]
     else:
         results = [_record_call(recorder, c, engines, state) for c in calls]
+    results += failed_assembly
     if recorder is not None:
         path = recorder.write(config.paths.output_dir)
         if path:
@@ -332,6 +336,50 @@ def cmd_run(args: argparse.Namespace) -> int:
     if review:
         return 1
     return 0
+
+
+def assemble_input(call: CallInput, files: list[str], source_dir: Path, config: Config
+                   ) -> CallInput:
+    """A call recorded in several files, joined into one (journey/assemble.py).
+    Raises AssembleError when it cannot be assembled whole."""
+    from callqa.journey.assemble import assemble_call
+    from callqa.journey.importers.common import AudioSource
+    from callqa.journey.models import CallAudio, Segment
+
+    audio = CallAudio(call_key=call.call_id, call_id=call.call_id,
+                      segments=[Segment(seq=n, file_name=f) for n, f in enumerate(files, start=1)])
+    built = assemble_call(audio, AudioSource.open(source_dir),
+                          config.paths.output_dir / "audio" / "assembled",
+                          gap_sec=config.journey.segment_gap_sec,
+                          codec_overrides=config.journey.nmf.codec_overrides,
+                          banker_stream=config.journey.nmf.banker_stream)
+    updates: dict = {"audio_path": built.wav_path, "segment_map_path": built.map_path}
+    if built.segmap.layout == "stereo":
+        # assemble_call puts the banker's stream (or, on "auto", the first
+        # one, checked after transcription) in the left channel
+        updates["banker_channel"] = "L"
+    return call.model_copy(update=updates)
+
+
+def _assemble_multi_part(calls: list[CallInput], segments: dict[str, list[str]], calls_dir: Path,
+                         config: Config) -> tuple[list[CallInput], list[CallResult]]:
+    from callqa.journey.assemble import AssembleError
+
+    ready: list[CallInput] = []
+    failed: list[CallResult] = []
+    for call in calls:
+        files = segments.get(call.call_id)
+        if not files:
+            ready.append(call)
+            continue
+        try:
+            ready.append(assemble_input(call, files, calls_dir, config))
+            logger.info("call_id=%s assembled from %d recorded parts", call.call_id, len(files))
+        except AssembleError as exc:
+            logger.error("call_id=%s could not be assembled: %s", call.call_id, exc)
+            failed.append(CallResult(call_id=call.call_id, status="failed",
+                                     error=f"AssembleError: {exc}"))
+    return ready, failed
 
 
 def _size_settled(path: Path, size: int, pause: float = 1.0) -> bool:

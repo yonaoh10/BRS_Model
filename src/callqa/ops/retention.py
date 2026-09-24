@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 # killed mid-write (SIGKILL, an OOM kill, power loss). It is named
 # ".<call>.dialog.json.<random>.tmp", holds the complete unredacted transcript,
 # and survived every retention run because of its suffix.
-RAW_GLOBS = ["transcripts/*", "audio/wav/*"]
+# audio/assembled/ holds calls joined from several recorded parts - the raw
+# voice as much as audio/wav/ is.
+RAW_GLOBS = ["transcripts/*", "audio/wav/*", "audio/assembled/*"]
 # The ORIGINAL recordings the `watch` driver moved out of the drop directory
 # once it had processed them. These are the rawest customer data in the whole
 # system - the voice itself, unredacted - and retention used to sweep only the

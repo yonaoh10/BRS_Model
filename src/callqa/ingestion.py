@@ -23,7 +23,7 @@ from callqa.portable import find_executable, run_text
 logger = logging.getLogger(__name__)
 
 REQUIRED_COLUMNS = ["call_id", "banker_id", "file_name"]
-OPTIONAL_COLUMNS = ["call_date", "call_type", "banker_channel", "banker_name"]
+OPTIONAL_COLUMNS = ["call_date", "call_type", "banker_channel", "banker_name", "segment"]
 # .wav/.mp3 are what the bank's recorders produce. The rest are what a phone
 # produces, which is what a staged test call arrives as; they are accepted only
 # when ffmpeg is present, since the dependency-free fallback reads WAV only.
@@ -165,6 +165,9 @@ class MetadataProblem:
 @dataclass
 class MetadataValidation:
     rows: dict[str, dict[str, str]] = field(default_factory=dict)  # call_id -> row
+    # A call recorded in several files: call_id -> its file names in segment
+    # order. Only calls with more than one file appear here.
+    segments: dict[str, list[str]] = field(default_factory=dict)
     problems: list[MetadataProblem] = field(default_factory=list)
 
     @property
@@ -261,6 +264,8 @@ def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> Metadata
         return result
     reader = _csv_reader(text)
     seen_ids: set[str] = set()
+    first_id: dict[str, str] = {}
+    seen_segments: dict[str, dict[int, str]] = {}
     fieldnames = [_visible(c) for c in (reader.fieldnames or [])]
     missing = [c for c in REQUIRED_COLUMNS if c not in fieldnames]
     if missing:
@@ -289,10 +294,30 @@ def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> Metadata
             if not row.get(col):
                 result.problems.append(MetadataProblem(i, col, "empty value"))
         call_id = row.get("call_id", "")
+        segment = row.get("segment", "")
         # Case-insensitively: on Windows "A100" and "a100" are the same
         # file, so two calls would overwrite each other's artifacts.
         if call_id and call_id.casefold() in seen_ids:
-            result.problems.append(MetadataProblem(i, "call_id", f"duplicate call_id '{call_id}'"))
+            first = first_id[call_id.casefold()]
+            # A second row of one call is another recorded part of it only
+            # when both rows say which part they are; anything else is the
+            # mistake this check always caught.
+            parts = seen_segments.get(first)
+            if parts is not None and segment.isdigit() and int(segment) not in parts:
+                file_name = row.get("file_name", "")
+                if not file_name or Path(file_name).name != file_name:
+                    result.problems.append(MetadataProblem(
+                        i, "file_name", "must be a file name inside calls/, not a path"))
+                    continue
+                if calls_dir is not None and not (calls_dir / file_name).exists():
+                    result.problems.append(
+                        MetadataProblem(i, "file_name", f"audio file not found: {file_name}"))
+                parts[int(segment)] = file_name
+                continue
+            hint = ("" if segment else
+                    " (a call recorded in several files needs a 'segment' column: 1, 2, ...)")
+            result.problems.append(MetadataProblem(
+                i, "call_id", f"duplicate call_id '{call_id}'{hint}"))
             continue
         if call_id and is_windows_reserved(call_id):
             result.problems.append(MetadataProblem(
@@ -328,6 +353,12 @@ def load_metadata(metadata_csv: Path, calls_dir: Path | None = None) -> Metadata
         if call_id:
             result.rows[call_id] = row
             seen_ids.add(call_id.casefold())
+            first_id[call_id.casefold()] = call_id
+            if segment.isdigit():
+                seen_segments[call_id] = {int(segment): row.get("file_name", "")}
+    for call_id, parts in seen_segments.items():
+        if len(parts) > 1:
+            result.segments[call_id] = [parts[k] for k in sorted(parts)]
     return result
 
 

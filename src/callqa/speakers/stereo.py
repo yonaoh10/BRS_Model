@@ -55,6 +55,7 @@ def assign_mono_roles(
     call_id: str,
     transcript: Transcript,
     diarized: list[DiarizedSegment],
+    parts: list[tuple[int, float, float]] | None = None,
 ) -> DialogTranscript:
     """Build a role-labelled dialog from a mono transcript and a diarization.
 
@@ -65,6 +66,8 @@ def assign_mono_roles(
     """
     attribution = attribute_segments(transcript.segments, diarized)
     decision = infer_roles(attribution.segments, call_id)
+    conflicts = part_role_conflicts(attribution.segments, decision.banker_index, parts or [],
+                                    call_id)
 
     turns = [
         DialogTurn(
@@ -86,7 +89,57 @@ def assign_mono_roles(
         banker_index=decision.banker_index,
         role_signals=[RoleSignalRecord(**signal.as_dict()) for signal in decision.signals],
         diarization=DiarizationQualityRecord(**attribution.quality.as_dict()),
+        segment_role_conflicts=conflicts,
     )
+
+
+# A part must disagree this clearly before it is flagged: a short part (a
+# transfer greeting) carries little evidence either way.
+PART_CONFLICT_CONFIDENCE = 0.3
+
+
+def part_role_conflicts(labeled: list, banker_index: int,
+                        parts: list[tuple[int, float, float]], call_id: str) -> list[int]:
+    """Parts of a multi-part call whose own evidence names the other speaker
+    as the banker. The whole call is diarized at once, so one voice keeps one
+    label across parts; a part that votes the other way is where the labels
+    are least trustworthy, and its lines are marked uncertain downstream."""
+    if len(parts) < 2:
+        return []
+    conflicts = []
+    for seq, start, end in parts:
+        inside = [(i, seg) for i, seg in labeled if start <= seg.start < end]
+        if len({i for i, _ in inside}) < 2:
+            continue
+        local = infer_roles(inside, f"{call_id}#part{seq}")
+        if local.banker_index != banker_index and local.confidence >= PART_CONFLICT_CONFIDENCE:
+            conflicts.append(seq)
+    return conflicts
+
+
+def verify_stereo_roles(call_id: str, dialog: DialogTranscript) -> DialogTranscript:
+    """A two-channel call whose roles no metadata states (an assembled NICE
+    recording): check from what each channel says which one is the banker,
+    and swap the labels when the evidence says the other channel is."""
+    from callqa.models import TranscriptSegment
+
+    labeled = [
+        (0 if t.speaker == "banker" else 1,
+         TranscriptSegment(speaker=t.speaker, start=t.start, end=t.end, text=t.text, words=[]))
+        for t in dialog.turns
+    ]
+    decision = infer_roles(labeled, call_id)
+    swapped = decision.banker_index == 1
+    turns = dialog.turns
+    if swapped:
+        turns = [t.model_copy(update={"speaker": "customer" if t.speaker == "banker"
+                                      else "banker"}) for t in turns]
+        logger.info("call_id=%s: channels were the other way round; roles swapped", call_id)
+    return dialog.model_copy(update={
+        "attribution_mode": "stereo_inferred", "turns": turns,
+        "role_confidence": decision.confidence, "roles_swapped": swapped,
+        "role_signals": [RoleSignalRecord(**s.as_dict()) for s in decision.signals],
+    })
 
 
 def speaker_segments_from_dialog(

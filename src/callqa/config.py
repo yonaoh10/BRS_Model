@@ -109,6 +109,9 @@ class ASRConfig(StrictModel):
     word_timestamps: bool = True
     vad_filter: bool = True
     low_confidence_logprob: float = -1.0
+    # Beam search width. 5 is faster-whisper's own default; 1 (greedy) is
+    # roughly twice as fast on a CPU for a small loss in accuracy.
+    beam_size: int = Field(default=5, ge=1, le=10)
 
     @field_validator("language")
     @classmethod

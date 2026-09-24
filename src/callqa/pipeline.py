@@ -49,6 +49,7 @@ from callqa.speakers.stereo import (
     assign_mono_roles,
     merge_stereo,
     speaker_segments_from_dialog,
+    verify_stereo_roles,
 )
 from callqa.state import CallLockedError, StateDB, atomic_write_model, atomic_write_text
 
@@ -277,10 +278,20 @@ def _report_is_intact(path: Path) -> bool:
         return False
 
 
-def process_call(call: CallInput, engines: Engines, state: StateDB | None = None) -> CallResult:
-    """The canonical single-call entrypoint. Never raises; returns a status envelope."""
+def process_call(call: CallInput, engines: Engines, state: StateDB | None = None, *,
+                 stop_after: str | None = None) -> CallResult:
+    """The canonical single-call entrypoint. Never raises; returns a status envelope.
+
+    stop_after: end after this stage (e.g. "features": transcribed, redacted
+    and measured, not yet judged). The envelope is written to results_partial/
+    - never results/, where a management report would count the call as done -
+    and a later run without stop_after resumes from the stored stages.
+    """
     config = engines.config
     call_id = call.call_id
+    if stop_after is not None and stop_after not in STAGES:
+        return CallResult(call_id=call_id, status="failed",
+                          error=f"unknown stage {stop_after!r}")
     # Defence in depth: CallInput validates call_id, but model_copy(update=...)
     # (used by the CLI and drivers) bypasses field validators, so an unsafe id
     # can reach here and every id becomes a filesystem path. Refuse it before
@@ -317,6 +328,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             atomic_write_model(meta_path, meta)
             store.mark_done("ingestion", meta_path)
         stages_completed.append("ingestion")
+        if stop_after == "ingestion":
+            return _stopped(config.paths.output_dir, call_id, stages_completed, review_reasons)
 
         # -- stage 2: audio ----------------------------------------------
         audio_path = store.path("audio")
@@ -342,6 +355,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                 f"only {speech_sec:.1f}s of speech was detected in this recording"
             )
         stages_completed.append("audio")
+        if stop_after == "audio":
+            return _stopped(config.paths.output_dir, call_id, stages_completed, review_reasons)
 
         # -- stage 3: asr (RAW transcripts) ------------------------------
         transcripts_dir = config.paths.output_dir / "transcripts"
@@ -374,14 +389,22 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             atomic_write_model(bundle_path, bundle)
             store.mark_done("asr", bundle_path)
         stages_completed.append("asr")
+        if stop_after == "asr":
+            return _stopped(config.paths.output_dir, call_id, stages_completed, review_reasons)
 
         # -- stage 4: speakers (RAW dialog, stored under transcripts/) ---
         dialog_path = store.path("transcripts", suffix=".dialog.json")
         dialog = store.load("speakers", dialog_path, DialogTranscript)
+        segmap = None
+        if call.segment_map_path is not None:
+            from callqa.journey.assemble import load_segmap
+            segmap = load_segmap(call.segment_map_path)
         if dialog is None:
             if audio_art.is_stereo:
                 assert bundle.banker is not None and bundle.customer is not None
                 dialog = merge_stereo(call_id, bundle.banker, bundle.customer)
+                if segmap is not None and segmap.banker_stream == "auto":
+                    dialog = verify_stereo_roles(call_id, dialog)
             else:
                 assert bundle.mono is not None
                 if engines.mono_diarizer is None:
@@ -393,19 +416,28 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                 if diarized is None:
                     diarized = engines.mono_diarizer.diarize(
                         Path(audio_art.mono_wav or ""), call_id)
-                dialog = assign_mono_roles(call_id, bundle.mono, diarized)
+                parts = ([(p.seq, p.start_in_call, p.end_in_call) for p in segmap.segments]
+                         if segmap is not None else None)
+                dialog = assign_mono_roles(call_id, bundle.mono, diarized, parts)
             atomic_write_model(dialog_path, dialog)
             store.mark_done("speakers", dialog_path)
         stages_completed.append("speakers")
+        if stop_after == "speakers":
+            return _stopped(config.paths.output_dir, call_id, stages_completed, review_reasons)
 
         # Who-is-who was inferred, not observed. If the evidence was close to
         # even, the whole report could be inverted, so the call is reported and
         # held for a human rather than published as fact.
-        if (dialog.attribution_mode == "mono_diarized"
+        if (dialog.attribution_mode in ("mono_diarized", "stereo_inferred")
                 and dialog.role_confidence < config.speakers.min_role_confidence):
             review_reasons.append(
                 f"speaker roles inferred with low confidence "
                 f"({dialog.role_confidence:.2f} < {config.speakers.min_role_confidence:.2f})"
+            )
+        if dialog.segment_role_conflicts:
+            review_reasons.append(
+                "speaker roles disagree within recorded part(s) "
+                + ", ".join(str(p) for p in dialog.segment_role_conflicts)
             )
 
         # -- stage 5: redaction ------------------------------------------
@@ -423,6 +455,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
                 "prompt and this report contain raw customer identifiers"
             )
         stages_completed.append("redaction")
+        if stop_after == "redaction":
+            return _stopped(config.paths.output_dir, call_id, stages_completed, review_reasons)
 
         # Redacted audio for the dashboard's player. The raw recording must
         # never be reachable from the browser, so a copy silenced wherever the
@@ -481,6 +515,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             atomic_write_model(features_path, features)
             store.mark_done("features", features_path)
         stages_completed.append("features")
+        if stop_after == "features":
+            return _stopped(config.paths.output_dir, call_id, stages_completed, review_reasons)
 
         # -- stage 7: judge ----------------------------------------------
         score_path = store.path("scores")
@@ -504,6 +540,8 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             atomic_write_model(score_path, scorecard)
             store.mark_done("judge", score_path)
         stages_completed.append("judge")
+        if stop_after == "judge":
+            return _stopped(config.paths.output_dir, call_id, stages_completed, review_reasons)
 
         # -- stage 8: per-call report ------------------------------------
         report_path = config.paths.output_dir / "reports" / "calls" / f"{call_id}.html"
@@ -549,6 +587,18 @@ def process_call(call: CallInput, engines: Engines, state: StateDB | None = None
             # An ASR failure must not orphan a diarization process.
             early_diar.cancel()
         state.release_lock(call_id)
+
+
+def _stopped(output_dir: Path, call_id: str, stages_completed: list[str],
+             review_reasons: list[str]) -> CallResult:
+    result = CallResult(
+        call_id=call_id,
+        status="needs_human_review" if review_reasons else "success",
+        error="; ".join(review_reasons) or None,
+        stages_completed=list(stages_completed),
+    )
+    atomic_write_model(output_dir / "results_partial" / f"{call_id}.json", result)
+    return result
 
 
 def _write_result(output_dir: Path, result: CallResult) -> None:
