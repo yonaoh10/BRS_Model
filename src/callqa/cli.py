@@ -959,6 +959,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_args(p)
     p.set_defaults(func=cmd_eval)
 
+    from callqa.journey.cli import register as register_journey
+    register_journey(sub, _add_common_args)
+
     return parser
 
 

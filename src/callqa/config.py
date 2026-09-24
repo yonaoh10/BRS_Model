@@ -212,6 +212,79 @@ class RetentionConfig(StrictModel):
     raw_days: int = Field(default=90, ge=1)
 
 
+class JourneyAtlasConfig(StrictModel):
+    # A contact in the Atlas export is the dataset's contact when the ids match
+    # and the times are within this many seconds (the bank's calls table and
+    # the vendor workbook agree to the second in 460 of 504 calls, and within
+    # a minute in all of them).
+    join_tolerance_sec: float = Field(default=60.0, ge=0.0)
+
+
+class JourneyNMFConfig(StrictModel):
+    # Which NICE stream is the banker when a recording carries two:
+    # auto = decide from what is said in each (opening, identification).
+    banker_stream: Literal["auto", "first", "second"] = "auto"
+    # A codec code the parser does not know, mapped by hand: {12: "alaw"}.
+    codec_overrides: dict[int, str] = Field(default_factory=dict)
+
+
+class JourneyLLMConfig(StrictModel):
+    # cpu = a small local model (llama-server on this machine); gpu = the
+    # bank's internal GPU server. One setting moves every default below.
+    profile: Literal["cpu", "gpu"] = "cpu"
+    # inherit = the judge's engine/endpoint/model; mock = deterministic.
+    engine: Literal["inherit", "vllm", "mock"] = "inherit"
+    base_url: str | None = None
+    gpu_base_url: str | None = None
+    model: str | None = None
+    ctx_tokens: int | None = Field(default=None, ge=2048)
+    concurrency: int | None = Field(default=None, ge=1, le=32)
+    transcript_mode: Literal["compressed", "full"] | None = None
+    memo: bool | None = None
+    max_retries: int = Field(default=2, ge=0, le=5)
+
+    @field_validator("base_url", "gpu_base_url")
+    @classmethod
+    def _safe_urls(cls, value: str | None) -> str | None:
+        return validate_endpoint(value, "journey.llm endpoint") if value else value
+
+
+class JourneyConfig(StrictModel):
+    """Customer journeys (repeat contacts): `callqa journey ...`."""
+
+    # Where datasets and their analysis live; relative = under paths.output_dir.
+    root: Path = Path("journey")
+    taxonomy: str = "journey_taxonomy.yaml"
+    units: str = "journey_units.yaml"
+    lexicon: str = "journey_lexicon_he.yaml"
+    # A return is any contact after the first; a second, narrower definition
+    # counts only returns within this many days of the previous contact.
+    return_window_days: int = Field(default=30, ge=1)
+    # A bank promise ("we'll call you back") is kept when the bank acts before
+    # the customer comes back and within this many Sunday-Thursday days.
+    callback_business_days: int = Field(default=2, ge=1, le=30)
+    # No contact for this many days after the bank's last action = settled.
+    quiet_days: int = Field(default=7, ge=1)
+    # Rates are shown only for at least min_rate_n cases; below min_firm_n a
+    # finding is labelled preliminary.
+    min_rate_n: int = Field(default=10, ge=1)
+    min_firm_n: int = Field(default=30, ge=1)
+    # Silence inserted between the recorded parts of one call.
+    segment_gap_sec: float = Field(default=1.0, ge=0.0, le=10.0)
+    # A multi-part call often changes banker; 0 = let diarization estimate
+    # (clamped to 2-4).
+    multi_segment_num_speakers: int = Field(default=0, ge=0, le=6)
+    uncertain_word_prob: float = Field(default=0.5, ge=0.0, le=1.0)
+    # Message bodies through the same redaction as transcripts, at import.
+    redact_messages: bool = True
+    show_call_ids: Literal["short", "full"] = "short"
+    # Money per banker-minute for the cost of failed returns; 0 = hours only.
+    cost_per_banker_minute: float = Field(default=0.0, ge=0.0)
+    atlas: JourneyAtlasConfig = JourneyAtlasConfig()
+    nmf: JourneyNMFConfig = JourneyNMFConfig()
+    llm: JourneyLLMConfig = JourneyLLMConfig()
+
+
 class Config(StrictModel):
     # StrictModel (not BaseModel): a MISSPELLED SECTION must fail loudly, not be
     # silently dropped. A plain BaseModel ignored e.g. CALLQA_JUGDE__BASE_URL
@@ -229,6 +302,7 @@ class Config(StrictModel):
     reporting: ReportingConfig = ReportingConfig()
     monitoring: MonitoringConfig = MonitoringConfig()
     retention: RetentionConfig = RetentionConfig()
+    journey: JourneyConfig = JourneyConfig()
 
     @model_validator(mode="after")
     def _interpolate_model_dir(self) -> Config:
