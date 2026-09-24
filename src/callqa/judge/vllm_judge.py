@@ -221,14 +221,24 @@ class VLLMJudge:
         }
 
     def complete(self, request: JudgeRequest) -> str:
-        messages = [
-            {"role": "system", "content": request.system_prompt},
-            {"role": "user", "content": request.user_prompt},
-        ]
         schema = self._scorecard_schema([d.id for d in request.dimensions])
+        return self.chat_json(request.system_prompt, request.user_prompt, schema, "scorecard")
+
+    def chat_json(self, system_prompt: str, user_prompt: str, schema: dict, name: str) -> str:
+        """One structured-output request: the reply is JSON in `schema`.
+
+        Shared by the scorecard judge and the journey content tasks, with the
+        same degradations: a server without json_schema support gets plain
+        json_object mode, and a chat template with no system role gets the
+        instructions merged into the user turn.
+        """
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
         response_format = {
             "type": "json_schema",
-            "json_schema": {"name": "scorecard", "schema": schema},
+            "json_schema": {"name": name, "schema": schema},
         }
         try:
             return self._chat(messages, response_format)
@@ -240,17 +250,17 @@ class VLLMJudge:
                 logger.warning("endpoint rejected json_schema structured output; "
                                "falling back to json_object mode")
                 return self._chat_with_role_fallback(
-                    request, {"type": "json_object"})
+                    system_prompt, user_prompt, {"type": "json_object"})
             if "alternate" in text or "system role" in text.lower():
-                merged = f"{request.system_prompt}\n\n{request.user_prompt}"
+                merged = f"{system_prompt}\n\n{user_prompt}"
                 return self._chat([{"role": "user", "content": merged}], response_format)
             raise
 
-    def _chat_with_role_fallback(self, request: JudgeRequest,
+    def _chat_with_role_fallback(self, system_prompt: str, user_prompt: str,
                                  response_format: dict) -> str:
         messages = [
-            {"role": "system", "content": request.system_prompt},
-            {"role": "user", "content": request.user_prompt},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ]
         try:
             return self._chat(messages, response_format)
@@ -264,7 +274,7 @@ class VLLMJudge:
                 raise
             logger.info("model's chat template rejects a system message; "
                         "resending with the system prompt merged into the user turn")
-            merged = f"{request.system_prompt}\n\n{request.user_prompt}"
+            merged = f"{system_prompt}\n\n{user_prompt}"
             return self._chat([{"role": "user", "content": merged}], response_format)
 
     _CTX_BUDGET_RE = re.compile(

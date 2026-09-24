@@ -112,6 +112,75 @@ def cmd_journey_reveal(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def cmd_journey_content(args: argparse.Namespace) -> int:
+    """Read the batch's recorded calls and correspondences: cards, why each
+    return happened, and each story's headline and status (content.json)."""
+    from callqa.journey.content import run_content
+
+    config = _config(args)
+
+    def progress(done: int, total: int) -> None:
+        if done == total or done % 10 == 0:
+            print(f"  {done}/{total} stories", flush=True)
+
+    try:
+        layer, stats = run_content(config, args.dataset, mock=args.mock, profile=args.profile,
+                                   limit_stories=args.limit_stories, progress=progress)
+    except FileNotFoundError as exc:
+        print(f"journey content failed: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    except Exception as exc:  # noqa: BLE001 - e.g. the model server is not reachable
+        from callqa.redaction import sanitize_error
+        print(f"journey content failed: {sanitize_error(exc)}", file=sys.stderr)
+        return EXIT_FAILED
+    print(f"engine {layer.engine} ({layer.model}): {stats.stories:,} stories, "
+          f"{stats.cards:,} cards from {stats.contacts_with_text:,} contacts with text")
+    print(f"  not transcribed yet: {stats.no_text:,} · failed: {stats.failed:,} · "
+          f"retries: {stats.retries:,} · quotes dropped: {stats.dropped_quotes:,} · "
+          f"from cache: {stats.cache_hits:,}")
+    return EXIT_SUCCESS if not stats.failed else EXIT_FAILED
+
+
+def cmd_journey_process(args: argparse.Namespace) -> int:
+    """The whole batch: transcribe what is not transcribed, read, report.
+    Resumable, and stoppable at a deadline."""
+    from callqa.journey.engine import ProcessLocked, process_dataset
+
+    config = _config(args)
+    try:
+        s = process_dataset(config, args.dataset, profile=args.profile, until=args.until,
+                            max_hours=args.max_hours, priority=args.priority,
+                            limit_stories=args.limit_stories, score=args.score,
+                            mock=args.mock, skip_transcribe=args.skip_transcribe,
+                            progress=lambda line: print(line, flush=True))
+    except (ProcessLocked, FileNotFoundError, ValueError) as exc:
+        print(f"journey process: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    print(f"calls: {s.calls_total:,} recorded; {s.calls_done_before:,} were done, "
+          f"{s.transcribed:,} transcribed now, {len(s.failed):,} failed")
+    if s.stopped_by_deadline:
+        print("stopped at the deadline; run the same command again to continue")
+    if s.report:
+        print(f"report: {s.report}")
+    return EXIT_FAILED if (s.failed or s.content_failed) else EXIT_SUCCESS
+
+
+def cmd_journey_estimate(args: argparse.Namespace) -> int:
+    """How long `journey process` will take here, measured on this machine."""
+    from callqa.journey.engine import estimate
+
+    config = _config(args)
+    try:
+        est = estimate(config, args.dataset, sample_calls=args.sample_calls,
+                       profile=args.profile, mock=args.mock)
+    except FileNotFoundError as exc:
+        print(f"journey estimate: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    for line in est.lines():
+        print(line)
+    return EXIT_SUCCESS
+
+
 def cmd_journey_report(args: argparse.Namespace) -> int:
     """The journey report of a dataset: HTML, the stories and the returns as
     CSV, and the numbers as JSON, under <output_dir>/reports/."""
@@ -246,6 +315,39 @@ def register(sub: argparse._SubParsersAction, add_common) -> None:
     p.add_argument("--dry-run", action="store_true", help="count and check only; write nothing")
     add_common(p)
     p.set_defaults(func=cmd_journey_import)
+
+    p = jsub.add_parser("content", help="read the calls and messages: cards, reasons, stories")
+    p.add_argument("--dataset", default=None, help="dataset id (default: the latest import)")
+    p.add_argument("--profile", choices=["cpu", "gpu"], default=None,
+                   help="override journey.llm.profile for this run")
+    p.add_argument("--limit-stories", type=int, default=None,
+                   help="only the first N stories (a trial run)")
+    add_common(p)
+    p.set_defaults(func=cmd_journey_content)
+
+    p = jsub.add_parser("process", help="transcribe, read and report a whole batch (resumable)")
+    p.add_argument("--dataset", default=None, help="dataset id (default: the latest import)")
+    p.add_argument("--profile", choices=["cpu", "gpu"], default=None)
+    p.add_argument("--until", default=None, metavar="HH:MM",
+                   help="stop cleanly at this time of day (e.g. 07:00)")
+    p.add_argument("--max-hours", type=float, default=None, help="stop cleanly after N hours")
+    p.add_argument("--priority", choices=["returns-first", "order"], default="returns-first",
+                   help="which stories first (default: the ones with the most returns)")
+    p.add_argument("--limit-stories", type=int, default=None)
+    p.add_argument("--score", action="store_true",
+                   help="also score each call on the rubric (for quality inside journeys)")
+    p.add_argument("--skip-transcribe", action="store_true",
+                   help="only read and report what is already transcribed")
+    add_common(p)
+    p.set_defaults(func=cmd_journey_process)
+
+    p = jsub.add_parser("estimate", help="measure, then predict how long `process` will take")
+    p.add_argument("--dataset", default=None)
+    p.add_argument("--profile", choices=["cpu", "gpu"], default=None)
+    p.add_argument("--sample-calls", type=int, default=2,
+                   help="calls to transcribe as the sample (the work is kept)")
+    add_common(p)
+    p.set_defaults(func=cmd_journey_estimate)
 
     p = jsub.add_parser("report", help="the journey report (HTML, CSV, JSON)")
     p.add_argument("--dataset", default=None, help="dataset id (default: the latest import)")

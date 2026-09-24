@@ -390,12 +390,15 @@ def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDa
                 "category_cls": _cat_cls(cat), "first": not c.is_return,
                 "decided": DECIDED_HE.get(j.decided_by, "") if j else "",
                 "basis": BASIS_HE.get(j.basis, "") if j else "",
-                "objective": OBJECTIVE_HE.get(j.objective_class, "") if j else "",
+                "objective": (OBJECTIVE_HE.get(j.objective_class, "")
+                              if j and not (j.objective_class == "content"
+                                            and j.decided_by != "none") else ""),
                 "inferred": tax.category_label(j.inferred_category)
                 if j is not None and j.inferred_category else "",
                 "reason": _prose(j.reason_he) if (j and with_text) else "",
                 "break": bool(j and j.is_break_point),
-                "break_text": _prose(j.break_he) if (j and j.is_break_point and with_text) else "",
+                "break_text": (_prose(j.break_he) if (j and j.is_break_point and with_text
+                                                      and j.break_he != j.reason_he) else ""),
                 "quote": quote,
                 "retold": {"yes": "סיפר מחדש", "partial": "סיפר מחדש חלקית"}.get(
                     card.retold, "") if card else "",

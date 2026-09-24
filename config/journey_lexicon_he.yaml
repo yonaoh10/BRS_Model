@@ -1,0 +1,105 @@
+# Phrases that mark the moments a repeat-contact analysis needs.
+#
+# Two uses:
+#  - cpu profile: a long transcript is shortened to its opening, its closing,
+#    and a few lines around every line containing one of these phrases, so a
+#    small model with an 8K context still sees what matters;
+#  - the mock engine (CI and demos) reads them as its "understanding".
+# The language model itself does NOT depend on this list. Extend it freely:
+# a phrase is matched as a substring, after removing niqqud and punctuation.
+
+cues:
+  callback_promise:       # the bank promises to come back
+    - "אחזור אלי"
+    - "נחזור אלי"
+    - "יחזרו אלי"
+    - "נחזור אליך"
+    - "אחזור אליך"
+    - "יחזרו אליך"
+    - "נעדכן"
+    - "אעדכן"
+    - "אבדוק ואחזור"
+    - "נחזור אלייך עד"
+  send_document:
+    - "אשלח לך"
+    - "נשלח לך"
+    - "ישלחו לך"
+  prior_contact:          # the customer refers to an earlier contact
+    - "כבר דיברתי"
+    - "כבר התקשרתי"
+    - "כבר פניתי"
+    - "דיברתי איתכם"
+    - "כתבתי לכם"
+    - "פעם השלישית"
+    - "פעם רביעית"
+    - "הפעם החמישית"
+    - "אמרו לי שיחזרו"
+    - "הבטיחו לי"
+  retold:                 # the customer has to tell it again
+    - "שוב מההתחלה"
+    - "סיפרתי את זה"
+    - "כבר הסברתי"
+    - "שאני מסביר"
+    - "שאני מסבירה"
+  no_history:             # the banker does not see the earlier contact
+    - "לא רואה תיעוד"
+    - "לא רואה את השיחה"
+    - "תסביר לי בבקשה"
+    - "אפשר להסביר לי"
+  history_known:
+    - "רואה את כל ההיסטוריה"
+    - "רואה שהפנייה"
+    - "חוזר אלייך לגבי"
+    - "חוזרת אלייך לגבי"
+  broken_promise:         # the customer says nobody came back
+    - "אף אחד לא חזר"
+    - "ואף אחד לא"
+    - "לא חזרו אליי"
+    - "לא קיבלתי שום תשובה"
+    - "אף אחד לא עונה"
+  transfer:
+    - "מעבירה אותך"
+    - "מעביר אותך"
+    - "אעביר"
+    - "מעבירה את זה"
+    - "צריך לפנות לסניף"
+    - "לפנות לסניף"
+    - "דווקא אתם מטפלים"
+  customer_to_act:        # the bank asks the customer to bring or send something
+    - "אני צריכה ממך"
+    - "אני צריך ממך"
+    - "תשלח לנו"
+    - "תשלחי לנו"
+    - "אפשר לשלוח בהודעה"
+  resolved:
+    - "אושרה"
+    - "שחררתי"
+    - "שלחתי לך"
+    - "שוחרר"
+    - "הקוד נשלח"
+    - "אישרתי"
+    - "זוכה בחשבון"
+    - "יכובד"
+    - "טיפלתי בזה"
+  frustration:
+    - "לא רציני"
+    - "לעבור בנק"
+    - "עוד העברה"
+    - "סוף סוף"
+    - "אני מקווה שהפעם"
+  new_topic:
+    - "שאלה אחרת"
+    - "משהו אחר"
+    - "נושא אחר"
+
+# Words that point to a topic (ids from journey_taxonomy.yaml). Used by the
+# mock engine only; the language model reads the taxonomy's own descriptions.
+topics:
+  loans_mortgages: ["הלוואה", "הלוואת", "משכנתה", "משכנתא"]
+  transfers_payments: ["העברה", "העברת", "תשלום", "הרשאה"]
+  account_service: ["אישור על יתרות", "אישור", "יתרה", "מסמך", "סגירת חשבון"]
+  deposits_investments: ["פיקדון", "פקדון", "חיסכון", "ניירות ערך"]
+  cards_digital: ["כרטיס", "קוד סודי", "אפליקציה"]
+  credit_lines: ["מסגרת", "חריגה"]
+  fx_international: ["חו\"ל", "מט\"ח", "תקבול"]
+  cheques: ["צ'ק", "שיק", "צק"]

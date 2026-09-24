@@ -547,7 +547,8 @@ def main(argv: list[str] | None = None) -> int:
            str(ws / "input" / "handoff.xlsx"), "--atlas", str(ws / "input" / "atlas")]
     if args.audio:
         cmd += ["--audio", str(ws / "input" / "recordings.zip")]
-    steps = [cmd, [sys.executable, "-m", "callqa", "journey", "report"]]
+    steps = [cmd, [sys.executable, "-m", "callqa", "journey", "content", "--mock"],
+             [sys.executable, "-m", "callqa", "journey", "report"]]
     for step in steps:
         proc = subprocess.run(step, env=env, cwd=str(ROOT))
         if proc.returncode not in (0, 1):
