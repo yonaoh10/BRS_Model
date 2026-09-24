@@ -206,7 +206,10 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
         content = [j for j in facts.judgements.values() if j.objective_class == "content"
                    and j.decided_by != "none"]
         fails = sum(1 for j in facts.judgements.values() if j.category in failure_cats)
-        retold = sum(1 for c in tl.returns if cards.get(c.interaction.interaction_id)
+        # the same base as the failure rate: returns with content that were read
+        judged = {j.interaction_id for j in content}
+        retold = sum(1 for c in tl.returns if c.interaction.interaction_id in judged
+                     and cards.get(c.interaction.interaction_id)
                      and cards[c.interaction.interaction_id].retold in ("yes", "partial"))
         kinds = _unit_kinds(units, tl)
         linked = {id(s) for c in tl.contacts for s in c.sessions}
@@ -280,11 +283,17 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
         topic_rows.append(row)
     topic_rows.sort(key=lambda r: (-r["stories"], r["topic"]))
 
-    # time to resolution: closed stories resolve at their last contact; the rest are censored
+    # time to resolution: a closed story resolves at its last contact; any other
+    # story was followed until the end of the data and is censored THERE - not
+    # at its last contact, which would count a quiet open story as a short one
     durations, resolved = [], []
     for s in summaries:
-        durations.append(max(0.0, s.span_days))
-        resolved.append(s.status == "closed")
+        if s.status == "closed":
+            durations.append(max(0.0, s.span_days))
+            resolved.append(True)
+        else:
+            durations.append(max(0.0, (data_end - s.first_at).total_seconds() / 86400))
+            resolved.append(False)
     km = kaplan_meier(durations, resolved) if summaries else []
 
     # banker handoffs between unit kinds (consecutive sessions of a story)
@@ -404,8 +413,11 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
     med_km = km_median(km) if km else None
     count("median_days_to_resolution", "חציון ימים עד סגירה", med_km,
           ("לפי עקומת Kaplan-Meier: סיפור שלא נסגר עד סוף הנתונים נחשב 'עדיין פתוח' "
-           "ולא מושמט."),
+           "עד סוף הנתונים, ולא מושמט."),
           "אם רוב הסיפורים לא נסגרו, החציון לא מוגדר.", basis="inference", unit="days")
+    m["median_days_to_resolution"].n = n_stories
+    m["median_days_to_resolution"].shown = n_stories >= min_rate_n and med_km is not None
+    m["median_days_to_resolution"].preliminary = n_stories < min_firm_n
     if gap_hours:
         count("median_gap_hours", "חציון זמן בין מגעים (שעות)", quantile(gap_hours, 0.5),
               "הזמן בין מגע למגע הבא באותו סיפור.", "", unit="hours")
@@ -434,10 +446,11 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
               "הזמן שבין פעולות בתוך סשן נספר; עבודה מחוץ לאטלס לא נספרת.", unit="minutes")
         m["background_share"] = Metric(
             key="background_share", label_he="זמן בנקאי בלי פנייה מתועדת", value=bg / minutes
-            if minutes else None, k=None, n=None, unit="share",
+            if minutes else None, k=None, unit="share",
             definition_he="חלק מזמן הבנקאים שלא היה צמוד לשום פנייה מתועדת של הלקוח.",
             wrong_if_he="כולל ביקור פיזי בסניף ועבודת תפעול עורפי, שאין להם רישום פנייה.",
-            shown=minutes > 0)
+            n=n_cov, shown=minutes > 0 and n_cov >= min_rate_n,
+            preliminary=n_cov < min_firm_n)
         sessions = sum(s.sessions for s in covered)
         m["view_only"] = _share_metric(
             "view_only", "סשנים של צפייה בלבד", sum(s.view_only_sessions for s in covered),

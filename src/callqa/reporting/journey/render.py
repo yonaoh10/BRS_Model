@@ -309,7 +309,7 @@ def _kpis(a: JourneyAnalysis) -> list[dict]:
     med = m.get("median_days_to_resolution")
     closed = m["closed"]
     k = _kpi(closed, "#sec-resolution")
-    if med is not None and med.value is not None:
+    if med is not None and med.shown and med.value is not None:
         k["sub"] += f" · חציון ⟦{_fmt(med.value)}⟧ ימים עד סגירה"
     out.append(k)
     if "bankers_per_story" in m:
@@ -340,7 +340,7 @@ def _branches(a: JourneyAnalysis, min_rate_n: int) -> list[dict]:
     return rows[:40]
 
 
-def _retold_by_bankers(a: JourneyAnalysis) -> list[dict]:
+def _retold_by_bankers(a: JourneyAnalysis, min_rate_n: int) -> list[dict]:
     covered = [s for s in a.stories if s.coverage == "full" and s.content_returns]
     out = []
     for label, test in (("עד 2 בנקאים", lambda s: s.bankers < 3),
@@ -348,7 +348,7 @@ def _retold_by_bankers(a: JourneyAnalysis) -> list[dict]:
         g = [s for s in covered if test(s)]
         k, n = sum(s.retold for s in g), sum(s.content_returns for s in g)
         out.append({"label": label, "stories": len(g), "k": k, "n": n,
-                    "rate": k / n if n else None})
+                    "rate": k / n if n >= min_rate_n else None})
     return out if any(r["n"] for r in out) else []
 
 
@@ -424,7 +424,9 @@ def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDa
             contact_rows.append({
                 "id": f"{anchor}-c{c.index}", "n": c.index + 1, "at": _dt(c.at),
                 "kind": KIND_HE.get(c.kind, c.kind), "dir": DIRECTION_HE.get(c.direction, ""),
-                "ref": (call_id or c.interaction.correspondence_id or "")[:8],
+                # the dataset's own id: a digest when the source id could be a
+                # phone or ID number - never the raw correspondence id
+                "ref": c.interaction.interaction_id[:16],
                 "category": _cat_label(tax, cat) if cat else "",
                 "category_cls": _cat_cls(cat), "first": not c.is_return,
                 "decided": DECIDED_HE.get(j.decided_by, "") if j else "",
@@ -532,7 +534,7 @@ def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFa
         "kpis": _kpis(a), "charts": _charts(a, facts, tax), "handoffs": _handoffs(a),
         "metric_table": _metric_table(a),
         "quality": _quality_view(quality), "branches": _branches(a, min_rate_n),
-        "retold_bankers": _retold_by_bankers(a), "min_rate_n": min_rate_n,
+        "retold_bankers": _retold_by_bankers(a, min_rate_n), "min_rate_n": min_rate_n,
         "cards": cards, "n_drawn": sum(1 for c in cards if c.get("svg")),
         "max_timelines": MAX_TIMELINES,
         "legend": charts.timeline_legend([(_cat_cls(c), _cat_label(tax, c)) for c in cats]

@@ -184,21 +184,31 @@ def message_view(interaction_id: str, messages: list[Message]) -> ContentView:
 def compress(view: ContentView, lexicon: Lexicon, max_chars: int, *, head: int = 6,
              tail: int = 6, around: int = 2) -> ContentView:
     """Keep the opening, the closing and the lines around cue phrases, within
-    `max_chars`. A view that already fits is returned whole."""
-    if view.chars <= max_chars or len(view.lines) <= head + tail:
+    `max_chars`. A view that already fits is returned whole. Linear in the
+    number of lines: each line's rendered length is computed once, and cue
+    windows are added in order while they fit."""
+    lengths = [len(f"L{ln.no} [?] ⚠ {ln.text}") + 1 for ln in view.lines]
+    if sum(lengths) <= max_chars or len(view.lines) <= head + tail:
         return view
     n = len(view.lines)
-    keep = set(range(1, min(head, n) + 1)) | set(range(max(1, n - tail + 1), n + 1))
-    cue_lines = [ln.no for ln in view.lines if lexicon.hits(ln.text)]
-    for no in cue_lines:
-        keep |= set(range(max(1, no - around), min(n, no + around) + 1))
-    shown = sorted(keep)
-    trimmed = ContentView(view.interaction_id, view.kind, view.lines, shown)
-    # still too long: drop cue windows from the middle outwards, keep the ends
-    while trimmed.chars > max_chars and len(shown) > head + tail:
-        middle = [x for x in shown if head < x <= n - tail]
-        if not middle:
-            break
-        shown.remove(middle[len(middle) // 2])
-        trimmed = ContentView(view.interaction_id, view.kind, view.lines, shown)
-    return trimmed
+    gap_cost = 32                       # "[... N שורות הושמטו ...]" and a part marker
+    keep: set[int] = set()
+    used = 0
+
+    def add(nos: list[int]) -> bool:
+        nonlocal used
+        new = [x for x in nos if x not in keep]
+        cost = sum(lengths[x - 1] for x in new) + gap_cost
+        if keep and used + cost > max_chars:
+            return False
+        keep.update(new)
+        used += cost
+        return True
+
+    add(list(range(1, min(head, n) + 1)) + list(range(max(1, n - tail + 1), n + 1)))
+    for ln in view.lines:
+        if head < ln.no <= n - tail and lexicon.hits(ln.text):
+            window = list(range(max(1, ln.no - around), min(n, ln.no + around) + 1))
+            if not add(window):
+                break
+    return ContentView(view.interaction_id, view.kind, view.lines, sorted(keep))

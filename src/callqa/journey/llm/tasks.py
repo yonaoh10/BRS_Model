@@ -70,7 +70,7 @@ class Prompt:
 
 _EV = {"type": "object",
        "properties": {"line": {"type": "integer", "minimum": 1},
-                      "quote": {"type": "string", "minLength": 4, "maxLength": 160}},
+                      "quote": {"type": "string", "minLength": 8, "maxLength": 160}},
        "required": ["line", "quote"], "additionalProperties": False}
 _EV1 = {"type": "array", "items": _EV, "maxItems": 1}
 
@@ -177,7 +177,13 @@ def parse_card(raw: str, view: ContentView, taxonomy: Taxonomy, *, first: bool) 
     problems: list[str] = []
 
     def ev(key_or_list: Any, label: str) -> Evidence | None:
-        items = key_or_list if isinstance(key_or_list, list) else []
+        if isinstance(key_or_list, dict):          # one object where a list of one was due
+            key_or_list = [key_or_list]
+        if key_or_list is not None and not isinstance(key_or_list, list):
+            failed.append(f"{label}: ראיה חייבת להיות מערך של {{line, quote}}")
+            problems.append(label)
+            return None
+        items = key_or_list or []
         if not items:
             return None
         item = items[0] if isinstance(items[0], dict) else {}

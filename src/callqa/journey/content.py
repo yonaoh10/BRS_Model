@@ -86,6 +86,7 @@ class ContentStats:
     cache_hits: int = 0
     engine_calls: int = 0
     skipped: int = 0
+    not_saved: bool = False
     problems: Counter = field(default_factory=Counter)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -130,7 +131,14 @@ def ask(ctx: Context, prompt: Prompt, parse, soft=None):  # noqa: ANN001, ANN201
         raw = ctx.cache.get(prompt, key)
         if raw is None:
             ctx.stats.add(engine_calls=1)
-            raw = ctx.engine.answer(prompt, feedback)
+            try:
+                raw = ctx.engine.answer(prompt, feedback)
+            except (RuntimeError, OSError, TimeoutError) as exc:
+                # the server's own words (a timeout, "hit max_tokens before
+                # finishing the JSON") are the feedback for the next try
+                from callqa.redaction import sanitize_error
+                feedback = last_error = sanitize_error(exc, 300)
+                continue
             ctx.cache.put(prompt, key, raw)
         else:
             ctx.stats.add(cache_hits=1)
@@ -206,8 +214,9 @@ def read_story(ctx: Context, tl: StoryTimeline) -> tuple[dict[str, InteractionCa
                 ctx.stats.add(no_text=1)
         else:
             ctx.stats.add(contacts_with_text=1)
-            if ctx.profile.transcript_mode == "compressed":
-                view = compress(view, ctx.lexicon, ctx.profile.transcript_chars)
+            # compressed on the cpu profile; on gpu only a call too long for the
+            # context is shortened (compress returns a view that fits unchanged)
+            view = compress(view, ctx.lexicon, ctx.profile.transcript_chars)
             prompt = card_prompt(view, taxonomy=tax, position=c.index + 1, total=total,
                                  channel_he=_kind_he(c) + (f", {DIRECTION_HE[c.direction]}"
                                                            if c.direction in DIRECTION_HE else ""),
@@ -340,9 +349,14 @@ def read_story(ctx: Context, tl: StoryTimeline) -> tuple[dict[str, InteractionCa
 def run_content(config: Config, dataset_id: str | None = None, *, mock: bool = False,
                 profile: str | None = None, limit_stories: int | None = None,
                 engine: ContentEngine | None = None, progress=None,  # noqa: ANN001
-                stop=None) -> tuple[ContentLayer, ContentStats]:  # noqa: ANN001
-    """Read the batch. `stop()` is asked before each story; stories not read
-    this time keep what an earlier run of the same engine and model read."""
+                stop=None, order: list[str] | None = None,  # noqa: ANN001
+                save: bool = True) -> tuple[ContentLayer, ContentStats]:
+    """Read the batch. `stop()` is asked before each story; `order` (story
+    keys) sets which stories go first. Stories not read this time keep what
+    an earlier run of the same engine, model and task versions read. A
+    partial run with a different engine or model is not saved over a
+    complete layer (a trial must not replace the real reading); `save=False`
+    never writes."""
     ds_id = resolve_dataset_id(config, dataset_id)
     dataset = load_dataset(config, ds_id)
     prof = resolve_profile(config, profile)
@@ -363,13 +377,20 @@ def run_content(config: Config, dataset_id: str | None = None, *, mock: bool = F
     ctx.settings.data_end = max(x for x in (data_end, ops_end) if x is not None) \
         if (data_end or ops_end) else None
     timelines = build_timelines(dataset)
+    if order:
+        rank = {k: i for i, k in enumerate(order)}
+        timelines.sort(key=lambda tl: (rank.get(tl.story.story_key, len(rank)),
+                                       tl.story.story_no))
     if limit_stories:
         timelines = timelines[:limit_stories]
     layer = ContentLayer(engine=eng.name, model=eng.model, prompt_versions=dict(VERSIONS),
                          created_at=datetime.now(UTC))
     from callqa.journey.store import load_content
     earlier = load_content(config, ds_id)
-    if earlier is not None and (earlier.engine, earlier.model) == (eng.name, eng.model):
+    same_reader = earlier is not None and (earlier.engine, earlier.model,
+                                           earlier.prompt_versions) == (eng.name, eng.model,
+                                                                        dict(VERSIONS))
+    if same_reader:
         layer.cards.update(earlier.cards)
         layer.judgements.update(earlier.judgements)
         layer.verdicts.update(earlier.verdicts)
@@ -381,7 +402,14 @@ def run_content(config: Config, dataset_id: str | None = None, *, mock: bool = F
         if stop is not None and stop():
             stats.add(skipped=1)
             return
-        cards, judgements, verdict = read_story(ctx, tl)
+        try:
+            cards, judgements, verdict = read_story(ctx, tl)
+        except Exception as exc:  # noqa: BLE001 - one story never stops the batch
+            stats.add(failed=1)
+            stats.problem(f"story: {type(exc).__name__}")
+            logger.warning("story %03d could not be read (%s)", tl.story.story_no,
+                           type(exc).__name__)
+            return
         ids = {c.interaction.interaction_id for c in tl.contacts}
         with lock:
             for store in (layer.cards, layer.judgements):
@@ -403,5 +431,14 @@ def run_content(config: Config, dataset_id: str | None = None, *, mock: bool = F
     else:
         for tl in timelines:
             one(tl)
-    save_content(config, ds_id, layer)
+    partial = bool(limit_stories and limit_stories < len(build_timelines(dataset))) \
+        or stats.skipped > 0
+    if not save:
+        pass
+    elif earlier is not None and not same_reader and partial:
+        stats.not_saved = True
+        logger.warning("content.json keeps the earlier reading (%s / %s): this partial run "
+                       "used %s / %s", earlier.engine, earlier.model, eng.name, eng.model)
+    else:
+        save_content(config, ds_id, layer)
     return layer, stats

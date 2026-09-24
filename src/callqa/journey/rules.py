@@ -80,6 +80,9 @@ def _bank_acted(tl: StoryTimeline, after: datetime, before: datetime) -> tuple[s
     for c in tl.contacts:
         if c.direction == "outbound" and after < c.at <= before:
             events.append((c.at, "bank_contact"))
+        for m in c.messages:              # the bank's replies inside a thread
+            if m.direction == "outbound" and after < m.at <= before:
+                events.append((m.at, "bank_contact"))
     for s in tl.sessions:
         for op in s.ops:
             if op.op_category == "execute" and after < op.at <= before:
@@ -91,11 +94,24 @@ def _bank_acted(tl: StoryTimeline, after: datetime, before: datetime) -> tuple[s
     return how, at
 
 
+def promise_time(made_in: Contact, evidence=None):  # noqa: ANN001, ANN201
+    """When a promise was made: the end of the call; in a correspondence, the
+    time of the message holding it (the view shows one line per message, in
+    time order)."""
+    if made_in.kind == "message" and made_in.messages:
+        msgs = sorted(made_in.messages, key=lambda m: m.at)
+        line = getattr(evidence, "line", None)
+        if isinstance(line, int) and 1 <= line <= len(msgs):
+            return msgs[line - 1].at
+        return msgs[-1].at
+    return made_in.end
+
+
 def check_promise(tl: StoryTimeline, made_in: Contact, kind: str, settings: RuleSettings,
                   evidence=None) -> PromiseCheck:
-    made_at = made_in.end
+    made_at = promise_time(made_in, evidence)
     due = add_business_days(made_at, settings.callback_business_days)
-    nxt = tl.next_contact_after(made_in.at, inbound_only=True)
+    nxt = tl.next_contact_after(made_at, inbound_only=True)
     horizon = min(due, nxt.at) if nxt else due
     acted = _bank_acted(tl, made_at, horizon)
     if acted:

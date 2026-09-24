@@ -123,10 +123,15 @@ def cmd_journey_content(args: argparse.Namespace) -> int:
         if done == total or done % 10 == 0:
             print(f"  {done}/{total} stories", flush=True)
 
+    from callqa.journey.engine import DatasetLock, ProcessLocked
+    from callqa.journey.store import dataset_dir, resolve_dataset_id
+
     try:
-        layer, stats = run_content(config, args.dataset, mock=args.mock, profile=args.profile,
-                                   limit_stories=args.limit_stories, progress=progress)
-    except FileNotFoundError as exc:
+        ds_id = resolve_dataset_id(config, args.dataset)
+        with DatasetLock(dataset_dir(config, ds_id)):
+            layer, stats = run_content(config, ds_id, mock=args.mock, profile=args.profile,
+                                       limit_stories=args.limit_stories, progress=progress)
+    except (FileNotFoundError, ProcessLocked) as exc:
         print(f"journey content failed: {exc}", file=sys.stderr)
         return EXIT_FAILED
     except Exception as exc:  # noqa: BLE001 - e.g. the model server is not reachable
@@ -138,6 +143,9 @@ def cmd_journey_content(args: argparse.Namespace) -> int:
     print(f"  not transcribed yet: {stats.no_text:,} · failed: {stats.failed:,} · "
           f"retries: {stats.retries:,} · quotes dropped: {stats.dropped_quotes:,} · "
           f"from cache: {stats.cache_hits:,}")
+    if stats.not_saved:
+        print("  not saved: content.json holds a complete reading by another engine or model; "
+              "run without --limit-stories to replace it")
     return EXIT_SUCCESS if not stats.failed else EXIT_FAILED
 
 
@@ -167,13 +175,13 @@ def cmd_journey_process(args: argparse.Namespace) -> int:
 
 def cmd_journey_estimate(args: argparse.Namespace) -> int:
     """How long `journey process` will take here, measured on this machine."""
-    from callqa.journey.engine import estimate
+    from callqa.journey.engine import ProcessLocked, estimate
 
     config = _config(args)
     try:
         est = estimate(config, args.dataset, sample_calls=args.sample_calls,
                        profile=args.profile, mock=args.mock)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ProcessLocked) as exc:
         print(f"journey estimate: {exc}", file=sys.stderr)
         return EXIT_FAILED
     for line in est.lines():

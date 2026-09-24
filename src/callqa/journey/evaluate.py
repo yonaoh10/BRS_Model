@@ -246,8 +246,10 @@ def write_label_form(path: Path, dataset: JourneyDataset, content: ContentLayer,
                       "lines": views.get(iid, []), "prev_lines": views.get(prev, []) if prev else []})
     cats = [{"id": k, "label": v.get("label", k), "definition": v.get("definition", "")}
             for k, v in taxonomy.categories.items() if k != "bank_initiated"]
+    import hashlib
+    sample_key = hashlib.sha256(json.dumps(sample).encode("utf-8")).hexdigest()[:12]
     html = jinja_env().get_template("journey_labels.html.j2").render(
-        items=items, categories=cats, dataset_id=dataset.dataset_id,
+        items=items, categories=cats, dataset_id=dataset.dataset_id, sample_key=sample_key,
         data_json=Markup(script_json({"n": len(items)})))
     atomic_write_text(path, html)
     return path

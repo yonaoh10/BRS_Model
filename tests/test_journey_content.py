@@ -334,3 +334,89 @@ def test_profiles_and_endpoint_overrides(tmp_path):
     cpu = resolve_profile(cfg, "cpu")
     assert cpu.concurrency == 1 and cpu.transcript_mode == "compressed"
     assert 5000 < cpu.transcript_chars < 20000
+
+
+# ---------------------------------------------------------------- review regressions
+
+
+def test_a_trial_with_another_engine_does_not_replace_the_reading(demo_config):
+    from callqa.journey.engine import estimate
+
+    class Other(MockContentEngine):
+        name, model = "vllm", "bank-model"
+    run_content(demo_config, engine=Other())
+    before = load_content(demo_config, _ds(demo_config))
+    estimate(demo_config, sample_calls=0, mock=True)                 # never saves
+    _layer, stats = run_content(demo_config, mock=True, limit_stories=2)
+    after = load_content(demo_config, _ds(demo_config))
+    assert stats.not_saved
+    assert (after.engine, len(after.cards)) == (before.engine, len(before.cards))
+
+
+def test_a_corrupt_transcript_costs_its_story_not_the_batch(demo_config):
+    red = sorted((demo_config.paths.output_dir / "redacted").glob("*.json"))
+    red[0].write_text("{not json", encoding="utf-8")
+    layer, stats = run_content(demo_config, mock=True)
+    assert stats.failed == 1 and layer.cards
+    assert load_content(demo_config, _ds(demo_config)) is not None
+
+
+class _Timeout(MockContentEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def answer(self, prompt: Prompt, feedback: str | None = None) -> str:
+        self.calls += 1
+        if feedback is None and prompt.task == "card":
+            raise RuntimeError("vLLM request failed: timed out")
+        return super().answer(prompt, feedback)
+
+
+def test_a_server_error_is_retried(demo_config):
+    layer, stats = run_content(demo_config, engine=_Timeout())
+    assert stats.failed == 0 and stats.retries >= stats.cards > 0
+
+
+def test_the_gpu_profile_shortens_a_call_too_long_for_its_context(demo_config):
+    from callqa.journey.content import ContentStats, Context, _view
+    from callqa.journey.llm.cache import AnswerCache
+    from callqa.journey.rules import RuleSettings
+    from callqa.journey.store import load_dataset
+    from callqa.journey.timeline import build_timelines
+    from callqa.journey.vocab import load_units
+
+    prof = resolve_profile(demo_config, "gpu")
+    tl = next(t for t in build_timelines(load_dataset(demo_config))
+              if any(c.kind == "recorded_call" for c in t.contacts))
+    c = next(c for c in tl.contacts if c.kind == "recorded_call")
+    path = demo_config.paths.output_dir / "redacted" / f"{c.interaction.call_id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["turns"] = data["turns"] * 2000
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    seen = []
+
+    class Spy(MockContentEngine):
+        def answer(self, prompt, feedback=None):  # noqa: ANN001, ANN201
+            if prompt.task == "card":
+                seen.append(len(prompt.user))
+            return super().answer(prompt, feedback)
+    ctx = Context(config=demo_config, output_dir=demo_config.paths.output_dir, taxonomy=TAX,
+                  units=load_units(), lexicon=load_lexicon(), profile=prof, engine=Spy(),
+                  cache=AnswerCache(demo_config.paths.output_dir / "c"),
+                  settings=RuleSettings(), stats=ContentStats())
+    assert _view(ctx, c).chars > prof.transcript_chars
+    from callqa.journey.content import read_story
+    read_story(ctx, tl)
+    assert seen and max(seen) < prof.transcript_chars + 6000
+
+
+def test_the_report_never_shows_a_raw_correspondence_id(demo_config):
+    from callqa.journey.store import load_dataset, save_dataset
+    from callqa.reporting.journey import build_journey_report
+    ds = load_dataset(demo_config)
+    msg = next(i for i in ds.interactions if i.channel == "message")
+    msg.correspondence_id = "0501234567"
+    save_dataset(demo_config, ds)
+    html = build_journey_report(demo_config).html.read_text(encoding="utf-8")
+    assert "05012345" not in html

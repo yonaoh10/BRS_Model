@@ -1,10 +1,12 @@
 """Evidence the model gives is checked against the line it names.
 
-A quote is accepted when the line exists, is not marked ⚠, and the quote is
-on it - verbatim after normalisation, or as a near-quote that the existing
-judge verifier would snap to the real words (never across lines, never
-changing a number or a negation). What is stored is always the line's own
-words, not the model's version of them.
+A quote is accepted when the line exists, was shown to the model, is not
+marked ⚠, and the quote is a run of the line's own WORDS - matched word by
+word, so "5 ימים" is not found inside "15 ימים" - or a near-quote the judge's
+verifier would snap to a real run of words without changing a number or a
+negation. What is stored is always the line's own words, never the model's
+version of them, and a negation just before the quoted words ("לא", "אינו",
+"אי", up to two words back) is kept in front of them.
 """
 
 from __future__ import annotations
@@ -13,7 +15,12 @@ from callqa.journey.models import Evidence
 from callqa.journey.transcript_view import ContentView
 from callqa.judge.validation import _POLARITY_WORDS, _snap_quote_to_turn, normalize_for_match
 
-MIN_QUOTE_CHARS = 4
+MIN_QUOTE_CHARS = 8
+# One-letter prefixes a Hebrew word takes ("ו", "ה", "ש", ...): a quote may
+# start without the prefix its first word carries on the line.
+_PREFIXES = "והשבלמכ"
+NEGATIONS = frozenset(_POLARITY_WORDS) | {
+    "אי", "אינו", "אינה", "איננה", "אינם", "אינן", "איני", "אינני", "מעולם", "בלתי"}
 
 
 def verify_evidence(view: ContentView, line_no: object, quote: object
@@ -24,51 +31,59 @@ def verify_evidence(view: ContentView, line_no: object, quote: object
     line = view.line(line_no)
     if line is None:
         return None, f"אין שורה L{line_no}"
+    if view.shown and line_no not in view.shown:
+        return None, f"L{line_no} לא הוצגה לך; צטט רק שורות מהטקסט"
     if line.uncertain:
         return None, f"L{line_no} מסומנת ⚠ ואסור לצטט אותה"
     if not isinstance(quote, str) or len(normalize_for_match(quote)) < MIN_QUOTE_CHARS:
-        return None, f"הציטוט מ-L{line_no} קצר מדי"
-    target = normalize_for_match(quote)
-    text = line.text
-    if target in normalize_for_match(text):
-        real = _span_of(quote, text) or quote.strip()
-    else:
-        real = _snap_quote_to_turn(quote, text)
-        if real is None:
-            return None, f"הציטוט אינו מופיע ב-L{line_no}; העתק מילים מהשורה עצמה"
+        return None, f"הציטוט מ-L{line_no} קצר מדי; צטט כמה מילים שלמות"
+    words = line.text.split()
+    span = _word_run(quote, words)
+    if span is None:
+        snapped = _snap_quote_to_turn(quote, line.text)
+        span = _word_run(snapped, words) if snapped else None
+    if span is None:
+        return None, f"הציטוט אינו מופיע ב-L{line_no}; העתק מילים שלמות מהשורה עצמה"
+    start, end = span
+    start = _with_negation(words, start)
     return Evidence(interaction_id=view.interaction_id, line=line_no,
-                    quote=_keep_negation(real, text), speaker=line.who), ""
+                    quote=" ".join(words[start:end]), speaker=line.who), ""
 
 
-def _is_polarity(word: str) -> bool:
-    w = normalize_for_match(word)
-    return w in _POLARITY_WORDS or (len(w) > 2 and w[0] in "וש" and w[1:] in _POLARITY_WORDS)
+def _norm(word: str) -> str:
+    return normalize_for_match(word)
 
 
-def _keep_negation(span: str, text: str) -> str:
-    """A quote that starts right after "לא" (or "ולא", "אין", ...) says the
-    opposite of the line: "אישרו לי אותה" out of "ולא אישרו לי אותה". The
-    negation is put back in front of it."""
-    words, part = text.split(), span.split()
-    if not part:
-        return span
-    for i in range(len(words) - len(part) + 1):
-        if words[i:i + len(part)] == part:
-            if i > 0 and _is_polarity(words[i - 1]):
-                return " ".join(words[i - 1:i + len(part)])
-            return span
-    return span
-
-
-def _span_of(quote: str, text: str) -> str | None:
-    """The line's own words that match the quote (the quote may differ in
-    punctuation or spacing)."""
-    words = text.split()
-    target = normalize_for_match(quote)
-    n = len(quote.split())
-    for size in range(max(1, n - 1), n + 2):
-        for start in range(0, max(0, len(words) - size) + 1):
-            span = " ".join(words[start:start + size])
-            if normalize_for_match(span) == target:
-                return span
+def _word_run(quote: str, words: list[str]) -> tuple[int, int] | None:
+    """(start, end) of the words of the line that the quote is, word for word
+    (punctuation-only tokens ignored on both sides). The first quoted word may
+    lack a one-letter prefix the line's word has; anything with a digit must
+    match exactly."""
+    q = [w for w in (_norm(x) for x in quote.split()) if w]
+    line = [(i, n) for i, n in ((i, _norm(x)) for i, x in enumerate(words)) if n]
+    if not q:
+        return None
+    for i in range(len(line) - len(q) + 1):
+        window = [n for _i, n in line[i:i + len(q)]]
+        if window[1:] != q[1:]:
+            continue
+        first, want = window[0], q[0]
+        if first == want or (not any(ch.isdigit() for ch in first)
+                             and len(first) == len(want) + 1 and first[0] in _PREFIXES
+                             and first[1:] == want):
+            return line[i][0], line[i + len(q) - 1][0] + 1
     return None
+
+
+def _is_negation(word: str) -> bool:
+    w = _norm(word)
+    return w in NEGATIONS or (len(w) > 2 and w[0] in "וש" and w[1:] in NEGATIONS)
+
+
+def _with_negation(words: list[str], start: int) -> int:
+    """Move the start back over a negation one or two words before it."""
+    for back in (1, 2):
+        i = start - back
+        if i >= 0 and _is_negation(words[i]):
+            return i
+    return start

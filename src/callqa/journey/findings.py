@@ -101,7 +101,7 @@ def _failure(a: JourneyAnalysis, tax: Taxonomy) -> list[Finding]:
 def _visibility(a: JourneyAnalysis) -> list[Finding]:
     m = a.metrics["classifiable"]
     n_ret = int(a.metrics["returns"].value or 0)
-    if not n_ret or m.value is None:
+    if not n_ret or not _usable(m):
         return []
     unseen = n_ret - (m.k or 0)
     if unseen <= 0:
@@ -210,7 +210,7 @@ def _status(a: JourneyAnalysis) -> list[Finding]:
     if inferred:
         text += f" ({count(inferred)} מהם לפי הסקה: פעולה בחשבון ואחריה שקט)"
     text += f"; {count(unclear.k or 0)} בסטטוס לא ברור."
-    if med is not None and med.value is not None:
+    if med is not None and med.shown and med.value is not None:
         text += f" חציון הזמן עד סגירה: {num(med.value)} ימים (Kaplan-Meier)."
     out.append(Finding(
         key="status", severity="medium" if (closed.value or 0) < 0.5 else "info",

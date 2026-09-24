@@ -82,33 +82,72 @@ class ProcessSummary:
 # -- lock ---------------------------------------------------------------------------
 
 class DatasetLock:
+    """One writer per dataset. The lock file appears whole - the pid is
+    written to a private file first and then hard-linked into place - so a
+    second process never reads it empty; a file held by a live pid, or one
+    too new to judge, is respected; and only the owner removes it."""
+
+    FRESH_SEC = 30.0
+
     def __init__(self, folder: Path) -> None:
         self.path = folder / "process.lock"
+        self.token = f"{os.getpid()}"
+
+    def _holder(self) -> tuple[int, float] | None:
+        try:
+            text = self.path.read_text(encoding="utf-8").strip()
+            age = time.time() - self.path.stat().st_mtime
+        except OSError:
+            return None
+        try:
+            return int(text or "0"), age
+        except ValueError:
+            return 0, age
+
+    def _create(self) -> bool:
+        tmp = self.path.with_name(f"process.lock.{os.getpid()}.{time.monotonic_ns()}")
+        tmp.write_text(self.token, encoding="utf-8")
+        try:
+            try:
+                os.link(tmp, self.path)
+                return True
+            except FileExistsError:
+                return False
+            except OSError:
+                # no hard links on this file system: exclusive create instead
+                try:
+                    fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                except FileExistsError:
+                    return False
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(self.token)
+                return True
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def __enter__(self) -> DatasetLock:
         from callqa.portable import pid_alive
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        for _ in range(2):
-            try:
-                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
-                try:
-                    pid = int(self.path.read_text(encoding="utf-8").strip() or "0")
-                except (OSError, ValueError):
-                    pid = 0
-                if pid and pid_alive(pid):
-                    raise ProcessLocked(f"another `journey process` (pid {pid}) is running "
-                                        "on this dataset") from None
-                self.path.unlink(missing_ok=True)       # left by a run that died
-                continue
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(str(os.getpid()))
-            return self
+        for _ in range(3):
+            if self._create():
+                return self
+            holder = self._holder()
+            if holder is None:
+                continue                                # gone meanwhile: try again
+            pid, age = holder
+            if (pid and pid_alive(pid)) or (not pid and age < self.FRESH_SEC):
+                raise ProcessLocked(f"another journey command (pid {pid or '?'}) is working "
+                                    "on this dataset")
+            # left by a run that died: remove it only if it is still that one
+            if self._holder() == holder or (self._holder() or (None,))[0] == pid:
+                self.path.unlink(missing_ok=True)
         raise ProcessLocked("could not take the dataset lock")
 
     def __exit__(self, *exc: object) -> None:
-        self.path.unlink(missing_ok=True)
+        holder = self._holder()
+        if holder is not None and str(holder[0]) == self.token:
+            self.path.unlink(missing_ok=True)
 
 
 # -- which calls, in which order ------------------------------------------------------
@@ -138,6 +177,16 @@ def ordered_calls(dataset: JourneyDataset, priority: str = "returns-first",
                                                                        key=lambda x: x.seq)],
                         i.at.date().isoformat()))
     return out
+
+
+def _story_order(dataset: JourneyDataset, priority: str) -> list[str]:
+    n = {s.story_key: 0 for s in dataset.stories}
+    for i in dataset.interactions:
+        n[i.story_key] = n.get(i.story_key, 0) + 1
+    stories = sorted(dataset.stories, key=lambda s: s.story_no)
+    if priority == "returns-first":
+        stories.sort(key=lambda s: (-n.get(s.story_key, 0), s.story_no))
+    return [s.story_key for s in stories]
 
 
 def is_transcribed(config: Config, call_id: str) -> bool:
@@ -222,8 +271,10 @@ def process_dataset(config: Config, dataset_id: str | None = None, *, profile: s
             summary.stopped_by_deadline = True
             return summary
         t1 = time.monotonic()
+        story_order = _story_order(dataset, priority)
         _layer, stats = run_content(
             config, ds_id, mock=mock, profile=profile, stop=deadline.passed,
+            order=story_order, limit_stories=limit_stories,
             progress=(lambda d, t: progress(f"  {d}/{t} stories read")) if progress else None)
         summary.content_ran = True
         summary.content_failed = stats.failed
@@ -325,11 +376,19 @@ def estimate(config: Config, dataset_id: str | None = None, *, sample_calls: int
              ) -> Estimate:
     """Measure, then predict: transcribe `sample_calls` of the calls still to
     do (the work is kept), time the reading of one story, and scale."""
+
+    ds_id = resolve_dataset_id(config, dataset_id)
+    with DatasetLock(dataset_dir(config, ds_id)):
+        return _estimate(config, ds_id, sample_calls=sample_calls, profile=profile, mock=mock,
+                         engines=engines)
+
+
+def _estimate(config: Config, ds_id: str, *, sample_calls: int, profile: str | None,
+              mock: bool, engines) -> Estimate:  # noqa: ANN001
     from callqa.journey.content import run_content
     from callqa.journey.llm.client import resolve_profile
     from callqa.journey.timeline import build_timelines
 
-    ds_id = resolve_dataset_id(config, dataset_id)
     dataset = load_dataset(config, ds_id)
     prof = resolve_profile(config, profile)
     left = [c for c in ordered_calls(dataset) if not is_transcribed(config, c[0])]
@@ -356,7 +415,8 @@ def estimate(config: Config, dataset_id: str | None = None, *, sample_calls: int
     stories_with_text = sum(1 for tl in timelines if any(c.has_content for c in tl.contacts))
     requests = with_text + 2 * stories_with_text
     t0 = time.monotonic()
-    _layer, stats = run_content(config, ds_id, mock=mock, profile=profile, limit_stories=1)
+    _layer, stats = run_content(config, ds_id, mock=mock, profile=profile, limit_stories=1,
+                                save=False)
     spent = time.monotonic() - t0
     measured = stats.engine_calls > 0
     per_request = spent / stats.engine_calls if measured else NOMINAL_REQUEST_SEC[prof.name]

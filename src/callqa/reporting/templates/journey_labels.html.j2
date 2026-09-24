@@ -58,7 +58,9 @@ button{font:inherit; padding:6px 16px; border-radius:8px; border:1px solid var(-
 <script>
 (function () {
   "use strict";
-  var KEY = "callqa-labels-{{ dataset_id }}";
+  // saved per dataset AND per sample, and restored by story and contact -
+  // never by position - so a new sample can not inherit another's answers
+  var KEY = "callqa-labels-{{ dataset_id }}-{{ sample_key }}";
   var items = Array.prototype.slice.call(document.querySelectorAll(".item"));
   function read() {
     return items.map(function (it) {
@@ -78,9 +80,13 @@ button{font:inherit; padding:6px 16px; border-radius:8px; border:1px solid var(-
   }
   try {
     var saved = JSON.parse(localStorage.getItem(KEY) || "[]");
-    saved.forEach(function (r, i) {
-      if (!items[i]) { return; }
-      items[i].querySelectorAll("input[data-k]").forEach(function (inp) {
+    saved.forEach(function (r) {
+      var it = items.filter(function (x) {
+        return x.getAttribute("data-story") === String(r.story_no) &&
+               x.getAttribute("data-contact") === String(r.contact_no);
+      })[0];
+      if (!it) { return; }
+      it.querySelectorAll("input[data-k]").forEach(function (inp) {
         if (r[inp.getAttribute("data-k")] === inp.value) { inp.checked = true; }
       });
     });
