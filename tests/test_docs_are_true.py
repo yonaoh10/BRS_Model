@@ -206,3 +206,11 @@ def test_every_script_flag_a_document_shows_exists(doc: Path) -> None:
                     and f"{flag})" not in source and f"{flag}=" not in source:
                 unknown.add(f"{script} {flag}")
     assert not unknown, f"{_ids(doc)} shows script flags that do not exist: {sorted(unknown)}"
+
+
+@pytest.mark.parametrize("doc", DOCS, ids=_ids)
+def test_documents_speak_from_inside_the_bank(doc: Path) -> None:
+    """The team is part of the bank: no document addresses it as an outsider
+    ("at your place")."""
+    text = doc.read_text(encoding="utf-8")
+    assert "אצלכם" not in text, f"{_ids(doc)} says 'אצלכם'; the readers are the bank"
