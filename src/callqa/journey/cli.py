@@ -281,6 +281,14 @@ def cmd_journey_report(args: argparse.Namespace) -> int:
     a = report.analysis
     print(f"{len(a.stories):,} stories, {sum(s.contacts for s in a.stories):,} contacts")
     print(f"report: {report.html}")
+    if args.pdf:
+        from callqa.reporting.pdf import PDFError, print_pdf
+        try:
+            pdf = print_pdf(report.html, report.html.with_suffix(".pdf"))
+        except PDFError as exc:
+            print(f"PDF: {exc}", file=sys.stderr)
+            return EXIT_FAILED
+        print(f"PDF: {pdf}")
     return EXIT_SUCCESS
 
 
@@ -440,6 +448,8 @@ def register(sub: argparse._SubParsersAction, add_common) -> None:
     p.add_argument("--title", default=None, help="the report's title")
     p.add_argument("--no-quotes", action="store_true",
                    help="leave out every quote and reasoning (for wide distribution)")
+    p.add_argument("--pdf", action="store_true",
+                   help="also print a PDF next to it, with the Edge or Chrome on this machine")
     add_common(p)
     p.set_defaults(func=cmd_journey_report)
 

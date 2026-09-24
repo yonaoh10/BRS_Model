@@ -2,6 +2,7 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="callqa 1.4.0">
 <title>דוח מסעות לקוח — פניות חוזרות</title>
@@ -67,88 +68,88 @@
 
 *{box-sizing:border-box}
 html{direction:rtl; scroll-behavior:smooth; scroll-padding-top:76px}
-body{margin:0; background:var(--page); color:var(--ink); font-family:var(--font);
+body{margin:0; background:#fff;background:var(--page); color:#1a1c22;color:var(--ink); font-family:"Segoe UI","Arial Hebrew","Noto Sans Hebrew",system-ui,-apple-system,Arial,sans-serif;font-family:var(--font);
   font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility}
 h1,h2,h3,h4{margin:0; font-weight:650; line-height:1.3; letter-spacing:-.01em}
-p{margin:0 0 var(--s2)}
-a{color:var(--accent-ink); text-decoration:none}
+p{margin:0 0 8px;margin:0 0 var(--s2)}
+a{color:#4338ca;color:var(--accent-ink); text-decoration:none}
 a:hover{text-decoration:underline}
 [hidden]{display:none !important}
-:focus-visible{outline:2px solid var(--ring); outline-offset:2px; border-radius:4px}
+:focus-visible{outline:2px solid #4f46e5;outline:2px solid var(--ring); outline-offset:2px; border-radius:4px}
 @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none !important; animation:none !important} }
 .n{direction:ltr; unicode-bidi:isolate; font-variant-numeric:tabular-nums lining-nums; white-space:nowrap}
-.mono{font-family:var(--mono); direction:ltr; unicode-bidi:isolate; font-size:12.5px}
-.muted{color:var(--ink-3)}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;font-family:var(--mono); direction:ltr; unicode-bidi:isolate; font-size:12.5px}
+.muted{color:#5f6672;color:var(--ink-3)}
 .small{font-size:12.5px}
 .sr{position:absolute !important; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
 /* Off-screen by moving UP, not sideways: in RTL "inline-start: -9999px" is a
    9999px overflow to the right, and the whole page scrolls sideways. */
-.skip{position:absolute; top:-200px; right:8px; inset-inline-start:8px; background:var(--card); padding:8px 12px; z-index:50; border-radius:var(--r)}
+.skip{position:absolute; top:-200px; right:8px; inset-inline-start:8px; background:#ffffff;background:var(--card); padding:8px 12px; z-index:50; border-radius:8px;border-radius:var(--r)}
 .skip:focus{top:8px}
 
 /* ------------------------------------------------------------------ top bar */
-.topbar{position:sticky; top:0; z-index:30; background:var(--page); background:color-mix(in srgb, var(--page) 88%, transparent);
-  backdrop-filter:saturate(1.4) blur(8px); border-bottom:1px solid var(--border)}
-.topbar .in{max-width:1220px; margin:0 auto; padding:10px 24px; display:flex; align-items:center; gap:var(--s4)}
+.topbar{position:sticky; top:0; z-index:30; background:#fff;background:var(--page); background:color-mix(in srgb, #fff 88%, transparent);background:color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter:saturate(1.4) blur(8px); border-bottom:1px solid #e7e9ee;border-bottom:1px solid var(--border)}
+.topbar .in{max-width:1220px; margin:0 auto; padding:10px 24px; display:flex; align-items:center; gap:16px;gap:var(--s4)}
 .brand{display:flex; align-items:center; gap:10px; font-weight:650; font-size:14px; white-space:nowrap}
-.brand .mark{width:26px; height:26px; border-radius:7px; background:var(--accent); color:#fff;
+.brand .mark{width:26px; height:26px; border-radius:7px; background:#4f46e5;background:var(--accent); color:#fff;
   display:grid; place-items:center; font-size:12px; font-weight:700; flex:none}
 @media screen{ :root[data-theme="dark"] .brand .mark{color:#0e0f13} }
 @media screen and (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .brand .mark{color:#0e0f13} }
 :root[data-theme="light"]{color-scheme: light}
-.levels{display:flex; gap:2px; margin-inline-start:var(--s4); overflow-x:auto; scrollbar-width:none}
-.levels a{display:flex; align-items:center; gap:7px; padding:7px 12px; border-radius:var(--r); color:var(--ink-2);
+.levels{display:flex; gap:2px; margin-inline-start:16px;margin-inline-start:var(--s4); overflow-x:auto; scrollbar-width:none}
+.levels a{display:flex; align-items:center; gap:7px; padding:7px 12px; border-radius:8px;border-radius:var(--r); color:#565c67;color:var(--ink-2);
   font-weight:500; font-size:13px; white-space:nowrap; min-height:34px}
-.levels a:hover{background:var(--sunken); text-decoration:none; color:var(--ink)}
-.levels a[aria-current="true"]{background:var(--accent-soft); color:var(--accent-ink); font-weight:600}
+.levels a:hover{background:#f0f1f4;background:var(--sunken); text-decoration:none; color:#1a1c22;color:var(--ink)}
+.levels a[aria-current="true"]{background:#eef0fe;background:var(--accent-soft); color:#4338ca;color:var(--accent-ink); font-weight:600}
 .levels .lv{display:inline-grid; place-items:center; width:19px; height:19px; border-radius:50%;
   border:1px solid currentColor; font-size:11px; font-weight:650}
 .tools{margin-inline-start:auto; display:flex; gap:6px}
-.btn{appearance:none; border:1px solid var(--border-2); background:var(--card); color:var(--ink-2);
-  border-radius:var(--r); min-height:32px; padding:0 12px; font:inherit; font-size:12.5px; font-weight:500;
+.btn{appearance:none; border:1px solid #dcdfe6;border:1px solid var(--border-2); background:#ffffff;background:var(--card); color:#565c67;color:var(--ink-2);
+  border-radius:8px;border-radius:var(--r); min-height:32px; padding:0 12px; font:inherit; font-size:12.5px; font-weight:500;
   cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
-.btn:hover{background:var(--sunken); color:var(--ink)}
-.btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+.btn:hover{background:#f0f1f4;background:var(--sunken); color:#1a1c22;color:var(--ink)}
+.btn.primary{background:#4f46e5;background:var(--accent); border-color:#4f46e5;border-color:var(--accent); color:#fff}
 @media screen{ :root[data-theme="dark"] .btn.primary{color:#0e0f13} }
 @media screen and (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .btn.primary{color:#0e0f13} }
 .btn.icon{width:32px; padding:0; justify-content:center}
 
 /* ------------------------------------------------------------------ layout */
-.wrap{max-width:1220px; margin:0 auto; padding:var(--s6) 24px var(--s7)}
-.cover{padding:var(--s5) 0 var(--s6)}
-.cover .eyebrow{color:var(--ink-3); font-size:12.5px; font-weight:500; letter-spacing:.02em}
+.wrap{max-width:1220px; margin:0 auto; padding:28px 24px 40px;padding:var(--s6) 24px var(--s7)}
+.cover{padding:20px 0 28px;padding:var(--s5) 0 var(--s6)}
+.cover .eyebrow{color:#5f6672;color:var(--ink-3); font-size:12.5px; font-weight:500; letter-spacing:.02em}
 .cover h1{font-size:28px; margin:6px 0 10px}
-.cover .meta{display:flex; flex-wrap:wrap; gap:8px 18px; color:var(--ink-2); font-size:13px}
-.cover .meta b{color:var(--ink); font-weight:600}
+.cover .meta{display:flex; flex-wrap:wrap; gap:8px 18px; color:#565c67;color:var(--ink-2); font-size:13px}
+.cover .meta b{color:#1a1c22;color:var(--ink); font-weight:600}
 .chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px}
-.chip{display:inline-flex; align-items:center; gap:6px; background:var(--sunken); border:1px solid var(--border);
-  border-radius:100px; padding:2px 10px; font-size:12px; color:var(--ink-2)}
+.chip{display:inline-flex; align-items:center; gap:6px; background:#f0f1f4;background:var(--sunken); border:1px solid #e7e9ee;border:1px solid var(--border);
+  border-radius:100px; padding:2px 10px; font-size:12px; color:#565c67;color:var(--ink-2)}
 .chip button{appearance:none; border:0; background:none; color:inherit; cursor:pointer; font-size:14px; line-height:1; padding:0 2px}
 
-.level{margin-top:var(--s7); scroll-margin-top:64px}
-.level-head{display:flex; align-items:center; gap:var(--s3); padding-bottom:var(--s3); margin-bottom:var(--s5);
-  border-bottom:2px solid var(--ink)}
+.level{margin-top:40px;margin-top:var(--s7); scroll-margin-top:64px}
+.level-head{display:flex; align-items:center; gap:12px;gap:var(--s3); padding-bottom:12px;padding-bottom:var(--s3); margin-bottom:20px;margin-bottom:var(--s5);
+  border-bottom:2px solid #1a1c22;border-bottom:2px solid var(--ink)}
 .level-head .num-badge{display:grid; place-items:center; width:30px; height:30px; border-radius:50%;
-  background:var(--ink); color:var(--page); font-weight:700; font-size:14px; flex:none}
+  background:#1a1c22;background:var(--ink); color:#fff;color:var(--page); font-weight:700; font-size:14px; flex:none}
 .level-head h2{font-size:21px}
-.level-head p{margin:0; color:var(--ink-3); font-size:13px}
+.level-head p{margin:0; color:#5f6672;color:var(--ink-3); font-size:13px}
 .level-head .right{margin-inline-start:auto}
 
-.section{margin-top:var(--s6); scroll-margin-top:72px}
+.section{margin-top:28px;margin-top:var(--s6); scroll-margin-top:72px}
 .section > h3{font-size:16.5px; margin-bottom:4px}
-.section > .lead{color:var(--ink-3); font-size:13px; margin-bottom:var(--s4); max-width:80ch}
-.subnav{display:flex; flex-wrap:wrap; gap:6px; margin:-4px 0 var(--s4)}
-.subnav a{font-size:12.5px; padding:4px 10px; border-radius:100px; border:1px solid var(--border-2);
-  color:var(--ink-2); background:var(--card)}
-.subnav a:hover{text-decoration:none; background:var(--sunken)}
+.section > .lead{color:#5f6672;color:var(--ink-3); font-size:13px; margin-bottom:16px;margin-bottom:var(--s4); max-width:80ch}
+.subnav{display:flex; flex-wrap:wrap; gap:6px; margin:-4px 0 16px;margin:-4px 0 var(--s4)}
+.subnav a{font-size:12.5px; padding:4px 10px; border-radius:100px; border:1px solid #dcdfe6;border:1px solid var(--border-2);
+  color:#565c67;color:var(--ink-2); background:#ffffff;background:var(--card)}
+.subnav a:hover{text-decoration:none; background:#f0f1f4;background:var(--sunken)}
 
-.card{background:var(--card); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow)}
-.card > .hd{display:flex; align-items:baseline; gap:var(--s3); padding:var(--s4) var(--s5) 0}
+.card{background:#ffffff;background:var(--card); border:1px solid #e7e9ee;border:1px solid var(--border); border-radius:12px;border-radius:var(--r-lg); box-shadow:0 1px 2px rgb(20 22 28/.05);box-shadow:var(--shadow)}
+.card > .hd{display:flex; align-items:baseline; gap:12px;gap:var(--s3); padding:16px 20px 0;padding:var(--s4) var(--s5) 0}
 .card > .hd h4{font-size:14px; font-weight:600}
-.card > .hd .sub{font-size:12px; color:var(--ink-3)}
+.card > .hd .sub{font-size:12px; color:#5f6672;color:var(--ink-3)}
 .card > .hd .right{margin-inline-start:auto}
-.card > .bd{padding:var(--s4) var(--s5) var(--s5)}
-.grid{display:grid; gap:var(--s4)}
+.card > .bd{padding:16px 20px 20px;padding:var(--s4) var(--s5) var(--s5)}
+.grid{display:grid; gap:16px;gap:var(--s4)}
 .g2{grid-template-columns:repeat(2, minmax(0,1fr))}
 .g3{grid-template-columns:repeat(3, minmax(0,1fr))}
 .g-wide{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
@@ -160,197 +161,197 @@ a:hover{text-decoration:underline}
 @media (max-width: 720px){ .g2,.g3{grid-template-columns:minmax(0,1fr)} }
 
 /* ------------------------------------------------------------------ level 1 */
-.verdict{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:var(--s5); align-items:start;
-  padding:var(--s5) var(--s6); border-inline-start:4px solid var(--ink)}
-.verdict.sev-critical{border-inline-start-color:var(--bad)}
-.verdict.sev-high{border-inline-start-color:var(--warn)}
-.verdict.sev-ok{border-inline-start-color:var(--ok)}
-.verdict .label{font-size:12px; color:var(--ink-3); font-weight:600; letter-spacing:.03em}
+.verdict{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:20px;gap:var(--s5); align-items:start;
+  padding:20px 28px;padding:var(--s5) var(--s6); border-inline-start:4px solid #1a1c22;border-inline-start:4px solid var(--ink)}
+.verdict.sev-critical{border-inline-start-color:#be2a2a;border-inline-start-color:var(--bad)}
+.verdict.sev-high{border-inline-start-color:#b45309;border-inline-start-color:var(--warn)}
+.verdict.sev-ok{border-inline-start-color:#0e7a5f;border-inline-start-color:var(--ok)}
+.verdict .label{font-size:12px; color:#5f6672;color:var(--ink-3); font-weight:600; letter-spacing:.03em}
 .verdict h3{font-size:20px; margin:4px 0 12px}
-.verdict .bl p{font-size:14.5px; line-height:1.75; margin:0 0 6px; color:var(--ink)}
+.verdict .bl p{font-size:14.5px; line-height:1.75; margin:0 0 6px; color:#1a1c22;color:var(--ink)}
 .gauge{text-align:center; min-width:150px}
 .gauge .big{font-size:52px; font-weight:700; letter-spacing:-.03em; line-height:1}
-.gauge .of{color:var(--ink-3); font-size:13px}
-@media (max-width: 720px){ .verdict{grid-template-columns:1fr; padding:var(--s4)} .gauge{text-align:start} }
+.gauge .of{color:#5f6672;color:var(--ink-3); font-size:13px}
+@media (max-width: 720px){ .verdict{grid-template-columns:1fr; padding:16px;padding:var(--s4)} .gauge{text-align:start} }
 
-.kpis{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:var(--s4); margin-top:var(--s4)}
+.kpis{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px;gap:var(--s4); margin-top:16px;margin-top:var(--s4)}
 @media (max-width: 980px){ .kpis{grid-template-columns:repeat(2, minmax(0,1fr))} }
 @media (max-width: 520px){ .kpis{grid-template-columns:1fr} }
-.kpi{padding:var(--s4) var(--s5); display:flex; flex-direction:column; gap:4px; min-height:132px; position:relative}
-.kpi .k-label{font-size:12.5px; color:var(--ink-2); font-weight:500}
+.kpi{padding:16px 20px;padding:var(--s4) var(--s5); display:flex; flex-direction:column; gap:4px; min-height:132px; position:relative}
+.kpi .k-label{font-size:12.5px; color:#565c67;color:var(--ink-2); font-weight:500}
 .kpi .k-value{font-size:30px; font-weight:680; letter-spacing:-.02em; line-height:1.1}
-.kpi .k-value small{font-size:13px; color:var(--ink-3); font-weight:500; margin-inline-start:4px}
-.kpi .k-sub{font-size:12px; color:var(--ink-3)}
-.kpi .k-spark{position:absolute; left:var(--s4); inset-inline-end:var(--s4); top:var(--s4); width:110px; opacity:.95}
+.kpi .k-value small{font-size:13px; color:#5f6672;color:var(--ink-3); font-weight:500; margin-inline-start:4px}
+.kpi .k-sub{font-size:12px; color:#5f6672;color:var(--ink-3)}
+.kpi .k-spark{position:absolute; left:16px;left:var(--s4); inset-inline-end:16px;inset-inline-end:var(--s4); top:16px;top:var(--s4); width:110px; opacity:.95}
 .kpi .k-foot{margin-top:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap}
-.kpi.risk{box-shadow:inset 0 3px 0 var(--bad), var(--shadow)}
-.kpi.warnk{box-shadow:inset 0 3px 0 var(--warn), var(--shadow)}
+.kpi.risk{box-shadow:inset 0 3px 0 #be2a2a, 0 1px 2px rgb(20 22 28/.05);box-shadow:inset 0 3px 0 var(--bad), var(--shadow)}
+.kpi.warnk{box-shadow:inset 0 3px 0 #b45309, 0 1px 2px rgb(20 22 28/.05);box-shadow:inset 0 3px 0 var(--warn), var(--shadow)}
 
 .badge{display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:6px; font-size:11.5px; font-weight:600; white-space:nowrap}
 .badge::before{content:""; width:6px; height:6px; border-radius:50%; background:currentColor}
-.b-critical,.b-bad{background:var(--bad-soft); color:var(--bad-ink)}
-.b-high,.b-warn{background:var(--warn-soft); color:var(--warn-ink)}
-.b-medium{background:var(--info-soft); color:var(--info-ink)}
-.b-positive,.b-ok{background:var(--ok-soft); color:var(--ok-ink)}
-.b-info,.b-muted{background:var(--sunken); color:var(--ink-3)}
+.b-critical,.b-bad{background:#fdeceb;background:var(--bad-soft); color:#a11f1f;color:var(--bad-ink)}
+.b-high,.b-warn{background:#fdf1e3;background:var(--warn-soft); color:#8a4308;color:var(--warn-ink)}
+.b-medium{background:#eef0f4;background:var(--info-soft); color:#3f4450;color:var(--info-ink)}
+.b-positive,.b-ok{background:#e7f6f0;background:var(--ok-soft); color:#0b5f4a;color:var(--ok-ink)}
+.b-info,.b-muted{background:#f0f1f4;background:var(--sunken); color:#5f6672;color:var(--ink-3)}
 .delta{font-size:12px; font-weight:600}
-.delta.up{color:var(--ok-ink)} .delta.down{color:var(--bad-ink)} .delta.flat{color:var(--ink-3)}
+.delta.up{color:#0b5f4a;color:var(--ok-ink)} .delta.down{color:#a11f1f;color:var(--bad-ink)} .delta.flat{color:#5f6672;color:var(--ink-3)}
 
 .findings{display:flex; flex-direction:column; gap:10px}
-.finding{display:grid; grid-template-columns:92px minmax(0,1fr); gap:var(--s4); padding:var(--s4) var(--s5)}
+.finding{display:grid; grid-template-columns:92px minmax(0,1fr); gap:16px;gap:var(--s4); padding:16px 20px;padding:var(--s4) var(--s5)}
 .finding .sev{padding-top:2px}
 .finding h4{font-size:15px; margin-bottom:4px}
-.finding .txt{color:var(--ink); font-size:13.5px; margin:0 0 4px}
-.finding .mean{color:var(--ink-3); font-size:12.5px; margin:0}
-.finding .links{display:flex; gap:var(--s4); margin-top:8px; font-size:12.5px; flex-wrap:wrap}
+.finding .txt{color:#1a1c22;color:var(--ink); font-size:13.5px; margin:0 0 4px}
+.finding .mean{color:#5f6672;color:var(--ink-3); font-size:12.5px; margin:0}
+.finding .links{display:flex; gap:16px;gap:var(--s4); margin-top:8px; font-size:12.5px; flex-wrap:wrap}
 .finding .links a{font-weight:600}
 @media (max-width: 620px){ .finding{grid-template-columns:1fr; gap:6px} }
-.callout{border-inline-start:3px solid var(--border-2); background:var(--sunken); border-radius:0 var(--r) var(--r) 0;
-  padding:10px 14px; margin:0 0 var(--s3); font-size:13px}
-.callout.critical{border-inline-start-color:var(--bad)} .callout.high{border-inline-start-color:var(--warn)}
-.callout.positive{border-inline-start-color:var(--ok)}
+.callout{border-inline-start:3px solid #dcdfe6;border-inline-start:3px solid var(--border-2); background:#f0f1f4;background:var(--sunken); border-radius:0 8px 8px 0;border-radius:0 var(--r) var(--r) 0;
+  padding:10px 14px; margin:0 0 12px;margin:0 0 var(--s3); font-size:13px}
+.callout.critical{border-inline-start-color:#be2a2a;border-inline-start-color:var(--bad)} .callout.high{border-inline-start-color:#b45309;border-inline-start-color:var(--warn)}
+.callout.positive{border-inline-start-color:#0e7a5f;border-inline-start-color:var(--ok)}
 .callout b{font-weight:650}
 .callout .links{margin-top:4px; font-size:12.5px}
 
-.actions{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:var(--s4)}
+.actions{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px;gap:var(--s4)}
 @media (max-width: 980px){ .actions{grid-template-columns:1fr} }
-.action{padding:var(--s5); display:flex; flex-direction:column; gap:8px}
-.action .rank{font-size:12px; color:var(--ink-3); font-weight:600}
+.action{padding:20px;padding:var(--s5); display:flex; flex-direction:column; gap:8px}
+.action .rank{font-size:12px; color:#5f6672;color:var(--ink-3); font-weight:600}
 .action h4{font-size:15px}
-.action .impact{background:var(--accent-soft); color:var(--accent-ink); border-radius:var(--r); padding:8px 12px; font-size:12.5px; font-weight:600}
-.action .owner{font-size:12px; color:var(--ink-3)}
-.action blockquote{margin:0; font-size:12.5px; color:var(--ink-2); border-inline-start:2px solid var(--border-2); padding-inline-start:10px}
-.action .links{margin-top:auto; font-size:12.5px; display:flex; gap:var(--s4); flex-wrap:wrap}
+.action .impact{background:#eef0fe;background:var(--accent-soft); color:#4338ca;color:var(--accent-ink); border-radius:8px;border-radius:var(--r); padding:8px 12px; font-size:12.5px; font-weight:600}
+.action .owner{font-size:12px; color:#5f6672;color:var(--ink-3)}
+.action blockquote{margin:0; font-size:12.5px; color:#565c67;color:var(--ink-2); border-inline-start:2px solid #dcdfe6;border-inline-start:2px solid var(--border-2); padding-inline-start:10px}
+.action .links{margin-top:auto; font-size:12.5px; display:flex; gap:16px;gap:var(--s4); flex-wrap:wrap}
 
 .dimbars{display:flex; flex-direction:column; gap:9px}
-.dimbar{display:grid; grid-template-columns:minmax(120px, 190px) minmax(0,1fr) 52px; gap:var(--s3); align-items:center; font-size:13px}
-.dimbar .nm{color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.dimbar .gate{font-size:10.5px; color:var(--warn-ink); background:var(--warn-soft); border-radius:4px; padding:0 5px; margin-inline-start:4px; font-weight:600}
-.track{position:relative; height:8px; background:var(--bar-soft); border-radius:100px}
-.track .fill{position:absolute; top:0; bottom:0; right:0; inset-block:0; inset-inline-start:0; background:var(--bar); border-radius:100px}
-.track .mark{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--ink); border-radius:1px}
+.dimbar{display:grid; grid-template-columns:minmax(120px, 190px) minmax(0,1fr) 52px; gap:12px;gap:var(--s3); align-items:center; font-size:13px}
+.dimbar .nm{color:#565c67;color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.dimbar .gate{font-size:10.5px; color:#8a4308;color:var(--warn-ink); background:#fdf1e3;background:var(--warn-soft); border-radius:4px; padding:0 5px; margin-inline-start:4px; font-weight:600}
+.track{position:relative; height:8px; background:#e4e6ec;background:var(--bar-soft); border-radius:100px}
+.track .fill{position:absolute; top:0; bottom:0; right:0; inset-block:0; inset-inline-start:0; background:#454b57;background:var(--bar); border-radius:100px}
+.track .mark{position:absolute; top:-4px; bottom:-4px; width:2px; background:#1a1c22;background:var(--ink); border-radius:1px}
 .dimbar .v{text-align:end; font-weight:650}
 
 /* ------------------------------------------------------------------ tables */
 .tbl-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
 table{width:100%; border-collapse:collapse; font-size:13px}
-th,td{padding:8px 10px; text-align:start; border-bottom:1px solid var(--border); vertical-align:top}
-th{font-weight:600; color:var(--ink-3); font-size:11.5px; white-space:nowrap; background:var(--card)}
+th,td{padding:8px 10px; text-align:start; border-bottom:1px solid #e7e9ee;border-bottom:1px solid var(--border); vertical-align:top}
+th{font-weight:600; color:#5f6672;color:var(--ink-3); font-size:11.5px; white-space:nowrap; background:#ffffff;background:var(--card)}
 tbody tr:last-child td{border-bottom:0}
 td.num,th.num{text-align:end}
 .lvl{display:inline-grid; place-items:center; min-width:22px; height:22px; border-radius:5px; font-size:12px; font-weight:650; padding:0 4px}
-.lvl-1{background:var(--l1); color:var(--l1-ink)} .lvl-2{background:var(--l2); color:var(--l2-ink)}
-.lvl-3{background:var(--l3); color:var(--l3-ink)} .lvl-4{background:var(--l4); color:var(--l4-ink)}
-.lvl-5{background:var(--l5); color:var(--l5-ink)}
+.lvl-1{background:#c9463d;background:var(--l1); color:#fff;color:var(--l1-ink)} .lvl-2{background:#e3a39c;background:var(--l2); color:#3b1512;color:var(--l2-ink)}
+.lvl-3{background:#d5d8df;background:var(--l3); color:#1a1c22;color:var(--l3-ink)} .lvl-4{background:#9aa6bd;background:var(--l4); color:#10131a;color:var(--l4-ink)}
+.lvl-5{background:#475673;background:var(--l5); color:#fff;color:var(--l5-ink)}
 .heat td.cell{padding:0; text-align:center}
 .heat td.cell button{appearance:none; border:0; width:100%; min-height:30px; font:inherit; font-size:12px; font-weight:600; cursor:pointer; border-radius:0}
 .heat td.cell button:focus-visible{outline-offset:-2px}
 .heat th.dim{writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap; height:132px; vertical-align:bottom; text-align:start; font-weight:500}
 .heat th.dim, .heat td.cell{width:46px}
-.heat .ref td{border-top:2px solid var(--ink-3); font-weight:650}
-.band-1{background:var(--b1)} .band-2{background:var(--b2)} .band-3{background:var(--b3)} .band-4{background:var(--b4)}
+.heat .ref td{border-top:2px solid #5f6672;border-top:2px solid var(--ink-3); font-weight:650}
+.band-1{background:#fbeaea;background:var(--b1)} .band-2{background:#fdf3e6;background:var(--b2)} .band-3{background:#f1f2f5;background:var(--b3)} .band-4{background:#e9f5f0;background:var(--b4)}
 
 /* ------------------------------------------------------------------ charts */
 .ch{margin:0}
 .ch-svg{display:block; width:100%; height:auto; overflow:visible}
-.ch text{font-family:var(--font); fill:var(--ink-2); font-size:11px}
-.ch .ch-tick{fill:var(--ink-3); font-size:10.5px}
-.ch .ch-lbl{fill:var(--ink); font-size:11px; font-weight:600}
-.ch .ch-title{fill:var(--ink-3); font-size:11px}
-.ch-grid{stroke:var(--border); stroke-width:1}
-.ch-axis{stroke:var(--border-2); stroke-width:1}
-.ch-bar{fill:var(--bar)} .ch-bar-muted{fill:var(--bar-soft)} .ch-bar-accent{fill:var(--accent)}
-.ch-bar-bad{fill:var(--bad)} .ch-bar-warn{fill:var(--warn)} .ch-bar-ok{fill:var(--ok)}
-.ch-line{fill:none; stroke:var(--ink); stroke-width:2; stroke-linejoin:round; stroke-linecap:round}
-.ch-line-2{fill:none; stroke:var(--bad); stroke-width:1.5; stroke-dasharray:4 3}
-.ch-area{fill:var(--bar-2); opacity:.22}
-.ch-dot{fill:var(--ink)} .ch-dot-bad{fill:var(--bad)} .ch-dot-ok{fill:var(--ok)} .ch-dot-muted{fill:var(--bar-2)}
-.ch-ci{stroke:var(--bar-2); stroke-width:1.5}
-.ch-ref{stroke:var(--ink-3); stroke-width:1; stroke-dasharray:3 3}
-.ch .ch-ref-label{fill:var(--ink-3); font-size:10.5px}
-.ch-band-1{fill:var(--b1)} .ch-band-2{fill:var(--b2)} .ch-band-3{fill:var(--b3)} .ch-band-4{fill:var(--b4)}
-.ch-lvl-1{fill:var(--l1); background:var(--l1); color:var(--l1-ink)}
-.ch-lvl-2{fill:var(--l2); background:var(--l2); color:var(--l2-ink)}
-.ch-lvl-3{fill:var(--l3); background:var(--l3); color:var(--l3-ink)}
-.ch-lvl-4{fill:var(--l4); background:var(--l4); color:var(--l4-ink)}
-.ch-lvl-5{fill:var(--l5); background:var(--l5); color:var(--l5-ink)}
+.ch text{font-family:"Segoe UI","Arial Hebrew","Noto Sans Hebrew",system-ui,-apple-system,Arial,sans-serif;font-family:var(--font); fill:#565c67;fill:var(--ink-2); font-size:11px}
+.ch .ch-tick{fill:#5f6672;fill:var(--ink-3); font-size:10.5px}
+.ch .ch-lbl{fill:#1a1c22;fill:var(--ink); font-size:11px; font-weight:600}
+.ch .ch-title{fill:#5f6672;fill:var(--ink-3); font-size:11px}
+.ch-grid{stroke:#e7e9ee;stroke:var(--border); stroke-width:1}
+.ch-axis{stroke:#dcdfe6;stroke:var(--border-2); stroke-width:1}
+.ch-bar{fill:#454b57;fill:var(--bar)} .ch-bar-muted{fill:#e4e6ec;fill:var(--bar-soft)} .ch-bar-accent{fill:#4f46e5;fill:var(--accent)}
+.ch-bar-bad{fill:#be2a2a;fill:var(--bad)} .ch-bar-warn{fill:#b45309;fill:var(--warn)} .ch-bar-ok{fill:#0e7a5f;fill:var(--ok)}
+.ch-line{fill:none; stroke:#1a1c22;stroke:var(--ink); stroke-width:2; stroke-linejoin:round; stroke-linecap:round}
+.ch-line-2{fill:none; stroke:#be2a2a;stroke:var(--bad); stroke-width:1.5; stroke-dasharray:4 3}
+.ch-area{fill:#8a909c;fill:var(--bar-2); opacity:.22}
+.ch-dot{fill:#1a1c22;fill:var(--ink)} .ch-dot-bad{fill:#be2a2a;fill:var(--bad)} .ch-dot-ok{fill:#0e7a5f;fill:var(--ok)} .ch-dot-muted{fill:#8a909c;fill:var(--bar-2)}
+.ch-ci{stroke:#8a909c;stroke:var(--bar-2); stroke-width:1.5}
+.ch-ref{stroke:#5f6672;stroke:var(--ink-3); stroke-width:1; stroke-dasharray:3 3}
+.ch .ch-ref-label{fill:#5f6672;fill:var(--ink-3); font-size:10.5px}
+.ch-band-1{fill:#fbeaea;fill:var(--b1)} .ch-band-2{fill:#fdf3e6;fill:var(--b2)} .ch-band-3{fill:#f1f2f5;fill:var(--b3)} .ch-band-4{fill:#e9f5f0;fill:var(--b4)}
+.ch-lvl-1{fill:#c9463d;fill:var(--l1); background:#c9463d;background:var(--l1); color:#fff;color:var(--l1-ink)}
+.ch-lvl-2{fill:#e3a39c;fill:var(--l2); background:#e3a39c;background:var(--l2); color:#3b1512;color:var(--l2-ink)}
+.ch-lvl-3{fill:#d5d8df;fill:var(--l3); background:#d5d8df;background:var(--l3); color:#1a1c22;color:var(--l3-ink)}
+.ch-lvl-4{fill:#9aa6bd;fill:var(--l4); background:#9aa6bd;background:var(--l4); color:#10131a;color:var(--l4-ink)}
+.ch-lvl-5{fill:#475673;fill:var(--l5); background:#475673;background:var(--l5); color:#fff;color:var(--l5-ink)}
 .ch-link{cursor:pointer}
 .ch-link:hover .ch-dot, .ch-link:hover rect{opacity:.8}
 .ch-link:focus-visible rect{opacity:.8}
-.ch-link:focus-visible{outline:2px solid var(--ring)}
-.ch-legend{display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11.5px; color:var(--ink-2); margin-top:8px}
+.ch-link:focus-visible{outline:2px solid #4f46e5;outline:2px solid var(--ring)}
+.ch-legend{display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11.5px; color:#565c67;color:var(--ink-2); margin-top:8px}
 .ch-legend-item{display:inline-flex; align-items:center; gap:6px}
 .ch-sw{display:inline-block; width:10px; height:10px; border-radius:2px}
 .ch-table{margin-top:8px; font-size:12px}
-.ch-table summary{cursor:pointer; color:var(--ink-3); font-size:12px; width:max-content}
+.ch-table summary{cursor:pointer; color:#5f6672;color:var(--ink-3); font-size:12px; width:max-content}
 .ch-table table{margin-top:6px}
-.ch-empty{color:var(--ink-3); font-size:13px; padding:var(--s4) 0}
+.ch-empty{color:#5f6672;color:var(--ink-3); font-size:13px; padding:16px 0;padding:var(--s4) 0}
 
 /* ------------------------------------------------------------------ explorer */
-.xp-bar{display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:10px; padding:var(--s4) var(--s5)}
+.xp-bar{display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:10px; padding:16px 20px;padding:var(--s4) var(--s5)}
 @media (max-width: 1100px){ .xp-bar{grid-template-columns:repeat(3, minmax(0,1fr))} }
 @media (max-width: 620px){ .xp-bar{grid-template-columns:repeat(2, minmax(0,1fr))} }
 .field{display:flex; flex-direction:column; gap:4px; min-width:0}
-.field label{font-size:11.5px; color:var(--ink-3); font-weight:500}
-.field input,.field select{font:inherit; font-size:13px; color:var(--ink); background:var(--card); border:1px solid var(--border-2);
-  border-radius:var(--r); min-height:34px; padding:4px 8px; width:100%}
+.field label{font-size:11.5px; color:#5f6672;color:var(--ink-3); font-weight:500}
+.field input,.field select{font:inherit; font-size:13px; color:#1a1c22;color:var(--ink); background:#ffffff;background:var(--card); border:1px solid #dcdfe6;border:1px solid var(--border-2);
+  border-radius:8px;border-radius:var(--r); min-height:34px; padding:4px 8px; width:100%}
 .field input[type="date"]{direction:ltr}
-.xp-active{display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:0 var(--s5) var(--s3)}
-.xp-sum{display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:var(--s3) var(--s4); padding:var(--s4) var(--s5);
-  border-top:1px solid var(--border); border-bottom:1px solid var(--border); background:var(--sunken)}
+.xp-active{display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:0 20px 12px;padding:0 var(--s5) var(--s3)}
+.xp-sum{display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px 16px;gap:var(--s3) var(--s4); padding:16px 20px;padding:var(--s4) var(--s5);
+  border-top:1px solid #e7e9ee;border-top:1px solid var(--border); border-bottom:1px solid #e7e9ee;border-bottom:1px solid var(--border); background:#f0f1f4;background:var(--sunken)}
 .xp-sum .xp-dims{grid-column:1/-1}
 @media (max-width: 900px){ .xp-sum{grid-template-columns:repeat(2, minmax(0,1fr))} }
 .xp-sum .v{font-size:20px; font-weight:680}
-.xp-sum .l{font-size:11.5px; color:var(--ink-3)}
+.xp-sum .l{font-size:11.5px; color:#5f6672;color:var(--ink-3)}
 .xp-dims{display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:6px 24px; font-size:12px}
 @media (max-width: 900px){ .xp-dims{grid-template-columns:repeat(2, minmax(0,1fr))} }
 .xp-dims .row{display:grid; grid-template-columns:62px minmax(0,1fr) 30px; gap:8px; align-items:center}
-.xp-dims .row span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-2)}
+.xp-dims .row span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#565c67;color:var(--ink-2)}
 .xp-dims .track{height:5px}
 .xp-dims .track .mark{top:-3px; bottom:-3px; width:1.5px}
-.profile{margin:var(--s4) var(--s5) 0; padding:var(--s4); border:1px solid var(--border); border-radius:var(--r-lg); background:var(--card)}
+.profile{margin:16px 20px 0;margin:var(--s4) var(--s5) 0; padding:16px;padding:var(--s4); border:1px solid #e7e9ee;border:1px solid var(--border); border-radius:12px;border-radius:var(--r-lg); background:#ffffff;background:var(--card)}
 .profile h4{font-size:15px; margin-bottom:6px}
 .xp-table th button{appearance:none; border:0; background:none; font:inherit; color:inherit; cursor:pointer; padding:0; display:inline-flex; gap:4px; align-items:center; min-height:24px}
 td a, .case .top a, .links a{display:inline-block; min-height:24px; line-height:24px}
 .xp-table th[aria-sort="ascending"] button::after{content:"▲"; font-size:9px}
 .xp-table th[aria-sort="descending"] button::after{content:"▼"; font-size:9px}
 .xp-table tbody tr.row{cursor:pointer}
-.xp-table tbody tr.row:hover td{background:var(--sunken)}
-.xp-table tbody tr.row[aria-expanded="true"] td{background:var(--accent-soft)}
+.xp-table tbody tr.row:hover td{background:#f0f1f4;background:var(--sunken)}
+.xp-table tbody tr.row[aria-expanded="true"] td{background:#eef0fe;background:var(--accent-soft)}
 .xp-table td.scores{white-space:nowrap}
 .xp-table td.scores .lvl{min-width:20px; height:20px; font-size:11px; margin-inline-end:2px}
 .xp-table .st{font-size:11.5px}
-.drawer td{background:var(--sunken); padding:var(--s4) var(--s5)}
-.drawer .dgrid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px var(--s5)}
+.drawer td{background:#f0f1f4;background:var(--sunken); padding:16px 20px;padding:var(--s4) var(--s5)}
+.drawer .dgrid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px 20px;gap:10px var(--s5)}
 @media (max-width: 900px){ .drawer .dgrid{grid-template-columns:1fr} }
-.dcard{background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:10px 12px}
+.dcard{background:#ffffff;background:var(--card); border:1px solid #e7e9ee;border:1px solid var(--border); border-radius:8px;border-radius:var(--r); padding:10px 12px}
 .dcard .top{display:flex; align-items:center; gap:8px; margin-bottom:4px}
 .dcard .top b{font-size:13px}
-.dcard p{margin:0 0 6px; font-size:12.5px; color:var(--ink-2)}
-.quote{background:var(--sunken); border-inline-start:3px solid var(--border-2); border-radius:0 6px 6px 0; padding:6px 10px; font-size:12.5px; margin:4px 0 0}
-.quote .ts{color:var(--ink-3); font-size:11px; margin-inline-start:6px}
+.dcard p{margin:0 0 6px; font-size:12.5px; color:#565c67;color:var(--ink-2)}
+.quote{background:#f0f1f4;background:var(--sunken); border-inline-start:3px solid #dcdfe6;border-inline-start:3px solid var(--border-2); border-radius:0 6px 6px 0; padding:6px 10px; font-size:12.5px; margin:4px 0 0}
+.quote .ts{color:#5f6672;color:var(--ink-3); font-size:11px; margin-inline-start:6px}
 .drawer .sum{margin-bottom:10px}
-.pager{display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s5); border-top:1px solid var(--border); flex-wrap:wrap}
+.pager{display:flex; align-items:center; gap:12px;gap:var(--s3); padding:12px 20px;padding:var(--s3) var(--s5); border-top:1px solid #e7e9ee;border-top:1px solid var(--border); flex-wrap:wrap}
 .pager .grow{flex:1}
-.cases{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:var(--s4)}
+.cases{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:16px;gap:var(--s4)}
 @media (max-width: 900px){ .cases{grid-template-columns:1fr} }
-.case{padding:10px 0; border-bottom:1px solid var(--border)}
+.case{padding:10px 0; border-bottom:1px solid #e7e9ee;border-bottom:1px solid var(--border)}
 .case:last-child{border-bottom:0}
 .case .top{display:flex; gap:8px; align-items:center; font-size:12.5px; flex-wrap:wrap}
-.case p{margin:4px 0 0; font-size:12.5px; color:var(--ink-2)}
-.tabs{display:flex; flex-wrap:wrap; gap:4px; margin-bottom:var(--s3)}
-.tabs button{appearance:none; border:1px solid var(--border-2); background:var(--card); color:var(--ink-2); border-radius:100px;
+.case p{margin:4px 0 0; font-size:12.5px; color:#565c67;color:var(--ink-2)}
+.tabs{display:flex; flex-wrap:wrap; gap:4px; margin-bottom:12px;margin-bottom:var(--s3)}
+.tabs button{appearance:none; border:1px solid #dcdfe6;border:1px solid var(--border-2); background:#ffffff;background:var(--card); color:#565c67;color:var(--ink-2); border-radius:100px;
   font:inherit; font-size:12.5px; padding:4px 12px; cursor:pointer; min-height:30px}
-.tabs button[aria-selected="true"]{background:var(--ink); color:var(--page); border-color:var(--ink)}
+.tabs button[aria-selected="true"]{background:#1a1c22;background:var(--ink); color:#fff;color:var(--page); border-color:#1a1c22;border-color:var(--ink)}
 
-.method dl{display:grid; grid-template-columns:minmax(140px, 220px) minmax(0,1fr); gap:8px var(--s5); margin:0; font-size:13px}
-.method dt{color:var(--ink-3); font-weight:600}
+.method dl{display:grid; grid-template-columns:minmax(140px, 220px) minmax(0,1fr); gap:8px 20px;gap:8px var(--s5); margin:0; font-size:13px}
+.method dt{color:#5f6672;color:var(--ink-3); font-weight:600}
 .method dd{margin:0}
 @media (max-width: 620px){ .method dl{grid-template-columns:1fr} }
-.demo{border:1px solid var(--bad); background:var(--bad-soft); color:var(--bad-ink); border-radius:var(--r-lg); padding:12px 16px; margin-bottom:var(--s4); font-size:13.5px}
+.demo{border:1px solid #be2a2a;border:1px solid var(--bad); background:#fdeceb;background:var(--bad-soft); color:#a11f1f;color:var(--bad-ink); border-radius:12px;border-radius:var(--r-lg); padding:12px 16px; margin-bottom:16px;margin-bottom:var(--s4); font-size:13.5px}
 .demo b{font-weight:700}
-footer.foot{max-width:1220px; margin:0 auto; padding:var(--s5) 24px var(--s7); color:var(--ink-3); font-size:11.5px; border-top:1px solid var(--border)}
-.noscript{background:var(--warn-soft); color:var(--warn-ink); padding:10px 14px; border-radius:var(--r); margin:var(--s3) 0}
+footer.foot{max-width:1220px; margin:0 auto; padding:20px 24px 40px;padding:var(--s5) 24px var(--s7); color:#5f6672;color:var(--ink-3); font-size:11.5px; border-top:1px solid #e7e9ee;border-top:1px solid var(--border)}
+.noscript{background:#fdf1e3;background:var(--warn-soft); color:#8a4308;color:var(--warn-ink); padding:10px 14px; border-radius:8px;border-radius:var(--r); margin:12px 0;margin:var(--s3) 0}
 .print-only{display:none}
 
 .chart-box{overflow-x:auto}
@@ -359,10 +360,10 @@ footer.foot{max-width:1220px; margin:0 auto; padding:var(--s5) 24px var(--s7); c
 @media (max-width: 720px){
   .topbar .in{padding:8px 12px; flex-wrap:wrap; gap:8px}
   .levels{order:3; width:100%; margin:0}
-  .wrap{padding:var(--s4) 12px var(--s6)}
+  .wrap{padding:16px 12px 28px;padding:var(--s4) 12px var(--s6)}
   .cover h1{font-size:22px}
-  .card > .bd{padding:var(--s3) var(--s4) var(--s4)}
-  .card > .hd{padding:var(--s3) var(--s4) 0}
+  .card > .bd{padding:12px 16px 16px;padding:var(--s3) var(--s4) var(--s4)}
+  .card > .hd{padding:12px 16px 0;padding:var(--s3) var(--s4) 0}
   .dimbar{grid-template-columns:minmax(96px, 130px) minmax(0,1fr) 40px}
   .kpi .k-spark{display:none}
 }
@@ -408,94 +409,107 @@ footer.foot{max-width:1220px; margin:0 auto; padding:var(--s5) 24px var(--s7); c
   --u-center:#8b93f8; --u-own:#34caa0; --u-branch:#9fc26a; --u-back:#d19a62; --u-other:#8b929e;
 }}
 
-.ch-cat-unclosed_loop{fill:var(--c-loop); background:var(--c-loop)}
-.ch-cat-excessive_runaround{fill:var(--c-run); background:var(--c-run)}
-.ch-cat-legit_return{fill:var(--c-legit); background:var(--c-legit)}
-.ch-cat-new_topic{fill:var(--c-new); background:var(--c-new)}
-.ch-cat-bank_initiated{fill:var(--c-bank); background:var(--c-bank)}
-.ch-cat-unclassifiable,.ch-cat-other,.ch-cat-none{fill:var(--c-none); background:var(--c-none)}
-.ch-cat-first{fill:var(--c-first); background:var(--c-first)}
-.ch-cat-pending{fill:var(--c-pending); background:var(--c-pending); stroke:var(--ink-3); stroke-dasharray:2 2}
-.cat-dot.ch-cat-pending{border:1px dashed var(--ink-3)}
-.ch .ch-cat{fill:var(--ink-2); font-size:11px}
-.ch .ch-seg-lbl{fill:var(--ink); font-weight:600; paint-order:stroke; stroke:var(--card); stroke-width:3px; stroke-linejoin:round}
-.ch .ch-break{fill:var(--ink-3); font-size:10px}
-.ch-link-line{stroke:var(--border-2); stroke-width:1; stroke-dasharray:2 3}
+.ch-cat-unclosed_loop{fill:#c9463d;fill:var(--c-loop); background:#c9463d;background:var(--c-loop)}
+.ch-cat-excessive_runaround{fill:#e0892f;fill:var(--c-run); background:#e0892f;background:var(--c-run)}
+.ch-cat-legit_return{fill:#2f8f6f;fill:var(--c-legit); background:#2f8f6f;background:var(--c-legit)}
+.ch-cat-new_topic{fill:#5b6bd6;fill:var(--c-new); background:#5b6bd6;background:var(--c-new)}
+.ch-cat-bank_initiated{fill:#8a909c;fill:var(--c-bank); background:#8a909c;background:var(--c-bank)}
+.ch-cat-unclassifiable,.ch-cat-other,.ch-cat-none{fill:#d5d8df;fill:var(--c-none); background:#d5d8df;background:var(--c-none)}
+.ch-cat-first{fill:#1a1c22;fill:var(--c-first); background:#1a1c22;background:var(--c-first)}
+.ch-cat-pending{fill:#eceef2;fill:var(--c-pending); background:#eceef2;background:var(--c-pending); stroke:#5f6672;stroke:var(--ink-3); stroke-dasharray:2 2}
+.cat-dot.ch-cat-pending{border:1px dashed #5f6672;border:1px dashed var(--ink-3)}
+.ch .ch-cat{fill:#565c67;fill:var(--ink-2); font-size:11px}
+.ch .ch-seg-lbl{fill:#1a1c22;fill:var(--ink); font-weight:600; paint-order:stroke; stroke:#ffffff;stroke:var(--card); stroke-width:3px; stroke-linejoin:round}
+.ch .ch-break{fill:#5f6672;fill:var(--ink-3); font-size:10px}
+.ch-link-line{stroke:#dcdfe6;stroke:var(--border-2); stroke-width:1; stroke-dasharray:2 3}
 .ch-arc,.ch-arc-ok,.ch-arc-bad{fill:none; stroke-width:1.6}
-.ch-arc{stroke:var(--ink-3); stroke-dasharray:3 3}
-.ch-arc-ok{stroke:var(--ok)}
-.ch-arc-bad{stroke:var(--bad); stroke-dasharray:5 3}
-.ch-mark{stroke:var(--card); stroke-width:1.5}
-.ch-mark-ring{fill:var(--card) !important; stroke-width:2.5}
-.ch-mark-ring.ch-cat-unclosed_loop{stroke:var(--c-loop)} .ch-mark-ring.ch-cat-excessive_runaround{stroke:var(--c-run)}
-.ch-mark-ring.ch-cat-legit_return{stroke:var(--c-legit)} .ch-mark-ring.ch-cat-new_topic{stroke:var(--c-new)}
-.ch-mark-ring.ch-cat-bank_initiated{stroke:var(--c-bank)} .ch-mark-ring.ch-cat-first{stroke:var(--c-first)}
-.ch-mark-ring.ch-cat-unclassifiable,.ch-mark-ring.ch-cat-other,.ch-mark-ring.ch-cat-none,.ch-mark-ring.ch-cat-pending{stroke:var(--ink-3)}
-.ch-mark-cross{fill:none; stroke:var(--bad); stroke-width:2.6; stroke-linecap:round}
+.ch-arc{stroke:#5f6672;stroke:var(--ink-3); stroke-dasharray:3 3}
+.ch-arc-ok{stroke:#0e7a5f;stroke:var(--ok)}
+.ch-arc-bad{stroke:#be2a2a;stroke:var(--bad); stroke-dasharray:5 3}
+.ch-mark{stroke:#ffffff;stroke:var(--card); stroke-width:1.5}
+.ch-mark-ring{fill:#ffffff !important;fill:var(--card) !important; stroke-width:2.5}
+.ch-mark-ring.ch-cat-unclosed_loop{stroke:#c9463d;stroke:var(--c-loop)} .ch-mark-ring.ch-cat-excessive_runaround{stroke:#e0892f;stroke:var(--c-run)}
+.ch-mark-ring.ch-cat-legit_return{stroke:#2f8f6f;stroke:var(--c-legit)} .ch-mark-ring.ch-cat-new_topic{stroke:#5b6bd6;stroke:var(--c-new)}
+.ch-mark-ring.ch-cat-bank_initiated{stroke:#8a909c;stroke:var(--c-bank)} .ch-mark-ring.ch-cat-first{stroke:#1a1c22;stroke:var(--c-first)}
+.ch-mark-ring.ch-cat-unclassifiable,.ch-mark-ring.ch-cat-other,.ch-mark-ring.ch-cat-none,.ch-mark-ring.ch-cat-pending{stroke:#5f6672;stroke:var(--ink-3)}
+.ch-mark-cross{fill:none; stroke:#be2a2a;stroke:var(--bad); stroke-width:2.6; stroke-linecap:round}
 .ch-sess{stroke:none}
-.ch-unit-center{fill:var(--u-center)} .ch-unit-own_branch{fill:var(--u-own)} .ch-unit-branch{fill:var(--u-branch)}
-.ch-unit-back_office{fill:var(--u-back)} .ch-unit-other{fill:var(--u-other)}
+.ch-unit-center{fill:#4f46e5;fill:var(--u-center)} .ch-unit-own_branch{fill:#0e7a5f;fill:var(--u-own)} .ch-unit-branch{fill:#6d8f3a;fill:var(--u-branch)}
+.ch-unit-back_office{fill:#8a5a2b;fill:var(--u-back)} .ch-unit-other{fill:#8a909c;fill:var(--u-other)}
 .ch-sess-view{opacity:.35}
 .ch-timeline a{cursor:pointer}
 .ch-timeline .ch-grid,.ch-timeline text.ch-break,.ch-link-line,.ch-arc,.ch-arc-ok,.ch-arc-bad{pointer-events:none}
-.ch-timeline a:hover .ch-mark,.ch-timeline a:focus-visible .ch-mark{stroke:var(--ink); stroke-width:2}
+.ch-timeline a:hover .ch-mark,.ch-timeline a:focus-visible .ch-mark{stroke:#1a1c22;stroke:var(--ink); stroke-width:2}
 .tl-legend{display:flex; flex-direction:column; gap:2px}
-.tl-glyph{display:inline-block; min-width:14px; text-align:center; color:var(--ink-2)}
+.tl-glyph{display:inline-block; min-width:14px; text-align:center; color:#565c67;color:var(--ink-2)}
 
 .mdef{display:inline-block; position:relative; vertical-align:middle}
 .mdef summary{list-style:none; cursor:pointer; display:inline-grid; place-items:center; width:17px; height:17px;
-  border-radius:50%; border:1px solid var(--border-2); font-size:10.5px; color:var(--ink-3); font-weight:700}
+  border-radius:50%; border:1px solid #dcdfe6;border:1px solid var(--border-2); font-size:10.5px; color:#5f6672;color:var(--ink-3); font-weight:700}
 .mdef summary::-webkit-details-marker{display:none}
-.mdef[open] summary{background:var(--accent-soft); color:var(--accent-ink); border-color:var(--accent)}
-.mdef-body{position:absolute; z-index:20; top:22px; inset-inline-start:-8px; width:min(340px, 80vw); background:var(--card);
-  border:1px solid var(--border-2); border-radius:var(--r); box-shadow:var(--shadow-pop); padding:10px 12px; font-size:12.5px;
-  font-weight:400; color:var(--ink); line-height:1.55}
+.mdef[open] summary{background:#eef0fe;background:var(--accent-soft); color:#4338ca;color:var(--accent-ink); border-color:#4f46e5;border-color:var(--accent)}
+.mdef-body{position:absolute; z-index:20; top:22px; inset-inline-start:-8px; width:min(340px, 80vw); background:#ffffff;background:var(--card);
+  border:1px solid #dcdfe6;border:1px solid var(--border-2); border-radius:8px;border-radius:var(--r); box-shadow:0 12px 40px rgb(20 22 28/.16);box-shadow:var(--shadow-pop); padding:10px 12px; font-size:12.5px;
+  font-weight:400; color:#1a1c22;color:var(--ink); line-height:1.55}
 .mdef-body p{margin:0 0 6px}
 .kpi .k-label{display:flex; align-items:center; gap:6px}
+.legacy .mdef{display:none}
 
 .cat-dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-inline-end:6px; vertical-align:baseline}
-.cat-chip{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--ink-2); margin-inline-end:10px; white-space:nowrap}
+.cat-chip{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:#565c67;color:var(--ink-2); margin-inline-end:10px; white-space:nowrap}
 .cat-chip .cat-dot{margin-inline-end:2px}
-table.matrix th[scope="row"]{color:var(--ink-2); font-weight:500; font-size:12.5px}
+table.matrix th[scope="row"]{color:#565c67;color:var(--ink-2); font-weight:500; font-size:12.5px}
 table.matrix td,table.matrix thead th{text-align:center}
-table.matrix td:empty::after{content:"·"; color:var(--ink-3)}
+table.matrix td:empty::after{content:"·"; color:#5f6672;color:var(--ink-3)}
 table.metrics td{font-size:12.5px}
-.track .fill.qfail{background:var(--bad)}
+.track .fill.qfail{background:#be2a2a;background:var(--bad)}
 ul.plain{margin:0; padding-inline-start:18px}
 
 .xp-table tbody tr.row{cursor:pointer}
-.stories{display:flex; flex-direction:column; gap:10px; margin-top:var(--s4)}
-.story > summary{list-style:none; cursor:pointer; display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:12px var(--s5)}
+.stories{display:flex; flex-direction:column; gap:10px; margin-top:16px;margin-top:var(--s4)}
+.story > summary{list-style:none; cursor:pointer; display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:12px 20px;padding:12px var(--s5)}
 .story > summary::-webkit-details-marker{display:none}
-.story > summary::before{content:"◂"; color:var(--ink-3); font-size:12px; transition:transform var(--dur)}
+.story > summary::before{content:"◂"; color:#5f6672;color:var(--ink-3); font-size:12px; transition:transform .13s;transition:transform var(--dur)}
 .story[open] > summary::before{transform:rotate(-90deg)}
-.story > summary:hover{background:var(--sunken)}
+.story > summary:hover{background:#f0f1f4;background:var(--sunken)}
 .story .st-no{font-weight:650}
-.story .st-topic{color:var(--ink-2); font-size:13px}
-.story .st-facts{color:var(--ink-3); font-size:12.5px}
+.story .st-topic{color:#565c67;color:var(--ink-2); font-size:13px}
+.story .st-facts{color:#5f6672;color:var(--ink-3); font-size:12.5px}
 .story .st-cats{flex-basis:100%; padding-inline-start:22px}
-.story-body{padding:0 var(--s5) var(--s5); border-top:1px solid var(--border)}
-.st-head{font-size:15px; margin:var(--s4) 0 4px}
-.st-narr{color:var(--ink-2); font-size:13.5px; max-width:95ch}
-.st-meta{display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px var(--s4); margin:var(--s4) 0; font-size:12.5px}
-.st-meta dt{color:var(--ink-3); font-size:11.5px}
+.story-body{padding:0 20px 20px;padding:0 var(--s5) var(--s5); border-top:1px solid #e7e9ee;border-top:1px solid var(--border)}
+.st-head{font-size:15px; margin:16px 0 4px;margin:var(--s4) 0 4px}
+.st-narr{color:#565c67;color:var(--ink-2); font-size:13.5px; max-width:95ch}
+.st-meta{display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px 16px;gap:8px var(--s4); margin:16px 0;margin:var(--s4) 0; font-size:12.5px}
+.st-meta dt{color:#5f6672;color:var(--ink-3); font-size:11.5px}
 .st-meta dd{margin:0}
 @media (max-width: 900px){ .st-meta{grid-template-columns:repeat(2, minmax(0,1fr))} }
-.tl-box{margin:var(--s3) 0 var(--s4)}
+.tl-box{margin:12px 0 16px;margin:var(--s3) 0 var(--s4)}
 @media screen and (max-width: 1100px){ .tl-box .ch .ch-svg{min-width:900px} }
 table.contacts td{font-size:12.5px}
-table.contacts tr.brk td{background:var(--bad-soft)}
-table.contacts tr:target td{background:var(--accent-soft)}
+table.contacts tr.brk td{background:#fdeceb;background:var(--bad-soft)}
+table.contacts tr:target td{background:#eef0fe;background:var(--accent-soft)}
 table.contacts .badge{margin-top:2px}
 
 @media print{
   .mdef{display:none}
-  .story{break-inside:avoid-page}
+  /* a closed <details> still takes a page in Chrome's print: only the
+     stories marked for print are printed, opened; the rest are in the index */
+  .story:not(.print-open){display:none !important}
+  .story.print-open::details-content{content-visibility:visible; display:block}
+  .story.print-open{break-before:page}
+  .story-index table{font-size:10.5px}
+  .story-index th, .story-index td{padding:3px 6px}
   #level3{page:wide}
   .explorer{display:none !important}
-}</style>
+}/* hidden wherever CSS variables work - i.e. the page is shown as designed */
+@supports (--callqa: 1) { .compat-note{display:none !important} }
+</style>
 </head>
 <body>
+<div class="compat-note" role="alert" style="background:#fdf1e3;color:#8a4308;border:1px solid #b45309;padding:12px 16px;margin:12px;font:15px/1.6 Arial,sans-serif;direction:rtl;text-align:right">
+  <b>הדוח מוצג בלי העיצוב המלא שלו.</b> זה קורה כשהקובץ נפתח ב־Internet Explorer או ב„מצב תאימות” (IE mode), או כשמערכת הדואר הסירה ממנו את העיצוב.
+  כדי לראות אותו כמו שצריך: לחיצה ימנית על הקובץ ← „פתח באמצעות” ← <b>Microsoft Edge</b> (או Chrome). אם הקובץ הגיע בדואר ועדיין נראה כך, שמרו אותו מהמקור (למשל מתיקייה משותפת) או השתמשו בגרסת ה־PDF.
+</div>
 <a class="skip" href="#level1">דלג לתוכן הדוח</a>
 
 <header class="topbar">
@@ -531,7 +545,7 @@ table.contacts .badge{margin-top:2px}
       <span>סיפורי לקוח: <b class="n">100</b></span>
       <span>מגעים: <b class="n">345</b></span>
       <span>חזרות: <b class="n">245</b></span>
-      <span>הופק: <b class="n">24.09.2026 10:05</b></span>
+      <span>הופק: <b class="n">24.09.2026 10:54</b></span>
     </div>
     <div class="chips">
 <span class="chip">סיווג לפי תוכן: mock</span>
@@ -1021,6 +1035,12 @@ table.contacts .badge{margin-top:2px}
       <h3>כרטיסי הסיפורים</h3>
       <p class="lead">פתחו סיפור מהטבלה או מהרשימה. בציר: <b>הזמן זורם מימין לשמאל</b>; פערים ארוכים מכווצים ומסומנים ב־≈. מספר מתחת לכל סימן הוא מספר המגע בטבלה.</p>
       <div class="card"><div class="bd"><div class="tl-legend"><div class="ch-legend"><span class="ch-legend-item"><span class="tl-glyph">●</span>שיחה מוקלטת</span><span class="ch-legend-item"><span class="tl-glyph">■</span>התכתבות</span><span class="ch-legend-item"><span class="tl-glyph">○</span>שיחה שנענתה, לא הוקלטה</span><span class="ch-legend-item"><span class="tl-glyph">✕</span>שיחה שננטשה</span></div><div class="ch-legend"><span class="ch-legend-item"><svg class="ch-sw ch-cat-unclosed_loop" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>אי-סגירת מעגל טיפול</span><span class="ch-legend-item"><svg class="ch-sw ch-cat-excessive_runaround" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>טרטור יתר</span><span class="ch-legend-item"><svg class="ch-sw ch-cat-legit_return" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>חזרה לגיטימית</span><span class="ch-legend-item"><svg class="ch-sw ch-cat-new_topic" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>פנייה בנושא חדש</span><span class="ch-legend-item"><svg class="ch-sw ch-cat-bank_initiated" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>חזרה ביוזמת הבנק</span><span class="ch-legend-item"><svg class="ch-sw ch-cat-unclassifiable" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>לא ניתן לסיווג</span><span class="ch-legend-item"><svg class="ch-sw ch-cat-first" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>פנייה ראשונה</span></div><div class="ch-legend"><span class="ch-legend-item"><svg class="ch-sw ch-unit-center ch-sess-exec" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>מרכז הבנקאות</span><span class="ch-legend-item"><svg class="ch-sw ch-unit-own_branch ch-sess-exec" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>סניף החשבון</span><span class="ch-legend-item"><svg class="ch-sw ch-unit-branch ch-sess-exec" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>סניף אחר</span><span class="ch-legend-item"><svg class="ch-sw ch-unit-back_office ch-sess-exec" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>תפעול עורפי</span><span class="ch-legend-item"><svg class="ch-sw ch-unit-center ch-sess-view" viewBox="0 0 10 10" aria-hidden="true"><rect width="10" height="10" rx="2"/></svg>צפייה בלבד (בהיר)</span></div></div></div></div>
+      <div class="print-only story-index">
+        <h4>כל הסיפורים</h4>
+        <p class="small muted">בהדפסה מוצגים במלואם <span class="n">10</span> הסיפורים עם הכי הרבה חזרות; כל השאר בטבלה. הדוח האינטראקטיבי (HTML) מציג את כולם.</p>
+        <table><thead><tr><th>סיפור</th><th>נושא</th><th class="num">מגעים</th><th class="num">חזרות</th><th class="num">ימים</th><th>סיבות החזרה</th><th>סטטוס</th></tr></thead><tbody>
+<tr><td class="n">סיפור 001</td><td>העברות ותשלומים</td><td class="num n">2</td><td class="num n">1</td><td class="num n">0.1</td><td class="small">חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 002</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">2</td><td class="num n">1</td><td class="num n">5.7</td><td class="small">פנייה בנושא חדש <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 003</td><td>צ&#39;קים</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.2</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 004</td><td>אחר</td><td class="num n">3</td><td class="num n">2</td><td class="num n">1.7</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 005</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">14</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 006</td><td>מט&#34;ח והעברות לחו&#34;ל</td><td class="num n">3</td><td class="num n">2</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 007</td><td>העברות ותשלומים</td><td class="num n">2</td><td class="num n">1</td><td class="num n">7</td><td class="small">פנייה בנושא חדש <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 008</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">0</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 009</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.8</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 010</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">3.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 011</td><td>מסגרות אשראי וחריגות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">3.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 012</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">1.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 013</td><td>מסגרות אשראי וחריגות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">5.8</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 014</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">4.2</td><td class="small">טרטור יתר <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 015</td><td>העברות ותשלומים</td><td class="num n">3</td><td class="num n">2</td><td class="num n">5</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 016</td><td>אחר</td><td class="num n">3</td><td class="num n">2</td><td class="num n">0</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 017</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">2</td><td class="num n">1</td><td class="num n">7.9</td><td class="small">פנייה בנושא חדש <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 018</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 019</td><td>העברות ותשלומים</td><td class="num n">2</td><td class="num n">1</td><td class="num n">0.1</td><td class="small">חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 020</td><td>הלוואות ומשכנתאות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">4</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 021</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">4.2</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה לגיטימית <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 022</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">6.1</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה לגיטימית <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 023</td><td>הלוואות ומשכנתאות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">6</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 024</td><td>הלוואות ומשכנתאות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">6.8</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span> · לא ניתן לסיווג <span class="n">1</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 025</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 026</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">3</td><td class="num n">2</td><td class="num n">6</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 027</td><td>העברות ותשלומים</td><td class="num n">5</td><td class="num n">4</td><td class="num n">0.2</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">3</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 028</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">4</td><td class="num n">3</td><td class="num n">6.9</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span> · לא ניתן לסיווג <span class="n">1</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 029</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 030</td><td>העברות ותשלומים</td><td class="num n">2</td><td class="num n">1</td><td class="num n">0.1</td><td class="small">חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 031</td><td>הלוואות ומשכנתאות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">6.1</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span> · לא ניתן לסיווג <span class="n">1</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 032</td><td>מסגרות אשראי וחריגות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">4.9</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 033</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">1</td><td class="small">טרטור יתר <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 034</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">3.8</td><td class="small">טרטור יתר <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 035</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">3.7</td><td class="small">טרטור יתר <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 036</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">2</td><td class="num n">1</td><td class="num n">3.4</td><td class="small">פנייה בנושא חדש <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 037</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">4</td><td class="num n">3</td><td class="num n">4.1</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 038</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 039</td><td>מט&#34;ח והעברות לחו&#34;ל</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.8</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 040</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">5</td><td class="num n">4</td><td class="num n">6.8</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 041</td><td>מסגרות אשראי וחריגות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.2</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 042</td><td>הלוואות ומשכנתאות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 043</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 044</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.7</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 045</td><td>העברות ותשלומים</td><td class="num n">5</td><td class="num n">4</td><td class="num n">4.8</td><td class="small">טרטור יתר <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 046</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 047</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.8</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 048</td><td>הלוואות ומשכנתאות</td><td class="num n">2</td><td class="num n">1</td><td class="num n">0.1</td><td class="small">חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 049</td><td>מסגרות אשראי וחריגות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 050</td><td>העברות ותשלומים</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.4</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 051</td><td>מט&#34;ח והעברות לחו&#34;ל</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.1</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 052</td><td>מסגרות אשראי וחריגות</td><td class="num n">2</td><td class="num n">1</td><td class="num n">9.7</td><td class="small">פנייה בנושא חדש <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 053</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.7</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 054</td><td>הלוואות ומשכנתאות</td><td class="num n">2</td><td class="num n">1</td><td class="num n">0.1</td><td class="small">חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 055</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">4.3</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 056</td><td>העברות ותשלומים</td><td class="num n">3</td><td class="num n">2</td><td class="num n">4.1</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 057</td><td>העברות ותשלומים</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 058</td><td>העברות ותשלומים</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 059</td><td>אחר</td><td class="num n">2</td><td class="num n">1</td><td class="num n">0.1</td><td class="small">חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 060</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.1</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 061</td><td>מסגרות אשראי וחריגות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.2</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 062</td><td>העברות ותשלומים</td><td class="num n">4</td><td class="num n">3</td><td class="num n">3.1</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 063</td><td>הלוואות ומשכנתאות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">6.2</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 064</td><td>צ&#39;קים</td><td class="num n">4</td><td class="num n">3</td><td class="num n">4.9</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 065</td><td>אחר</td><td class="num n">6</td><td class="num n">5</td><td class="num n">4</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">4</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 066</td><td>העברות ותשלומים</td><td class="num n">3</td><td class="num n">2</td><td class="num n">4</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 067</td><td>מסגרות אשראי וחריגות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">3.7</td><td class="small">טרטור יתר <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 068</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">2</td><td class="num n">1</td><td class="num n">0.1</td><td class="small">חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 069</td><td>הלוואות ומשכנתאות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">4.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 070</td><td>מסגרות אשראי וחריגות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">3.1</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 071</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">6.9</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 072</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.2</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 073</td><td>העברות ותשלומים</td><td class="num n">2</td><td class="num n">1</td><td class="num n">7</td><td class="small">פנייה בנושא חדש <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 074</td><td>העברות ותשלומים</td><td class="num n">5</td><td class="num n">4</td><td class="num n">1.9</td><td class="small">טרטור יתר <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 075</td><td>מסגרות אשראי וחריגות</td><td class="num n">4</td><td class="num n">3</td><td class="num n">4.9</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 076</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.8</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 077</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">4</td><td class="num n">3</td><td class="num n">5</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 078</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 079</td><td>צ&#39;קים</td><td class="num n">4</td><td class="num n">3</td><td class="num n">4.2</td><td class="small">חזרה לגיטימית <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 080</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 081</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">6.9</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 082</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.8</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 083</td><td>מט&#34;ח והעברות לחו&#34;ל</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 084</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">5.6</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 085</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">3</td><td class="num n">2</td><td class="num n">5.2</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 086</td><td>העברות ותשלומים</td><td class="num n">3</td><td class="num n">2</td><td class="num n">1.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 087</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">4.8</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה לגיטימית <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 088</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">3</td><td class="num n">2</td><td class="num n">5.3</td><td class="small">פנייה בנושא חדש <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>לא ברור</td></tr><tr><td class="n">סיפור 089</td><td>מסגרות אשראי וחריגות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 090</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.2</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 091</td><td>כרטיסים וגישה דיגיטלית</td><td class="num n">5</td><td class="num n">4</td><td class="num n">5.7</td><td class="small">אי-סגירת מעגל טיפול <span class="n">2</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 092</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">3.2</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 093</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">2.9</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 094</td><td>ניהול חשבון, מסמכים ושירות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 095</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">1.1</td><td class="small">חזרה לגיטימית <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 096</td><td>הלוואות ומשכנתאות</td><td class="num n">3</td><td class="num n">2</td><td class="num n">5.7</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 097</td><td>העברות ותשלומים</td><td class="num n">4</td><td class="num n">3</td><td class="num n">0.1</td><td class="small">טרטור יתר <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>פתוח</td></tr><tr><td class="n">סיפור 098</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">5</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 099</td><td>פיקדונות, חסכונות והשקעות</td><td class="num n">5</td><td class="num n">4</td><td class="num n">4</td><td class="small">אי-סגירת מעגל טיפול <span class="n">1</span> · חזרה ביוזמת הבנק <span class="n">1</span> · לא ניתן לסיווג <span class="n">2</span></td><td>נסגר</td></tr><tr><td class="n">סיפור 100</td><td>הלוואות ומשכנתאות</td><td class="num n">2</td><td class="num n">1</td><td class="num n">4.2</td><td class="small">פנייה בנושא חדש <span class="n">1</span></td><td>נסגר</td></tr>        </tbody></table>
+      </div>
       <div class="stories" id="stories">
         <details class="card story" id="s1" data-no="1">
           <summary>
@@ -1694,7 +1714,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s14" data-no="14">
+        <details class="card story print-open" id="s14" data-no="14">
           <summary>
             <span class="st-no">סיפור 014</span>
             <span class="st-topic">ניהול חשבון, מסמכים ושירות</span>
@@ -2009,7 +2029,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s20" data-no="20">
+        <details class="card story print-open" id="s20" data-no="20">
           <summary>
             <span class="st-no">סיפור 020</span>
             <span class="st-topic">הלוואות ומשכנתאות</span>
@@ -2402,7 +2422,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s27" data-no="27">
+        <details class="card story print-open" id="s27" data-no="27">
           <summary>
             <span class="st-no">סיפור 027</span>
             <span class="st-topic">העברות ותשלומים</span>
@@ -2735,7 +2755,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s33" data-no="33">
+        <details class="card story print-open" id="s33" data-no="33">
           <summary>
             <span class="st-no">סיפור 033</span>
             <span class="st-topic">פיקדונות, חסכונות והשקעות</span>
@@ -2804,7 +2824,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s34" data-no="34">
+        <details class="card story print-open" id="s34" data-no="34">
           <summary>
             <span class="st-no">סיפור 034</span>
             <span class="st-topic">פיקדונות, חסכונות והשקעות</span>
@@ -2873,7 +2893,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s35" data-no="35">
+        <details class="card story print-open" id="s35" data-no="35">
           <summary>
             <span class="st-no">סיפור 035</span>
             <span class="st-topic">ניהול חשבון, מסמכים ושירות</span>
@@ -3155,7 +3175,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s40" data-no="40">
+        <details class="card story print-open" id="s40" data-no="40">
           <summary>
             <span class="st-no">סיפור 040</span>
             <span class="st-topic">כרטיסים וגישה דיגיטלית</span>
@@ -3455,7 +3475,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s45" data-no="45">
+        <details class="card story print-open" id="s45" data-no="45">
           <summary>
             <span class="st-no">סיפור 045</span>
             <span class="st-topic">העברות ותשלומים</span>
@@ -4382,7 +4402,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s63" data-no="63">
+        <details class="card story print-open" id="s63" data-no="63">
           <summary>
             <span class="st-no">סיפור 063</span>
             <span class="st-topic">הלוואות ומשכנתאות</span>
@@ -4511,7 +4531,7 @@ table.contacts .badge{margin-top:2px}
             </div>
           </div>
         </details>
-        <details class="card story" id="s65" data-no="65">
+        <details class="card story print-open" id="s65" data-no="65">
           <summary>
             <span class="st-no">סיפור 065</span>
             <span class="st-topic">אחר</span>
@@ -6552,7 +6572,7 @@ table.contacts .badge{margin-top:2px}
   </section>
 </main>
 
-<footer class="foot">callqa 1.4.0 · הופק 24.09.2026 10:05 · מערך נתונים ds-20260924-43a70ab5 · שכבת תוכן: mock</footer>
+<footer class="foot">callqa 1.4.0 · הופק 24.09.2026 10:54 · מערך נתונים ds-20260924-43a70ab5 · שכבת תוכן: mock</footer>
 
 <script type="application/json" id="xr-data">{"cats":{"bank_initiated":"חזרה ביוזמת הבנק","excessive_runaround":"טרטור יתר","legit_return":"חזרה לגיטימית","new_topic":"פנייה בנושא חדש","unclassifiable":"לא ניתן לסיווג","unclosed_loop":"אי-סגירת מעגל טיפול"},"stories":[{"a":"s1","ab":1,"bk":0,"br":"2","c":2,"cats":["bank_initiated"],"cv":"partial","d":0.1,"f":0,"fa":"2026-06-01","mn":0.0,"no":1,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":2,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s2","ab":0,"bk":0,"br":"10","c":2,"cats":["new_topic"],"cv":"partial","d":5.7,"f":0,"fa":"2026-06-01","mn":0.0,"no":2,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":1,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s3","ab":1,"bk":0,"br":"122","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":0.2,"f":1,"fa":"2026-06-02","mn":0.0,"no":3,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"cheques","tl":"צ'קים"},{"a":"s4","ab":0,"bk":0,"br":"30","c":3,"cats":["bank_initiated","legit_return"],"cv":"partial","d":1.7,"f":0,"fa":"2026-06-02","mn":0.0,"no":4,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"other","tl":"אחר"},{"a":"s5","ab":0,"bk":0,"br":"120","c":3,"cats":["legit_return","unclassifiable"],"cv":"partial","d":14.0,"f":0,"fa":"2026-06-04","mn":0.0,"no":5,"p":0,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"unclear","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s6","ab":2,"bk":0,"br":"146","c":3,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":0.1,"f":1,"fa":"2026-06-04","mn":0.0,"no":6,"p":0,"pb":0,"r":2,"rt":0,"sb":"content","sd":3,"st":"closed","t":"fx_international","tl":"מט\"ח והעברות לחו\"ל"},{"a":"s7","ab":0,"bk":0,"br":"122","c":2,"cats":["new_topic"],"cv":"partial","d":7.0,"f":0,"fa":"2026-06-07","mn":0.0,"no":7,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":1,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s8","ab":2,"bk":0,"br":"35","c":3,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":0.0,"f":1,"fa":"2026-06-07","mn":0.0,"no":8,"p":0,"pb":0,"r":2,"rt":0,"sb":"content","sd":3,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s9","ab":0,"bk":0,"br":"14","c":3,"cats":["bank_initiated","legit_return"],"cv":"partial","d":2.8,"f":0,"fa":"2026-06-07","mn":0.0,"no":9,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s10","ab":1,"bk":0,"br":"102","c":4,"cats":["legit_return","unclassifiable"],"cv":"partial","d":3.9,"f":0,"fa":"2026-06-07","mn":0.0,"no":10,"p":1,"pb":1,"r":3,"rt":0,"sb":"content","sd":2,"st":"unclear","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s11","ab":1,"bk":0,"br":"43","c":4,"cats":["legit_return","unclassifiable"],"cv":"partial","d":3.9,"f":0,"fa":"2026-06-07","mn":0.0,"no":11,"p":1,"pb":1,"r":3,"rt":0,"sb":"content","sd":2,"st":"unclear","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s12","ab":0,"bk":0,"br":"139","c":3,"cats":["bank_initiated","legit_return"],"cv":"partial","d":1.9,"f":0,"fa":"2026-06-08","mn":0.0,"no":12,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":2,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s13","ab":1,"bk":0,"br":"49","c":4,"cats":["legit_return","unclassifiable"],"cv":"partial","d":5.8,"f":0,"fa":"2026-06-09","mn":0.0,"no":13,"p":1,"pb":1,"r":3,"rt":0,"sb":"content","sd":2,"st":"unclear","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s14","ab":1,"bk":0,"br":"30","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":4.2,"f":2,"fa":"2026-06-10","mn":0.0,"no":14,"p":0,"pb":0,"r":4,"rt":1,"sb":"content","sd":4,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s15","ab":0,"bk":0,"br":"120","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"partial","d":5.0,"f":1,"fa":"2026-06-10","mn":0.0,"no":15,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s16","ab":2,"bk":0,"br":"165","c":3,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":0.0,"f":1,"fa":"2026-06-11","mn":0.0,"no":16,"p":0,"pb":0,"r":2,"rt":0,"sb":"content","sd":3,"st":"closed","t":"other","tl":"אחר"},{"a":"s17","ab":0,"bk":0,"br":"126","c":2,"cats":["new_topic"],"cv":"partial","d":7.9,"f":0,"fa":"2026-06-14","mn":0.0,"no":17,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":1,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s18","ab":1,"bk":0,"br":"14","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":0.1,"f":1,"fa":"2026-06-14","mn":0.0,"no":18,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s19","ab":1,"bk":0,"br":"35","c":2,"cats":["bank_initiated"],"cv":"partial","d":0.1,"f":0,"fa":"2026-06-14","mn":0.0,"no":19,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":2,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s20","ab":2,"bk":0,"br":"42","c":5,"cats":["unclassifiable","unclosed_loop"],"cv":"partial","d":4.0,"f":2,"fa":"2026-06-14","mn":0.0,"no":20,"p":2,"pb":1,"r":4,"rt":1,"sb":"content","sd":3,"st":"open","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s21","ab":0,"bk":0,"br":"67","c":3,"cats":["legit_return","unclosed_loop"],"cv":"partial","d":4.2,"f":1,"fa":"2026-06-17","mn":0.0,"no":21,"p":1,"pb":1,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s22","ab":0,"bk":0,"br":"35","c":3,"cats":["legit_return","unclosed_loop"],"cv":"partial","d":6.1,"f":1,"fa":"2026-06-17","mn":0.0,"no":22,"p":1,"pb":1,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s23","ab":1,"bk":0,"br":"139","c":4,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"partial","d":6.0,"f":1,"fa":"2026-06-17","mn":0.0,"no":23,"p":2,"pb":1,"r":3,"rt":1,"sb":"content","sd":2,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s24","ab":1,"bk":0,"br":"56","c":4,"cats":["unclassifiable","unclosed_loop"],"cv":"partial","d":6.8,"f":2,"fa":"2026-06-17","mn":0.0,"no":24,"p":2,"pb":1,"r":3,"rt":1,"sb":"content","sd":2,"st":"open","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s25","ab":0,"bk":0,"br":"102","c":3,"cats":["bank_initiated","legit_return"],"cv":"partial","d":3.9,"f":0,"fa":"2026-06-17","mn":0.0,"no":25,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s26","ab":0,"bk":1,"br":"165","c":3,"cats":["unclosed_loop"],"cv":"partial","d":6.0,"f":2,"fa":"2026-06-18","mn":5.2,"no":26,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"open","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s27","ab":4,"bk":0,"br":"42","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":0.2,"f":1,"fa":"2026-06-21","mn":0.0,"no":27,"p":0,"pb":0,"r":4,"rt":0,"sb":"content","sd":5,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s28","ab":1,"bk":2,"br":"14","c":4,"cats":["unclassifiable","unclosed_loop"],"cv":"partial","d":6.9,"f":2,"fa":"2026-06-21","mn":2.6,"no":28,"p":2,"pb":1,"r":3,"rt":1,"sb":"content","sd":2,"st":"open","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s29","ab":0,"bk":0,"br":"10","c":3,"cats":["bank_initiated","legit_return"],"cv":"partial","d":2.9,"f":0,"fa":"2026-06-21","mn":0.0,"no":29,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s30","ab":1,"bk":0,"br":"74","c":2,"cats":["bank_initiated"],"cv":"partial","d":0.1,"f":0,"fa":"2026-06-21","mn":0.0,"no":30,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":2,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s31","ab":1,"bk":1,"br":"49","c":4,"cats":["unclassifiable","unclosed_loop"],"cv":"partial","d":6.1,"f":2,"fa":"2026-06-22","mn":3.8,"no":31,"p":2,"pb":1,"r":3,"rt":1,"sb":"content","sd":2,"st":"open","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s32","ab":0,"bk":2,"br":"35","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"partial","d":4.9,"f":1,"fa":"2026-06-23","mn":8.5,"no":32,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s33","ab":1,"bk":1,"br":"67","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":1.0,"f":2,"fa":"2026-06-24","mn":6.3,"no":33,"p":0,"pb":0,"r":4,"rt":1,"sb":"content","sd":4,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s34","ab":1,"bk":2,"br":"10","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":3.8,"f":2,"fa":"2026-06-24","mn":5.2,"no":34,"p":0,"pb":0,"r":4,"rt":1,"sb":"content","sd":4,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s35","ab":1,"bk":3,"br":"30","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"partial","d":3.7,"f":2,"fa":"2026-06-24","mn":11.7,"no":35,"p":0,"pb":0,"r":4,"rt":1,"sb":"content","sd":3,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s36","ab":0,"bk":2,"br":"22","c":2,"cats":["new_topic"],"cv":"full","d":3.4,"f":0,"fa":"2026-06-25","mn":8.6,"no":36,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":1,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s37","ab":1,"bk":4,"br":"148","c":4,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":4.1,"f":1,"fa":"2026-06-28","mn":14.9,"no":37,"p":2,"pb":2,"r":3,"rt":1,"sb":"content","sd":2,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s38","ab":1,"bk":5,"br":"33","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.1,"f":1,"fa":"2026-06-28","mn":16.1,"no":38,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s39","ab":0,"bk":4,"br":"176","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.8,"f":0,"fa":"2026-06-28","mn":13.4,"no":39,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"fx_international","tl":"מט\"ח והעברות לחו\"ל"},{"a":"s40","ab":2,"bk":4,"br":"122","c":5,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":6.8,"f":1,"fa":"2026-06-28","mn":11.8,"no":40,"p":2,"pb":2,"r":4,"rt":1,"sb":"content","sd":3,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s41","ab":1,"bk":3,"br":"14","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.2,"f":1,"fa":"2026-06-28","mn":8.8,"no":41,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s42","ab":1,"bk":5,"br":"165","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.1,"f":1,"fa":"2026-06-28","mn":10.4,"no":42,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s43","ab":1,"bk":4,"br":"130","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.1,"f":1,"fa":"2026-06-28","mn":12.4,"no":43,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s44","ab":0,"bk":3,"br":"122","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"full","d":3.7,"f":1,"fa":"2026-06-28","mn":10.6,"no":44,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s45","ab":1,"bk":5,"br":"55","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":4.8,"f":2,"fa":"2026-06-30","mn":16.8,"no":45,"p":0,"pb":0,"r":4,"rt":1,"sb":"content","sd":3,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s46","ab":0,"bk":3,"br":"42","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.9,"f":0,"fa":"2026-07-01","mn":7.3,"no":46,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s47","ab":0,"bk":4,"br":"22","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.8,"f":0,"fa":"2026-07-01","mn":11.8,"no":47,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s48","ab":1,"bk":1,"br":"102","c":2,"cats":["bank_initiated"],"cv":"full","d":0.1,"f":0,"fa":"2026-07-01","mn":8.0,"no":48,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":2,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s49","ab":0,"bk":4,"br":"148","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.0,"f":0,"fa":"2026-07-02","mn":9.3,"no":49,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":2,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s50","ab":0,"bk":3,"br":"2","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.4,"f":0,"fa":"2026-07-05","mn":14.7,"no":50,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s51","ab":0,"bk":3,"br":"102","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.1,"f":0,"fa":"2026-07-05","mn":9.2,"no":51,"p":1,"pb":1,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"fx_international","tl":"מט\"ח והעברות לחו\"ל"},{"a":"s52","ab":0,"bk":2,"br":"56","c":2,"cats":["new_topic"],"cv":"full","d":9.7,"f":0,"fa":"2026-07-05","mn":8.3,"no":52,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":1,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s53","ab":0,"bk":3,"br":"126","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.7,"f":0,"fa":"2026-07-05","mn":10.1,"no":53,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s54","ab":1,"bk":1,"br":"33","c":2,"cats":["bank_initiated"],"cv":"full","d":0.1,"f":0,"fa":"2026-07-09","mn":5.7,"no":54,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":2,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s55","ab":0,"bk":2,"br":"120","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"full","d":4.3,"f":1,"fa":"2026-07-09","mn":12.0,"no":55,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s56","ab":0,"bk":4,"br":"10","c":3,"cats":["unclosed_loop"],"cv":"full","d":4.1,"f":2,"fa":"2026-07-09","mn":9.1,"no":56,"p":2,"pb":2,"r":2,"rt":1,"sb":"content","sd":1,"st":"open","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s57","ab":1,"bk":5,"br":"176","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.1,"f":1,"fa":"2026-07-12","mn":14.6,"no":57,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s58","ab":1,"bk":3,"br":"56","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.1,"f":1,"fa":"2026-07-12","mn":10.3,"no":58,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s59","ab":1,"bk":2,"br":"176","c":2,"cats":["bank_initiated"],"cv":"full","d":0.1,"f":0,"fa":"2026-07-12","mn":8.0,"no":59,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":2,"st":"closed","t":"other","tl":"אחר"},{"a":"s60","ab":0,"bk":3,"br":"55","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.1,"f":0,"fa":"2026-07-12","mn":15.3,"no":60,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s61","ab":0,"bk":4,"br":"73","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.2,"f":0,"fa":"2026-07-13","mn":12.6,"no":61,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":2,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s62","ab":1,"bk":5,"br":"49","c":4,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":3.1,"f":1,"fa":"2026-07-13","mn":16.0,"no":62,"p":2,"pb":1,"r":3,"rt":1,"sb":"content","sd":2,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s63","ab":2,"bk":3,"br":"5","c":5,"cats":["unclassifiable","unclosed_loop"],"cv":"full","d":6.2,"f":2,"fa":"2026-07-13","mn":5.6,"no":63,"p":2,"pb":2,"r":4,"rt":1,"sb":"content","sd":3,"st":"open","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s64","ab":1,"bk":5,"br":"5","c":4,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":4.9,"f":1,"fa":"2026-07-14","mn":9.5,"no":64,"p":2,"pb":1,"r":3,"rt":1,"sb":"content","sd":2,"st":"closed","t":"cheques","tl":"צ'קים"},{"a":"s65","ab":4,"bk":2,"br":"113","c":6,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":4.0,"f":1,"fa":"2026-07-15","mn":9.1,"no":65,"p":0,"pb":0,"r":5,"rt":0,"sb":"content","sd":4,"st":"unclear","t":"other","tl":"אחר"},{"a":"s66","ab":0,"bk":3,"br":"49","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":4.0,"f":0,"fa":"2026-07-15","mn":12.9,"no":66,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s67","ab":1,"bk":6,"br":"49","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":3.7,"f":2,"fa":"2026-07-15","mn":18.9,"no":67,"p":0,"pb":0,"r":4,"rt":1,"sb":"content","sd":3,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s68","ab":1,"bk":1,"br":"14","c":2,"cats":["bank_initiated"],"cv":"full","d":0.1,"f":0,"fa":"2026-07-16","mn":7.2,"no":68,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":2,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s69","ab":1,"bk":4,"br":"102","c":4,"cats":["legit_return","unclassifiable"],"cv":"full","d":4.9,"f":0,"fa":"2026-07-16","mn":9.8,"no":69,"p":1,"pb":1,"r":3,"rt":0,"sb":"content","sd":2,"st":"unclear","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s70","ab":1,"bk":3,"br":"22","c":4,"cats":["legit_return","unclassifiable"],"cv":"full","d":3.1,"f":0,"fa":"2026-07-19","mn":10.8,"no":70,"p":1,"pb":1,"r":3,"rt":0,"sb":"inference","sd":2,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s71","ab":0,"bk":4,"br":"33","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"full","d":6.9,"f":1,"fa":"2026-07-19","mn":14.3,"no":71,"p":2,"pb":2,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s72","ab":1,"bk":3,"br":"67","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.2,"f":1,"fa":"2026-07-19","mn":8.4,"no":72,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s73","ab":0,"bk":2,"br":"176","c":2,"cats":["new_topic"],"cv":"full","d":7.0,"f":0,"fa":"2026-07-19","mn":7.5,"no":73,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":1,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s74","ab":1,"bk":5,"br":"83","c":5,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":1.9,"f":2,"fa":"2026-07-20","mn":20.0,"no":74,"p":0,"pb":0,"r":4,"rt":1,"sb":"content","sd":4,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s75","ab":1,"bk":4,"br":"139","c":4,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":4.9,"f":1,"fa":"2026-07-21","mn":11.4,"no":75,"p":2,"pb":1,"r":3,"rt":1,"sb":"content","sd":2,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s76","ab":0,"bk":3,"br":"56","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.8,"f":0,"fa":"2026-07-22","mn":9.1,"no":76,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s77","ab":1,"bk":3,"br":"130","c":4,"cats":["legit_return","unclassifiable"],"cv":"full","d":5.0,"f":0,"fa":"2026-07-23","mn":8.2,"no":77,"p":1,"pb":1,"r":3,"rt":0,"sb":"content","sd":2,"st":"unclear","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s78","ab":0,"bk":3,"br":"73","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.0,"f":0,"fa":"2026-07-23","mn":9.9,"no":78,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":2,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s79","ab":1,"bk":3,"br":"130","c":4,"cats":["legit_return","unclassifiable"],"cv":"full","d":4.2,"f":0,"fa":"2026-07-26","mn":8.6,"no":79,"p":1,"pb":1,"r":3,"rt":0,"sb":"content","sd":2,"st":"unclear","t":"cheques","tl":"צ'קים"},{"a":"s80","ab":0,"bk":4,"br":"165","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.0,"f":0,"fa":"2026-07-26","mn":7.6,"no":80,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s81","ab":2,"bk":2,"br":"33","c":5,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":6.9,"f":1,"fa":"2026-07-26","mn":12.2,"no":81,"p":2,"pb":2,"r":4,"rt":1,"sb":"content","sd":2,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s82","ab":0,"bk":2,"br":"43","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.8,"f":0,"fa":"2026-07-26","mn":8.4,"no":82,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s83","ab":0,"bk":3,"br":"113","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.9,"f":0,"fa":"2026-07-27","mn":9.0,"no":83,"p":1,"pb":1,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"fx_international","tl":"מט\"ח והעברות לחו\"ל"},{"a":"s84","ab":0,"bk":4,"br":"126","c":3,"cats":["unclosed_loop"],"cv":"full","d":5.6,"f":2,"fa":"2026-07-27","mn":13.5,"no":84,"p":2,"pb":2,"r":2,"rt":1,"sb":"content","sd":1,"st":"open","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s85","ab":0,"bk":4,"br":"33","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"full","d":5.2,"f":1,"fa":"2026-07-28","mn":14.6,"no":85,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s86","ab":0,"bk":4,"br":"46","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":1.9,"f":0,"fa":"2026-07-28","mn":10.0,"no":86,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s87","ab":0,"bk":1,"br":"83","c":3,"cats":["legit_return","unclosed_loop"],"cv":"full","d":4.8,"f":1,"fa":"2026-07-28","mn":5.6,"no":87,"p":1,"pb":1,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s88","ab":0,"bk":5,"br":"130","c":3,"cats":["new_topic","unclassifiable"],"cv":"full","d":5.3,"f":0,"fa":"2026-07-29","mn":15.5,"no":88,"p":0,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"unclear","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s89","ab":0,"bk":4,"br":"46","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":3.9,"f":0,"fa":"2026-07-29","mn":14.6,"no":89,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"credit_lines","tl":"מסגרות אשראי וחריגות"},{"a":"s90","ab":1,"bk":3,"br":"56","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.2,"f":1,"fa":"2026-07-30","mn":10.3,"no":90,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s91","ab":2,"bk":4,"br":"148","c":5,"cats":["unclassifiable","unclosed_loop"],"cv":"full","d":5.7,"f":2,"fa":"2026-07-30","mn":12.3,"no":91,"p":2,"pb":2,"r":4,"rt":1,"sb":"content","sd":3,"st":"open","t":"cards_digital","tl":"כרטיסים וגישה דיגיטלית"},{"a":"s92","ab":0,"bk":4,"br":"83","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"full","d":3.2,"f":1,"fa":"2026-08-02","mn":13.2,"no":92,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s93","ab":0,"bk":3,"br":"122","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":2.9,"f":0,"fa":"2026-08-02","mn":12.7,"no":93,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":1,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s94","ab":2,"bk":1,"br":"113","c":3,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.1,"f":1,"fa":"2026-08-02","mn":4.2,"no":94,"p":0,"pb":0,"r":2,"rt":0,"sb":"content","sd":3,"st":"closed","t":"account_service","tl":"ניהול חשבון, מסמכים ושירות"},{"a":"s95","ab":0,"bk":3,"br":"74","c":3,"cats":["bank_initiated","legit_return"],"cv":"full","d":1.1,"f":0,"fa":"2026-08-03","mn":9.7,"no":95,"p":1,"pb":0,"r":2,"rt":0,"sb":"content","sd":2,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s96","ab":0,"bk":5,"br":"83","c":3,"cats":["bank_initiated","unclosed_loop"],"cv":"full","d":5.7,"f":1,"fa":"2026-08-03","mn":16.1,"no":96,"p":2,"pb":1,"r":2,"rt":1,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"},{"a":"s97","ab":1,"bk":4,"br":"5","c":4,"cats":["excessive_runaround","unclassifiable"],"cv":"full","d":0.1,"f":1,"fa":"2026-08-05","mn":15.4,"no":97,"p":0,"pb":0,"r":3,"rt":1,"sb":"content","sd":4,"st":"open","t":"transfers_payments","tl":"העברות ותשלומים"},{"a":"s98","ab":2,"bk":3,"br":"83","c":5,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":5.0,"f":1,"fa":"2026-08-06","mn":12.3,"no":98,"p":2,"pb":2,"r":4,"rt":1,"sb":"content","sd":3,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s99","ab":2,"bk":3,"br":"35","c":5,"cats":["bank_initiated","unclassifiable","unclosed_loop"],"cv":"full","d":4.0,"f":1,"fa":"2026-08-09","mn":10.7,"no":99,"p":2,"pb":1,"r":4,"rt":1,"sb":"content","sd":3,"st":"closed","t":"deposits_investments","tl":"פיקדונות, חסכונות והשקעות"},{"a":"s100","ab":0,"bk":2,"br":"120","c":2,"cats":["new_topic"],"cv":"full","d":4.2,"f":0,"fa":"2026-08-09","mn":10.1,"no":100,"p":0,"pb":0,"r":1,"rt":0,"sb":"content","sd":1,"st":"closed","t":"loans_mortgages","tl":"הלוואות ומשכנתאות"}]}</script>
 <script>
@@ -6562,6 +6582,14 @@ table.contacts .badge{margin-top:2px}
 (function () {
   "use strict";
   var doc = document;
+  // An engine without CSS variables (Internet Explorer, Edge's IE mode) gets
+  // the literal fallbacks; the pop-up definitions need <details>, which it
+  // lacks, so they are hidden there instead of all showing at once.
+  try {
+    if (!(window.CSS && CSS.supports && CSS.supports("--callqa", "1"))) {
+      doc.documentElement.className += " legacy";
+    }
+  } catch (e) { doc.documentElement.className += " legacy"; }
   var data;
   try { data = JSON.parse(doc.getElementById("xr-data").textContent); }
   catch (e) { data = {stories: [], cats: {}}; }
@@ -6625,6 +6653,20 @@ table.contacts .badge{margin-top:2px}
     }
     var pr = $("btn-print");
     if (pr) { pr.addEventListener("click", function () { window.print(); }); }
+  })();
+
+  /* ------------------------------------------------ print: open the printed stories */
+  (function () {
+    var opened = [];
+    window.addEventListener("beforeprint", function () {
+      Array.prototype.forEach.call(doc.querySelectorAll("details.story.print-open"), function (d) {
+        if (!d.open) { d.open = true; opened.push(d); }
+      });
+    });
+    window.addEventListener("afterprint", function () {
+      opened.forEach(function (d) { d.open = false; });
+      opened = [];
+    });
   })();
 
   /* ------------------------------------------------ level navigation */

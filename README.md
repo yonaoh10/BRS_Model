@@ -306,7 +306,9 @@ C0001,B17,C0001.wav,L,דנה כהן
 
 כל ציטוט מאומת מול השורה בתמלול, וכל מספר מגיע עם הגדרה, בסיס ורווח סמך. בשרת GPU פנימי מספיק לשנות הגדרה אחת: `journey.llm.profile: gpu`. בדיקת הדיוק מול תיוג אנושי: `journey label-sample` ו־`journey eval`.
 
-**דוח לדוגמה על 100 סיפורים סינתטיים:** [`docs/examples/journey-demo.html`](docs/examples/journey-demo.html). את הקובץ מורידים (Download raw file) ופותחים ב־Edge. להפקה מקומית: `.venv\Scripts\python scripts\generate_journey_demo.py --audio`. ההסבר המלא נמצא ב־`docs/journey_report_he.md`.
+**דוח לדוגמה על 100 סיפורים סינתטיים:** [`docs/examples/journey-demo.pdf`](docs/examples/journey-demo.pdf) (נפתח ישירות ב־GitHub) ו־[`docs/examples/journey-demo.html`](docs/examples/journey-demo.html), הדוח האינטראקטיבי. את קובץ ה־HTML מורידים (Download raw file) ופותחים ב־Edge. `journey report --pdf` מפיק גם PDF, בעזרת ה־Edge שעל המחשב.
+
+**לשליחה במייל עדיף PDF.** מערכות אבטחת דואר מסירות לפעמים את העיצוב מקובצי HTML מצורפים, ומחשבים מסוימים פותחים HTML במצב תאימות של Internet Explorer. הדוח מזהה את שני המצבים ומציג בראשו הסבר מה לעשות: לפתוח אותו ב־Microsoft Edge (לחיצה ימנית ← „פתח באמצעות”), או להשתמש ב־PDF. להפקה מקומית: `.venv\Scripts\python scripts\generate_journey_demo.py --audio`. ההסבר המלא נמצא ב־`docs/journey_report_he.md`.
 
 ---
 
@@ -699,7 +701,9 @@ A tool for **why customers come back to the bank**. It takes a batch of customer
 
 Every quote is verified against its line in the transcript, and every figure comes with its definition, base and confidence interval. On an internal GPU server one setting is enough: `journey.llm.profile: gpu`. To check accuracy against human labels, use `journey label-sample` and `journey eval`.
 
-**A sample report over 100 synthetic stories:** [`docs/examples/journey-demo.html`](docs/examples/journey-demo.html). Download the file (Download raw file) and open it in Edge. To produce one locally: `.venv\Scripts\python scripts\generate_journey_demo.py --audio`. The full guide (Hebrew) is `docs/journey_report_he.md`.
+**A sample report over 100 synthetic stories:** [`docs/examples/journey-demo.pdf`](docs/examples/journey-demo.pdf) (opens directly on GitHub) and [`docs/examples/journey-demo.html`](docs/examples/journey-demo.html), the interactive report. Download the HTML file (Download raw file) and open it in Edge. `journey report --pdf` also prints a PDF, with the Edge on the machine.
+
+**For e-mail, send the PDF.** Mail security gateways sometimes strip the styles out of attached HTML files, and some desktops open HTML in Internet Explorer compatibility mode. The report recognises both and says at its top what to do: open it in Microsoft Edge (right-click → "Open with"), or use the PDF. To produce one locally: `.venv\Scripts\python scripts\generate_journey_demo.py --audio`. The full guide (Hebrew) is `docs/journey_report_he.md`.
 
 ---
 

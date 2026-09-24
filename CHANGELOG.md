@@ -5,6 +5,28 @@ All notable changes to callqa are recorded here. The format follows
 semantic versioning: the CLI commands, exit codes, and on-disk artifact schemas
 are the public contract.
 
+## [1.4.1] — 2026-09-24
+
+The reports on the desktops they are really opened on.
+
+### Fixed
+- A report opened in Internet Explorer or in Edge's "IE mode" - which bank
+  desktops often apply to local HTML files - came out white, unstyled and in
+  the default font: that engine drops every CSS rule written with a CSS
+  variable. Every such rule now carries a literal fallback in front of it
+  (the light theme); modern browsers keep the variables, dark mode included.
+  Both reports also ask the browser for its newest mode (`X-UA-Compatible`).
+- When a mail gateway strips the report's styles, or the page is opened in
+  such a mode, a notice at the top says so and what to do (open it in Edge,
+  or use the PDF); wherever the page is shown as designed, it is hidden.
+
+### Added
+- `callqa journey report --pdf`: the report printed to PDF by the Edge or
+  Chrome already on the machine (`CALLQA_BROWSER` overrides), for e-mail.
+  The printed version holds a table of every story and the ten stories with
+  the most returns in full.
+- `docs/examples/journey-demo.pdf`; the sample reports regenerated.
+
 ## [1.4.0] — 2026-09-24
 
 Customer journeys and repeat contacts. A tool that takes a batch of customers

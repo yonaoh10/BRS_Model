@@ -4,6 +4,14 @@
 (function () {
   "use strict";
   var doc = document;
+  // An engine without CSS variables (Internet Explorer, Edge's IE mode) gets
+  // the literal fallbacks; the pop-up definitions need <details>, which it
+  // lacks, so they are hidden there instead of all showing at once.
+  try {
+    if (!(window.CSS && CSS.supports && CSS.supports("--callqa", "1"))) {
+      doc.documentElement.className += " legacy";
+    }
+  } catch (e) { doc.documentElement.className += " legacy"; }
   var data;
   try { data = JSON.parse(doc.getElementById("xr-data").textContent); }
   catch (e) { data = {stories: [], cats: {}}; }
@@ -67,6 +75,20 @@
     }
     var pr = $("btn-print");
     if (pr) { pr.addEventListener("click", function () { window.print(); }); }
+  })();
+
+  /* ------------------------------------------------ print: open the printed stories */
+  (function () {
+    var opened = [];
+    window.addEventListener("beforeprint", function () {
+      Array.prototype.forEach.call(doc.querySelectorAll("details.story.print-open"), function (d) {
+        if (!d.open) { d.open = true; opened.push(d); }
+      });
+    });
+    window.addEventListener("afterprint", function () {
+      opened.forEach(function (d) { d.open = false; });
+      opened = [];
+    });
   })();
 
   /* ------------------------------------------------ level navigation */

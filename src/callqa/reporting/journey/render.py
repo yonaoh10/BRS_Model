@@ -66,6 +66,8 @@ JOURNEY_REPORT_FILE_RE = re.compile(r"journey(?:-[A-Za-z0-9][A-Za-z0-9._-]{0,60}
 # reader opens first: most returns, then most failures.
 MAX_TIMELINES = 300
 MAX_QUOTE = 320
+PRINT_STORIES = 10          # story cards printed in full
+PRINT_INDEX_MAX = 300       # rows of the printed story index
 
 W_FULL, W_HALF = 1110, 540
 
@@ -536,6 +538,12 @@ def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFa
         "quality": _quality_view(quality), "branches": _branches(a, min_rate_n),
         "retold_bankers": _retold_by_bankers(a, min_rate_n), "min_rate_n": min_rate_n,
         "cards": cards, "n_drawn": sum(1 for c in cards if c.get("svg")),
+        # printed in full (the PDF): the stories with the most returns; every
+        # story is in the printed index table
+        "print_open": {c["anchor"] for c in sorted(cards, key=lambda c: (-c["returns"], c["no"]))
+                       [:PRINT_STORIES]},
+        "print_rows": cards[:PRINT_INDEX_MAX], "print_more": max(0, len(cards) - PRINT_INDEX_MAX),
+        "print_stories": PRINT_STORIES,
         "max_timelines": MAX_TIMELINES,
         "legend": charts.timeline_legend([(_cat_cls(c), _cat_label(tax, c)) for c in cats]
                                          + [("ch-cat-first", "פנייה ראשונה")]),

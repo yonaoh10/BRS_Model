@@ -97,7 +97,7 @@ def test_report_without_content_is_facts_only(config):
     assert (report.html.parent.parent / "journey").is_dir()
     assert report.analysis.categories_strict.get(PENDING)
     # every story has its card and its timeline
-    assert html.count('class="card story"') == 3
+    assert html.count('class="card story') == 3
     assert html.count('class="ch ch-timeline"') == 3
 
 

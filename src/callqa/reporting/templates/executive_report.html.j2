@@ -2,14 +2,23 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="callqa {{ version }}">
 <title>{{ title }}</title>
 <style>
+{% filter legacy_css %}
 {% include "executive_report.css.j2" %}
+{% endfilter %}
+/* hidden wherever CSS variables work - i.e. the page is shown as designed */
+@supports (--callqa: 1) { .compat-note{display:none !important} }
 </style>
 </head>
 <body>
+<div class="compat-note" role="alert" style="background:#fdf1e3;color:#8a4308;border:1px solid #b45309;padding:12px 16px;margin:12px;font:15px/1.6 Arial,sans-serif;direction:rtl;text-align:right">
+  <b>הדוח מוצג בלי העיצוב המלא שלו.</b> זה קורה כשהקובץ נפתח ב־Internet Explorer או ב„מצב תאימות” (IE mode), או כשמערכת הדואר הסירה ממנו את העיצוב.
+  כדי לראות אותו כמו שצריך: לחיצה ימנית על הקובץ ← „פתח באמצעות” ← <b>Microsoft Edge</b> (או Chrome). אם הקובץ הגיע בדואר ועדיין נראה כך, שמרו אותו מהמקור (למשל מתיקייה משותפת) או השתמשו בגרסת ה־PDF.
+</div>
 <a class="skip" href="#level1">דלג לתוכן הדוח</a>
 
 <header class="topbar">

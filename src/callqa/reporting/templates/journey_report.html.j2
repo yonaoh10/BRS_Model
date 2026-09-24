@@ -2,15 +2,24 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="callqa {{ version }}">
 <title>{{ title }}</title>
 <style>
+{% filter legacy_css %}
 {% include "executive_report.css.j2" %}
 {% include "journey_report.css.j2" %}
+{% endfilter %}
+/* hidden wherever CSS variables work - i.e. the page is shown as designed */
+@supports (--callqa: 1) { .compat-note{display:none !important} }
 </style>
 </head>
 <body>
+<div class="compat-note" role="alert" style="background:#fdf1e3;color:#8a4308;border:1px solid #b45309;padding:12px 16px;margin:12px;font:15px/1.6 Arial,sans-serif;direction:rtl;text-align:right">
+  <b>הדוח מוצג בלי העיצוב המלא שלו.</b> זה קורה כשהקובץ נפתח ב־Internet Explorer או ב„מצב תאימות” (IE mode), או כשמערכת הדואר הסירה ממנו את העיצוב.
+  כדי לראות אותו כמו שצריך: לחיצה ימנית על הקובץ ← „פתח באמצעות” ← <b>Microsoft Edge</b> (או Chrome). אם הקובץ הגיע בדואר ועדיין נראה כך, שמרו אותו מהמקור (למשל מתיקייה משותפת) או השתמשו בגרסת ה־PDF.
+</div>
 <a class="skip" href="#level1">דלג לתוכן הדוח</a>
 
 <header class="topbar">
@@ -353,9 +362,17 @@
       <h3>כרטיסי הסיפורים</h3>
       <p class="lead">פתחו סיפור מהטבלה או מהרשימה. בציר: <b>הזמן זורם מימין לשמאל</b>; פערים ארוכים מכווצים ומסומנים ב־≈. מספר מתחת לכל סימן הוא מספר המגע בטבלה.{% if n_drawn < cards|length %} ציר זמן מוצג ל־<span class="n">{{ n_drawn }}</span> הסיפורים עם הכי הרבה חזרות.{% endif %}</p>
       <div class="card"><div class="bd">{{ legend }}</div></div>
+      <div class="print-only story-index">
+        <h4>כל הסיפורים</h4>
+        <p class="small muted">בהדפסה מוצגים במלואם <span class="n">{{ print_stories }}</span> הסיפורים עם הכי הרבה חזרות; כל השאר בטבלה. הדוח האינטראקטיבי (HTML) מציג את כולם.</p>
+        <table><thead><tr><th>סיפור</th><th>נושא</th><th class="num">מגעים</th><th class="num">חזרות</th><th class="num">ימים</th><th>סיבות החזרה</th><th>סטטוס</th></tr></thead><tbody>
+        {% for s in print_rows %}<tr><td class="n">{{ s.label }}</td><td>{{ s.topic }}</td><td class="num n">{{ s.contacts }}</td><td class="num n">{{ s.returns }}</td><td class="num n">{{ s.days }}</td><td class="small">{% for c in s.cats %}{{ c.label }} <span class="n">{{ c.n }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</td><td>{{ s.status }}</td></tr>{% endfor %}
+        </tbody></table>
+        {% if print_more %}<p class="small muted">ועוד <span class="n">{{ print_more }}</span> סיפורים — בדוח האינטראקטיבי ובקובץ ה־CSV.</p>{% endif %}
+      </div>
       <div class="stories" id="stories">
         {% for s in cards %}
-        <details class="card story" id="{{ s.anchor }}" data-no="{{ s.no }}">
+        <details class="card story{{ ' print-open' if s.anchor in print_open else '' }}" id="{{ s.anchor }}" data-no="{{ s.no }}">
           <summary>
             <span class="st-no">{{ s.label }}</span>
             <span class="st-topic">{{ s.topic }}</span>

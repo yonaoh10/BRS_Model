@@ -61,6 +61,7 @@
   font-weight:400; color:var(--ink); line-height:1.55}
 .mdef-body p{margin:0 0 6px}
 .kpi .k-label{display:flex; align-items:center; gap:6px}
+.legacy .mdef{display:none}
 
 .cat-dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-inline-end:6px; vertical-align:baseline}
 .cat-chip{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--ink-2); margin-inline-end:10px; white-space:nowrap}
@@ -99,7 +100,13 @@ table.contacts .badge{margin-top:2px}
 
 @media print{
   .mdef{display:none}
-  .story{break-inside:avoid-page}
+  /* a closed <details> still takes a page in Chrome's print: only the
+     stories marked for print are printed, opened; the rest are in the index */
+  .story:not(.print-open){display:none !important}
+  .story.print-open::details-content{content-visibility:visible; display:block}
+  .story.print-open{break-before:page}
+  .story-index table{font-size:10.5px}
+  .story-index th, .story-index td{padding:3px 6px}
   #level3{page:wide}
   .explorer{display:none !important}
 }
