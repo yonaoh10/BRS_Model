@@ -17,7 +17,7 @@
   var BANKERS = data.bankers || {};
   var DIM_INDEX = {};
   DIMS.forEach(function (d, i) { DIM_INDEX[d.id] = i; });
-  var STATUS_HE = {success: "נוקדה", needs_human_review: "ממתינה לבדיקה", failed: "לא עובדה"};
+  var STATUS_HE = {success: "קיבלה ציון", needs_human_review: "ממתינה לבדיקה", failed: "לא עובדה"};
   var SPEAKER_HE = {banker: "בנקאי", customer: "לקוח"};
   var BAND_HE = {4: "גבוה", 3: "בינוני", 2: "גבולי", 1: "חלש"};
   var DUR_HE = data.durations || {};
@@ -34,11 +34,15 @@
     return node;
   }
   function fmt(v, digits) {
+    // Half-up on the decimal string, the rule the rest of the report uses:
+    // 51.25 is 51.3 here too, as it is in the tables and charts.
     if (v === null || v === undefined || isNaN(v)) { return "—"; }
     var d = digits === undefined ? 1 : digits;
-    var r = Math.round(v * Math.pow(10, d)) / Math.pow(10, d);
-    return (r === Math.round(r) && d <= 1) ? String(Math.round(r)) : r.toFixed(d);
+    var r = Number(Math.round(Number(Math.abs(v) + "e" + d)) + "e-" + d) * (v < 0 ? -1 : 1);
+    var text = (r === Math.round(r) && d <= 1) ? String(Math.abs(Math.round(r))) : Math.abs(r).toFixed(d);
+    return (r < 0 ? "−" : "") + text;
   }
+  function callsHe(n) { return n === 1 ? "שיחה אחת" : n.toLocaleString("en-US") + " שיחות"; }
   function pct(k, n) { return n ? fmt(100 * k / n) + "%" : "—"; }
   function band(t) { return t >= 80 ? 4 : t >= 60 ? 3 : t >= 40 ? 2 : 1; }
   function lvl(s) { return "lvl lvl-" + Math.max(1, Math.min(5, Math.round(s))); }
@@ -58,10 +62,14 @@
      Served by the dashboard, the page carries its access token in ?t=; a
      relative link without it is refused. Opened from disk there is no token
      and links are left alone. */
+  var TOKEN = null;
+  try { TOKEN = new URLSearchParams(location.search).get("t"); } catch (e) { TOKEN = null; }
   (function () {
-    var token = null;
-    try { token = new URLSearchParams(location.search).get("t"); } catch (e) { token = null; }
+    var token = TOKEN;
     if (!token) { return; }
+    // Out of the address bar once read: Edge prints the URL in the page
+    // footer, and a PDF of the report would carry the dashboard's key.
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) { /* ignore */ }
     Array.prototype.forEach.call(doc.querySelectorAll("a[href]"), function (a) {
       var href = a.getAttribute("href");
       if (!href || href.charAt(0) === "#" || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.charAt(0) === "/") { return; }
@@ -102,10 +110,15 @@
     function update() {
       pending = false;
       var current = ids[0];
+      // A clicked level lands ~140px below the top (bar + scroll padding),
+      // so the test sits above that; at the very bottom the last one wins.
       ids.forEach(function (id) {
         var sec = doc.getElementById(id);
-        if (sec && sec.getBoundingClientRect().top < 140) { current = id; }
+        if (sec && sec.getBoundingClientRect().top < 160) { current = id; }
       });
+      if (window.innerHeight + window.scrollY >= doc.documentElement.scrollHeight - 2) {
+        current = ids[ids.length - 1];
+      }
       Array.prototype.forEach.call(links, function (a) {
         if (a.getAttribute("data-level") === current) { a.setAttribute("aria-current", "true"); }
         else { a.removeAttribute("aria-current"); }
@@ -120,6 +133,12 @@
   /* ------------------------------------------------ case library tabs */
   (function () {
     var tabs = doc.querySelectorAll("[data-case]");
+    // Panels are all visible in the HTML (for print and for no-script
+    // readers); the script shows one at a time.
+    Array.prototype.forEach.call(tabs, function (t) {
+      var panel = doc.getElementById("case-" + t.getAttribute("data-case"));
+      if (panel) { panel.hidden = t.getAttribute("aria-selected") !== "true"; }
+    });
     Array.prototype.forEach.call(tabs, function (tab) {
       tab.addEventListener("click", function () {
         Array.prototype.forEach.call(tabs, function (t) {
@@ -135,7 +154,7 @@
   /* ------------------------------------------------ explorer */
   var S = {};
   function resetState() {
-    S = {q: "", banker: "", bankers: null, type: "", band: "", gate: "", status: "scored",
+    S = {q: "", qExact: false, banker: "", bankers: null, type: "", band: "", gate: "", status: "scored",
          dim: "", dimop: "", from: "", to: "", dur: "", layout: "", feature: "", fmin: null,
          sort: "tot", dir: -1, page: 0, size: 50, open: null};
   }
@@ -151,7 +170,13 @@
     if (!bankerSel) { return; }
     Object.keys(BANKERS).sort().forEach(function (b) { bankerSel.appendChild(el("option", {value: b}, b)); });
     var types = {};
-    CALLS.forEach(function (c) { if (c.t) { types[c.t] = (types[c.t] || 0) + 1; } });
+    // Counted as the explorer opens (calls with a score), so the number in
+    // the list is the number the filter then shows.
+    CALLS.forEach(function (c) {
+      if (!c.t) { return; }
+      if (!(c.t in types)) { types[c.t] = 0; }
+      if (c.s === "success" && c.tot !== null) { types[c.t] += 1; }
+    });
     Object.keys(types).sort().forEach(function (t) { typeSel.appendChild(el("option", {value: t}, t + " (" + types[t] + ")")); });
     DIMS.forEach(function (d) { dimSel.appendChild(el("option", {value: d.id}, d.name)); });
     var key = $("xp-dimkey");
@@ -173,7 +198,7 @@
   function matches(c) {
     if (S.status === "scored") { if (c.s !== "success" || c.tot === null) { return false; } }
     else if (S.status && c.s !== S.status) { return false; }
-    if (S.q && c.id.toLowerCase().indexOf(S.q.toLowerCase()) < 0) { return false; }
+    if (S.q && (S.qExact ? c.id !== S.q : c.id.toLowerCase().indexOf(S.q.toLowerCase()) < 0)) { return false; }
     if (S.banker && c.b !== S.banker) { return false; }
     if (S.bankers && S.bankers.indexOf(c.b) < 0) { return false; }
     if (S.type && c.t !== S.type) { return false; }
@@ -242,6 +267,8 @@
         if (c[0] === "layout") { S.layout = ""; }
         if (c[0] === "gate") { S.gate = ""; }
         S.page = 0; render();
+        var next = doc.querySelector("#xp-active .chip button") || $("xp-count");
+        if (next) { if (!next.hasAttribute("tabindex") && next.id) { next.setAttribute("tabindex", "-1"); } next.focus(); }
       });
       chip.appendChild(x);
       box.appendChild(chip);
@@ -257,7 +284,7 @@
     var mean = n ? scored.reduce(function (s, c) { return s + c.tot; }, 0) / n : null;
     var gates = scored.filter(function (c) { return c.g && c.g.length; }).length;
     var high = scored.filter(function (c) { return c.tot >= 80; }).length;
-    [[String(filtered.length), "שיחות בסינון"], [fmt(mean), "מדד ממוצע (כלל הדוח: " + fmt(data.gm) + ")"],
+    [[String(filtered.length), filtered.length === 1 ? "שיחה בסינון" : "שיחות בסינון"], [fmt(mean), "מדד ממוצע (כלל הדוח: " + fmt(data.gm) + ")"],
      [pct(gates, n), "כשל שער"], [pct(high, n), "ברמה גבוהה"]].forEach(function (kv) {
       var cell = el("div");
       cell.appendChild(el("div", {class: "v n"}, kv[0]));
@@ -272,9 +299,9 @@
       row.appendChild(el("span", null, d.short));
       var track = el("div", {class: "track"});
       var fill = el("div", {class: "fill"});
-      fill.style.inlineSize = m === null ? "0" : (100 * (m - 1) / 4) + "%";
+      fill.style.width = m === null ? "0" : (100 * (m - 1) / 4) + "%";
       var mark = el("div", {class: "mark"});
-      mark.style.insetInlineStart = data.gd[i] === null ? "0" : (100 * (data.gd[i] - 1) / 4) + "%";
+      mark.style.right = data.gd[i] === null ? "0" : (100 * (data.gd[i] - 1) / 4) + "%";
       track.appendChild(fill); track.appendChild(mark);
       row.appendChild(track);
       row.appendChild(el("span", {class: "n"}, fmt(m, 1)));
@@ -294,10 +321,10 @@
     h.appendChild(doc.createTextNode("פרופיל בנקאי "));
     h.appendChild(el("span", {class: "mono"}, S.banker));
     card.appendChild(h);
-    var flagText = {bad: "נמוך באופן מובהק משאר הבנקאים", ok: "גבוה באופן מובהק משאר הבנקאים",
-                    none: "אין הבדל מובהק משאר הבנקאים", few: "מעט שיחות — לא מדורג"}[b.flag] || "";
+    var flagText = {bad: "נמוך באופן מובהק מהבנקאי הטיפוסי", ok: "גבוה באופן מובהק מהבנקאי הטיפוסי",
+                    none: "ללא הבדל מובהק מהבנקאי הטיפוסי", few: "מעט שיחות — לא מדורג"}[b.flag] || "";
     var p = el("p", {class: "small"});
-    p.appendChild(doc.createTextNode(b.n + " שיחות מנוקדות · מדד ממוצע "));
+    p.appendChild(doc.createTextNode((b.n === 1 ? "שיחה אחת שקיבלה ציון" : b.n + " שיחות שקיבלו ציון") + " · מדד ממוצע "));
     p.appendChild(el("b", {class: "n"}, fmt(b.mean)));
     if (b.lo !== null && b.hi !== null) { p.appendChild(el("span", {class: "n muted"}, " (" + fmt(b.lo) + "–" + fmt(b.hi) + ")")); }
     p.appendChild(doc.createTextNode(" · " + flagText));
@@ -311,7 +338,8 @@
       card.appendChild(line);
     }
     if (b.link) {
-      var a = el("a", {href: b.link}, "לדוח הבנקאי המלא");
+      // Built after load, so the load-time token pass never saw it.
+      var a = el("a", {href: withToken(b.link)}, "לדוח הבנקאי המלא");
       card.appendChild(a);
     }
     box.appendChild(card);
@@ -347,9 +375,12 @@
         td.appendChild(p);
       }
     } else if (c.s === "success") {
-      td.appendChild(el("p", {class: "small muted"}, data.withText
-        ? "טקסט משיחה זו אינו מוצג: לא ניתן היה לאמת שהסתרת הפרטים פעלה בה."
-        : "גרסה להפצה רחבה: נימוקים וציטוטים אינם מוצגים."));
+      var why = !data.withText ? "גרסה להפצה רחבה: נימוקים וציטוטים אינם מוצגים."
+        : (c.x && data.textCapped)
+          ? (c.rep ? "בדוח גדול זה מוצגים כאן הנימוקים של השיחות החלשות ביותר בלבד; לשיחה זו — בדוח השיחה המלא."
+                   : "בדוח גדול זה מוצגים כאן הנימוקים של השיחות החלשות ביותר בלבד.")
+          : "טקסט משיחה זו אינו מוצג: לא ניתן היה לאמת שהסתרת הפרטים פעלה בה.";
+      td.appendChild(el("p", {class: "small muted"}, why));
     }
     if (c.sc) {
       var grid = el("div", {class: "dgrid"});
@@ -387,9 +418,12 @@
   }
 
   function withToken(href) {
-    var token = null;
-    try { token = new URLSearchParams(location.search).get("t"); } catch (e) { token = null; }
-    return token ? href + "?t=" + encodeURIComponent(token) : href;
+    var token = TOKEN;
+    if (!token) { return href; }
+    var i = href.indexOf("#");
+    var hash = i >= 0 ? href.slice(i) : "";
+    var base = i >= 0 ? href.slice(0, i) : href;
+    return base + (base.indexOf("?") >= 0 ? "&" : "?") + "t=" + encodeURIComponent(token) + hash;
   }
 
   function rows() {
@@ -404,7 +438,8 @@
       body.appendChild(tr0);
     }
     page.forEach(function (c) {
-      var tr = el("tr", {class: "row", tabindex: "0", "aria-expanded": S.open === c.id ? "true" : "false"});
+      var tr = el("tr", {class: "row", tabindex: "0", "data-id": c.id,
+                         "aria-expanded": S.open === c.id ? "true" : "false"});
       tr.appendChild(el("td", {class: "mono"}, c.id));
       tr.appendChild(el("td", {class: "n"}, dateHe(c.d)));
       tr.appendChild(el("td", {class: "mono"}, c.b));
@@ -421,7 +456,14 @@
         c.sc.forEach(function (v, i) { sc.appendChild(el("span", {class: lvl(v), title: DIMS[i].name + ": " + v}, String(v))); });
       } else { sc.appendChild(el("span", {class: "muted small"}, c.r || "")); }
       tr.appendChild(sc);
-      function toggle() { S.open = S.open === c.id ? null : c.id; rows(); }
+      function toggle() {
+        S.open = S.open === c.id ? null : c.id;
+        rows();
+        // The rows were rebuilt: put the keyboard back on the same call.
+        var again = Array.prototype.filter.call(body.querySelectorAll("tr.row"), function (r) {
+          return r.getAttribute("data-id") === c.id; })[0];
+        if (again) { again.focus(); }
+      }
       tr.addEventListener("click", toggle);
       tr.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
       body.appendChild(tr);
@@ -436,16 +478,33 @@
     box.textContent = "";
     var pages = Math.max(1, Math.ceil(filtered.length / S.size));
     if (S.page >= pages) { S.page = pages - 1; }
-    var prev = el("button", {type: "button", class: "btn", disabled: S.page === 0 ? "disabled" : null}, "הקודם");
-    prev.addEventListener("click", function () { if (S.page > 0) { S.page -= 1; rows(); scrollToTable(); } });
-    var next = el("button", {type: "button", class: "btn", disabled: S.page >= pages - 1 ? "disabled" : null}, "הבא");
-    next.addEventListener("click", function () { if (S.page < pages - 1) { S.page += 1; rows(); scrollToTable(); } });
+    var prev = el("button", {type: "button", class: "btn", "data-dir": "prev", disabled: S.page === 0 ? "disabled" : null}, "הקודם");
+    prev.addEventListener("click", function () { if (S.page > 0) { S.page -= 1; rows(); scrollToTable(); focusPager("prev"); } });
+    var next = el("button", {type: "button", class: "btn", "data-dir": "next", disabled: S.page >= pages - 1 ? "disabled" : null}, "הבא");
+    next.addEventListener("click", function () { if (S.page < pages - 1) { S.page += 1; rows(); scrollToTable(); focusPager("next"); } });
     box.appendChild(prev);
-    box.appendChild(el("span", {class: "small n"}, "עמוד " + (S.page + 1) + " מתוך " + pages));
+    // Numbers isolated one by one; the Hebrew words stay outside them, or a
+    // right-to-left reader sees "1–50 960 מתוך".
+    var pg = el("span", {class: "small"});
+    pg.appendChild(doc.createTextNode("עמוד "));
+    pg.appendChild(el("span", {class: "n"}, String(S.page + 1)));
+    pg.appendChild(doc.createTextNode(" מתוך "));
+    pg.appendChild(el("span", {class: "n"}, String(pages)));
+    box.appendChild(pg);
     box.appendChild(next);
     box.appendChild(el("span", {class: "grow"}));
     var from = filtered.length ? S.page * S.size + 1 : 0;
-    box.appendChild(el("span", {class: "small muted n"}, from + "–" + Math.min(filtered.length, (S.page + 1) * S.size) + " מתוך " + filtered.length));
+    var rng = el("span", {class: "small muted"});
+    rng.appendChild(el("span", {class: "n"}, from + "–" + Math.min(filtered.length, (S.page + 1) * S.size)));
+    rng.appendChild(doc.createTextNode(" מתוך "));
+    rng.appendChild(el("span", {class: "n"}, String(filtered.length)));
+    box.appendChild(rng);
+  }
+
+  function focusPager(dir) {
+    var b = doc.querySelector('#xp-pager button[data-dir="' + dir + '"]:not([disabled])') ||
+      doc.querySelector("#xp-pager button:not([disabled])");
+    if (b) { b.focus({preventScroll: true}); }
   }
 
   function scrollToTable() {
@@ -469,7 +528,7 @@
     profile();
     sortHeaders();
     var count = $("xp-count");
-    if (count) { count.textContent = filtered.length + " שיחות"; }
+    if (count) { count.textContent = callsHe(filtered.length); }
     rows();
   }
 
@@ -478,7 +537,7 @@
     resetState();
     S.size = size;
     if (f.status !== undefined) { S.status = f.status; }
-    if (f.q) { S.q = f.q; S.open = f.q; }
+    if (f.q) { S.q = f.q; S.qExact = true; S.open = f.q; }
     if (f.banker) { S.banker = f.banker; }
     if (f.bankers) { S.bankers = f.bankers.slice(); }
     if (f.type) { S.type = f.type; }
@@ -508,6 +567,7 @@
       c.addEventListener(ev, function () {
         var v = c.value;
         if (k === "size") { S.size = Number(v) || 50; } else { S[k] = v; }
+        if (k === "q") { S.qExact = false; }
         if (k === "dim" && !v) { S.dimop = ""; }
         if (k === "dimop" && v && !S.dim) { S.dim = DIMS.length ? DIMS[0].id : ""; }
         S.page = 0;

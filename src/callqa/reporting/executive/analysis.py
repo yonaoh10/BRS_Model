@@ -71,7 +71,14 @@ class DimStat:
     lost_share: float              # share of ALL lost points (incl. the gate penalty)
     gain_if_floor3: float          # index gain if every score below 3 were a 3
     gates_removed: int             # gate failures that floor would remove
+    # The loss including the gate penalty this dimension CAUSED (a call's
+    # penalty is split among the gates it failed): what "the biggest source of
+    # lost points" must rank by, or a gate dimension hides behind its own cap.
+    lost_with_gate: float = 0.0
+    lost_share_with_gate: float = 0.0
     focus_bankers: list[tuple[str, int, int]] = field(default_factory=list)  # (id, low, n)
+    focus_share: float = 0.0       # share of this dimension's low scores in that group
+    focus_call_share: float = 0.0  # the same group's share of all calls
 
 
 @dataclass
@@ -97,6 +104,7 @@ class GroupStat:
     strongest: str | None = None
     dim_means: dict[str, float | None] = field(default_factory=dict)
     low_calls: int = 0             # calls below 60
+    dim_low: dict[str, int] = field(default_factory=dict)   # calls scored <= 2, per dimension
     link: str | None = None        # banker report
     filter: dict = field(default_factory=dict)
 
@@ -124,8 +132,11 @@ class GateStat:
     fails: int
     rate: stats.PropCI
     top_bankers: list[tuple[str, int, int]]     # (banker, fails, calls)
-    concentration: float | None                 # share of fails from the top 20% of bankers
+    concentration: float | None                 # share of fails in the top group of bankers
     by_type: list[tuple[str, int, int]]         # (type label, fails, calls)
+    top_n: int = 0                              # size of that group
+    n_bankers: int = 0
+    call_share: float | None = None             # that group's share of all calls
 
 
 @dataclass
@@ -176,6 +187,9 @@ class Analysis:
     worst_examples: dict[str, list[Example]]
     attention: list[CallRecord]
     coverage: dict
+    date_basis: str = "none"        # "call" | "processed" | "none": what the time axis is
+    undated: int = 0                # scored calls left out of the time series
+    banker_reference: float | None = None   # median of banker means (n >= MIN_GROUP_N)
 
     @property
     def dim_names(self) -> dict[str, str]:
@@ -215,9 +229,11 @@ def _group(key: str, label: str, members: list[CallRecord], rest: list[CallRecor
             if len(totals) >= 2 and len(rest_totals) >= 2 else None)
     gates = sum(1 for r in members if r.card.gate_failed)
     dim_means: dict[str, float | None] = {}
+    dim_low: dict[str, int] = {}
     for d in rubric.dimensions:
         vals = [s for r in members if (s := _score(r.card, d.id)) is not None]
         dim_means[d.id] = _mean(vals)
+        dim_low[d.id] = sum(1 for v in vals if v <= 2)
     scored_dims = [(d.id, m) for d, m in ((d, dim_means[d.id]) for d in rubric.dimensions)
                    if m is not None]
     order = [d.id for d in rubric.dimensions]
@@ -229,6 +245,7 @@ def _group(key: str, label: str, members: list[CallRecord], rest: list[CallRecor
         gate=stats.proportion_ci(gates, len(members), LEVEL), diff=diff,
         flag=_flag(diff, len(members)), weakest=weakest, strongest=strongest,
         dim_means=dim_means, low_calls=sum(1 for t in totals if t < 60), link=link,
+        dim_low=dim_low,
         filter=filt,
     )
 
@@ -288,19 +305,26 @@ def analyse(batch: Batch) -> Analysis:
     gate_fails = sum(1 for c in cards if c.gate_failed)
     n_held = len(batch.held)
     lost_sum: dict[str, float] = defaultdict(float)
+    caused: dict[str, float] = defaultdict(float)
     penalty_sum = 0.0
     for card in cards:
         lost, penalty = _lost_points(card, rubric)
         for k, v in lost.items():
             lost_sum[k] += v
         penalty_sum += penalty
+        gates = [g for g in card.failed_gates if g in lost]
+        for g in gates:
+            caused[g] += penalty / len(gates)
     all_lost = sum(lost_sum.values()) + penalty_sum
+    n_bankers = len({r.banker_id for r in scored})
 
     dims: list[DimStat] = []
     for d in rubric.dimensions:
         scores = [s for c in cards if (s := _score(c, d.id)) is not None]
         counts = [sum(1 for s in scores if s == level) for level in range(1, 6)]
         gain, removed = _floor_gain(cards, rubric, d.id)
+        focus, focus_share, focus_calls = _focus_bankers(scored, d.id, n_bankers)
+        with_gate = lost_sum[d.id] + caused.get(d.id, 0.0)
         dims.append(DimStat(
             id=d.id, name=d.name_he, weight=d.weight, gate=d.gate,
             mean=stats.mean_ci(scores, LEVEL), counts=counts,
@@ -309,16 +333,26 @@ def analyse(batch: Batch) -> Analysis:
             lost_mean=lost_sum[d.id] / n if n else 0.0,
             lost_share=lost_sum[d.id] / all_lost if all_lost else 0.0,
             gain_if_floor3=gain, gates_removed=removed,
-            focus_bankers=_focus_bankers(scored, d.id),
+            lost_with_gate=with_gate / n if n else 0.0,
+            lost_share_with_gate=with_gate / all_lost if all_lost else 0.0,
+            focus_bankers=focus, focus_share=focus_share, focus_call_share=focus_calls,
         ))
 
     edges = [float(x) for x in range(0, 101, 5)]
     counts = stats.histogram(totals, edges)
     histogram = [(edges[i], edges[i + 1], counts[i]) for i in range(len(counts))]
 
-    dated = [r for r in scored if r.call_date is not None]
-    first = min((r.call_date for r in batch.records if r.call_date), default=None)
-    last = max((r.call_date for r in batch.records if r.call_date), default=None)
+    # The time axis is the date of the CALL. A call with no date in the
+    # metadata falls back to the day it was scored, and mixing the two puts
+    # every undated call into the last period - a trend made of the batch run.
+    # Processing dates are used only when no call has a date at all.
+    by_call = [r for r in scored if r.call_date is not None and r.date_source == "call"]
+    dated = by_call or [r for r in scored if r.call_date is not None]
+    date_basis = "call" if by_call else ("processed" if dated else "none")
+    in_scope = [r.call_date for r in batch.records if r.call_date is not None
+                and (r.date_source == "call" or date_basis == "processed")]
+    first = min(in_scope, default=None)
+    last = max(in_scope, default=None)
     granularity = stats.choose_granularity(first, last) if first and last else None
     periods, trend, last_vs_prev = _time(dated, granularity)
 
@@ -327,7 +361,7 @@ def analyse(batch: Batch) -> Analysis:
         "duration": _duration_segments(scored, rubric),
         "layout": _layout_segments(scored, rubric),
     }
-    bankers = _bankers(scored, rubric)
+    bankers, banker_reference = _bankers(scored, rubric)
     drivers = _drivers(scored)
     gates = _gates(scored, rubric)
     best, worst = _examples(scored, rubric)
@@ -345,18 +379,22 @@ def analyse(batch: Batch) -> Analysis:
         high_rate=stats.proportion_ci(band_counts.get(4, 0), n, LEVEL),
         low_rate=stats.proportion_ci(band_counts.get(1, 0) + band_counts.get(2, 0), n, LEVEL),
         gate_rate=stats.proportion_ci(gate_fails, n, LEVEL),
-        review_rate=stats.proportion_ci(n_held, n + n_held, LEVEL),
+        review_rate=stats.proportion_ci(n_held, len(batch.records), LEVEL),
         gate_penalty_mean=penalty_sum / n if n else 0.0,
         first_date=first, last_date=last, granularity=granularity,
         dims=dims, histogram=histogram, periods=periods, trend=trend,
         last_vs_prev=last_vs_prev, segments=segments, bankers=bankers, drivers=drivers,
         gates=gates, best_examples=best, worst_examples=worst, attention=attention,
-        coverage=_coverage(batch),
+        coverage=_coverage(batch), date_basis=date_basis, undated=n - len(dated),
+        banker_reference=banker_reference,
     )
 
 
-def _focus_bankers(scored: list[CallRecord], dim_id: str) -> list[tuple[str, int, int]]:
-    """The bankers with the most calls scored <= 2 on a dimension."""
+def _focus_bankers(scored: list[CallRecord], dim_id: str, n_bankers: int
+                   ) -> tuple[list[tuple[str, int, int]], float, float]:
+    """The fifth of the bankers with the most calls scored <= 2 on a dimension,
+    with their share of those low scores and their share of all calls. The
+    group is worth naming only when the first clearly exceeds the second."""
     low: Counter[str] = Counter()
     total: Counter[str] = Counter()
     for r in scored:
@@ -366,8 +404,13 @@ def _focus_bankers(scored: list[CallRecord], dim_id: str) -> list[tuple[str, int
         total[r.banker_id] += 1
         if s <= 2:
             low[r.banker_id] += 1
-    ranked = sorted(low.items(), key=lambda kv: (-kv[1], -kv[1] / total[kv[0]], kv[0]))
-    return [(b, k, total[b]) for b, k in ranked[:5]]
+    if not low:
+        return [], 0.0, 0.0
+    k = max(1, round(0.2 * n_bankers))
+    ranked = sorted(low.items(), key=lambda kv: (-kv[1], -kv[1] / total[kv[0]], kv[0]))[:k]
+    share = sum(v for _, v in ranked) / sum(low.values())
+    call_share = sum(total[b] for b, _ in ranked) / sum(total.values())
+    return [(b, v, total[b]) for b, v in ranked], share, call_share
 
 
 def _time(dated: list[CallRecord], granularity: str | None
@@ -463,14 +506,39 @@ def _layout_segments(scored: list[CallRecord], rubric: Rubric) -> list[GroupStat
             for key in ("stereo", "mono") if key in groups]
 
 
-def _bankers(scored: list[CallRecord], rubric: Rubric) -> list[GroupStat]:
+def _bankers(scored: list[CallRecord], rubric: Rubric
+             ) -> tuple[list[GroupStat], float | None]:
+    """Each banker against the TYPICAL banker - the median of the other
+    bankers' means - rather than against "everyone else".
+
+    Against everyone else, one very weak banker drags the rest's mean down and
+    ordinary bankers come out "significantly better"; with a gate-capped
+    minority, most of the team did. The median of banker means is not moved
+    by an outlier, and it is the reference line the chart draws.
+    """
     groups = _split(scored, lambda r: r.banker_id)
-    out = []
+    stats_by: dict[str, GroupStat] = {}
     for banker_id, members in groups.items():
         rest = [r for r in scored if r.banker_id != banker_id]
-        out.append(_group(banker_id, banker_id, members, rest, rubric,
-                          {"banker": banker_id}, link=members[0].banker_report))
-    return sorted(out, key=lambda g: (-(g.mean.mean or 0), g.key))
+        stats_by[banker_id] = _group(banker_id, banker_id, members, rest, rubric,
+                                     {"banker": banker_id}, link=members[0].banker_report)
+    eligible = {b: g.mean.mean for b, g in stats_by.items()
+                if g.n >= MIN_GROUP_N and g.mean.mean is not None}
+    reference = stats.quantile(list(eligible.values()), 0.5) if eligible else None
+    for banker_id, g in stats_by.items():
+        others = [m for b, m in eligible.items() if b != banker_id]
+        ref = stats.quantile(others, 0.5) if len(others) >= 2 else None
+        totals = [r.card.weighted_total for r in groups[banker_id]]
+        ci = stats.mean_ci(totals, GROUP_LEVEL)
+        if ref is None or ci.mean is None or ci.low is None or ci.high is None:
+            g.diff = None
+        else:
+            g.diff = stats.DiffCI(n1=len(totals), n2=len(others), diff=ci.mean - ref,
+                                  low=ci.low - ref, high=ci.high - ref,
+                                  significant=not (ci.low <= ref <= ci.high))
+        g.flag = _flag(g.diff, g.n)
+    out = sorted(stats_by.values(), key=lambda g: (-(g.mean.mean or 0), g.key))
+    return out, reference
 
 
 # (key, Hebrew label, unit, value getter). Interruptions only exist on
@@ -542,10 +610,16 @@ def _gates(scored: list[CallRecord], rubric: Rubric) -> list[GateStat]:
         per_banker = Counter(r.banker_id for r in failing)
         calls_per_banker = Counter(r.banker_id for r in scored)
         ranked = sorted(per_banker.items(), key=lambda kv: (-kv[1], kv[0]))
-        concentration = None
-        if failing and len(calls_per_banker) >= 5:
-            top = max(1, round(len(calls_per_banker) * 0.2))
-            concentration = sum(k for _, k in ranked[:top]) / len(failing)
+        concentration = call_share = None
+        top = max(1, round(len(calls_per_banker) * 0.2))
+        if len(failing) >= 10 and len(calls_per_banker) >= 5:
+            conc = sum(k for _, k in ranked[:top]) / len(failing)
+            share = sum(calls_per_banker[b] for b, _ in ranked[:top]) / n
+            # Concentrated means more of the failures than of the calls: a
+            # group that takes 60% of the calls "holding" 55% of the failures
+            # is not a concentration.
+            if conc - share >= 0.15:
+                concentration, call_share = conc, share
         per_type = Counter(bucket[r.call_id] for r in failing)
         calls_per_type = Counter(bucket.values())
         by_type = sorted(((t, per_type.get(t, 0), c) for t, c in calls_per_type.items()),
@@ -554,7 +628,8 @@ def _gates(scored: list[CallRecord], rubric: Rubric) -> list[GateStat]:
             id=d.id, name=d.name_he, fails=len(failing),
             rate=stats.proportion_ci(len(failing), n, LEVEL),
             top_bankers=[(b, k, calls_per_banker[b]) for b, k in ranked[:5]],
-            concentration=concentration, by_type=by_type,
+            concentration=concentration, by_type=by_type, top_n=top,
+            n_bankers=len(calls_per_banker), call_share=call_share,
         ))
     return out
 

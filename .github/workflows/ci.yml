@@ -57,9 +57,10 @@ jobs:
           set -eux
           python scripts/generate_batch_demo.py --calls 1000 --workspace "$RUNNER_TEMP/batch"
           report="$RUNNER_TEMP/batch/output/reports/executive.html"
-          chrome=$(command -v google-chrome || command -v chromium || command -v chromium-browser)
-          "$chrome" --headless=new --disable-gpu --no-sandbox --dump-dom "file://$report" > "$RUNNER_TEMP/dom.html"
-          python .github/check_executive_report.py "$report" --calls 1000 --dom "$RUNNER_TEMP/dom.html"
+          python .github/check_executive_report.py "$report" --calls 1000
+          # The installed Chrome, driven by Playwright (nothing downloaded).
+          pip install playwright==1.55.0
+          python .github/check_executive_browser.py "$report" --channel chrome
       - name: Deployability of a bare archive
         if: always()
         # What a reviewer downloads from GitHub is `git archive`, not the
@@ -152,9 +153,10 @@ jobs:
       - name: Evaluation gate (no regression vs baseline)
         if: always()
         run: python -m callqa eval --mock --baseline eval/baseline.json
-      # The management report on the bank's own browser: 1,000 realistic
-      # synthetic calls, opened from disk by Edge (headless), whose DOM after
-      # the page script ran is checked - the explorer drew its first page.
+      # The management report in the bank's own browser: 1,000 realistic
+      # synthetic calls, opened from disk by the Edge installed on the runner
+      # and driven by Playwright - script errors, the explorer, a finding's
+      # filter link, a drill-down and printing are all exercised.
       - name: Management report over 1,000 synthetic calls, opened in Edge
         if: always()
         run: |
@@ -162,17 +164,18 @@ jobs:
           $ws = Join-Path $env:RUNNER_TEMP "batch"
           python scripts/generate_batch_demo.py --calls 1000 --workspace $ws
           $report = Join-Path $ws "output\reports\executive.html"
-          $edge = Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"
-          if (-not (Test-Path $edge)) { $edge = Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe" }
-          $uri = ([System.Uri]$report).AbsoluteUri
-          $dom = Join-Path $env:RUNNER_TEMP "dom.html"
-          # Edge is a GUI program: Start-Process -Wait is what reliably waits for
-          # it and captures what it prints.
-          $profile = Join-Path $env:RUNNER_TEMP "edge-profile"
-          Start-Process -FilePath $edge -Wait -NoNewWindow -RedirectStandardOutput $dom `
-            -ArgumentList @("--headless=new", "--disable-gpu", "--no-first-run",
-                            "--user-data-dir=$profile", "--dump-dom", $uri)
-          python .github/check_executive_report.py $report --calls 1000 --dom $dom
+          python .github/check_executive_report.py $report --calls 1000
+          python -m pip install playwright==1.55.0
+          python .github/check_executive_browser.py $report --channel msedge --screenshot (Join-Path $env:RUNNER_TEMP "executive-edge.png")
+      - name: Keep the management report and how Edge drew it
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: management-report-windows-py${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/executive-edge.png
+            ${{ runner.temp }}/batch/output/reports/executive.html
+          if-no-files-found: warn
       - name: The README's Windows steps, from a GitHub ZIP, in a path with a space and Hebrew
         if: always()
         run: |

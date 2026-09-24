@@ -60,6 +60,7 @@ from callqa.portable import (  # noqa: E402
     configure_stdio,
     disable_console_quick_edit,
 )
+from callqa.reporting.executive.render import REPORT_FILE_RE  # noqa: E402
 
 logger = logging.getLogger("callqa.dashboard")
 
@@ -68,7 +69,7 @@ ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 # Everything the report tree contains, as a pattern: index, calibration and
 # the management reports (executive.html, executive-<scope>.html) at the top,
 # one page per call and per banker below.
-_EXECUTIVE_RE = r"executive(?:-[A-Za-z0-9][A-Za-z0-9._-]{0,60})?"
+_EXECUTIVE_RE = REPORT_FILE_RE.pattern.removesuffix(r"\.html")
 _REPORT_PATH_RE = re.compile(
     rf"(index|calibration|{_EXECUTIVE_RE})\.html"
     r"|(calls|bankers)/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.html")

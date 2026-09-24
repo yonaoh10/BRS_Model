@@ -162,7 +162,10 @@ def normalize_for_detection(text: str) -> tuple[str, list[int]]:
     for i, ch in enumerate(text):
         if ch in INVISIBLE or unicodedata.category(ch) in _STRIP_CATEGORIES:
             continue
-        chars.append(_fold_digit(ch))
+        # A thin space, no-break space, line separator, vertical tab... between
+        # digit groups is a separator like any other: seen as itself it hid
+        # "123 456 782" from every pattern. Newlines stay (turn boundaries).
+        chars.append(" " if ch.isspace() and ch != "\n" else _fold_digit(ch))
         index.append(i)
     return "".join(chars), index
 

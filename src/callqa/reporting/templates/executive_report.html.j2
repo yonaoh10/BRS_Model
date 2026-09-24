@@ -29,7 +29,8 @@
 </header>
 
 <main class="wrap" id="main">
-  <noscript><div class="noscript">חלק מהאפשרויות (סינון השיחות ברמה 3) דורשות JavaScript. כל הנתונים, הגרפים והממצאים מוצגים גם בלעדיו.</div></noscript>
+  <noscript><div class="noscript">סייר השיחות (רמה 3) דורש JavaScript. כל שאר הנתונים, הגרפים, הממצאים וספריית המקרים מוצגים גם בלעדיו.</div>
+    <style>.tabs,#explorer{display:none !important} .case-panel .print-only{display:block !important}</style></noscript>
 
   {% if demo %}
   <div class="demo" role="note">
@@ -38,12 +39,12 @@
   {% endif %}
 
   <section class="cover" aria-labelledby="doc-title">
-    <div class="eyebrow">ניתוח איכות שיחות · דוח לאצוות שיחות</div>
+    <div class="eyebrow">ניתוח איכות השיחות · דוח מרוכז</div>
     <h1 id="doc-title">{{ title }}</h1>
     <div class="meta">
       <span>תקופה: <b>{{ period_label | rich }}</b></span>
-      <span>שיחות בדוח: <b class="n">{{ "{:,}".format(a.n_scope) }}</b></span>
-      <span>נוקדו: <b class="n">{{ "{:,}".format(a.n_scored) }}</b></span>
+      <span>שיחות בתקופה: <b class="n">{{ "{:,}".format(a.n_scope) }}</b></span>
+      <span>קיבלו ציון: <b class="n">{{ "{:,}".format(a.n_scored) }}</b></span>
       <span>בנקאים: <b class="n">{{ a.bankers | length }}</b></span>
       <span>הופק: <b class="n">{{ generated_at }}</b></span>
     </div>
@@ -67,7 +68,7 @@
     <div class="card verdict {{ verdict_class }}">
       <div>
         <div class="label">חוות דעת מקצועית</div>
-        <h3>{{ opinion.assessment }}</h3>
+        <h3>{{ opinion.assessment | rich }}</h3>
         <div class="bl">
           {% for line in opinion.bottom_line %}<p>{{ line | rich }}</p>{% endfor %}
         </div>
@@ -120,7 +121,8 @@
     {% if opinion.actions %}
     <div class="section" id="sec-actions">
       <h3>פעולות מומלצות</h3>
-      <p class="lead">שלוש הפעולות בעלות ההשפעה הגדולה ביותר, לפי הנתונים. ההשפעה מחושבת על השיחות בדוח זה.</p>
+      {% set k = opinion.actions | length %}
+      <p class="lead">{% if k == 1 %}הפעולה בעלת ההשפעה הגדולה ביותר{% elif k == 2 %}שתי הפעולות בעלות ההשפעה הגדולה ביותר{% else %}שלוש הפעולות בעלות ההשפעה הגדולה ביותר{% endif %}, לפי הנתונים. ההשפעה של כל פעולה מחושבת בנפרד על השיחות בדוח זה, ואין לחבר בין ההשפעות.</p>
       <div class="actions">
         {% for x in opinion.actions %}
         <article class="card action">
@@ -128,7 +130,7 @@
           <h4>{{ x.title | rich }}</h4>
           <p class="small">{{ x.text | rich }}</p>
           <div class="impact">{{ x.impact | rich }}</div>
-          {% if x.coaching %}<blockquote>{{ x.coaching }}</blockquote>{% endif %}
+          {% if x.coaching %}<blockquote><b>הנחיה לבנקאים:</b> {{ x.coaching | replace(" - ", " — ") }}</blockquote>{% endif %}
           <div class="owner">אחריות: {{ x.owner }}</div>
           <div class="links">
             <a href="#{{ x.section }}">לניתוח</a>
@@ -150,8 +152,8 @@
           <div class="dimbar">
             <div class="nm" title="{{ d.name }}">{{ d.name }}{% if d.gate %}<span class="gate">שער</span>{% endif %}</div>
             <div class="track" role="img" aria-label="{{ d.name }}: {{ fmt(d.mean.mean) }} מתוך 5">
-              <div class="fill" style="inline-size:{{ pct_width(d.mean.mean) }}%"></div>
-              <div class="mark" style="inset-inline-start:50%"></div>
+              <div class="fill" style="width:{{ pct_width(d.mean.mean) }}%"></div>
+              <div class="mark" style="right:50%"></div>
             </div>
             <div class="v n">{{ fmt(d.mean.mean, 2) }}</div>
           </div>
@@ -186,7 +188,7 @@
 
     <div class="section" id="sec-dims">
       <h3>ממדי ההערכה ומקורות אובדן הנקודות</h3>
-      <p class="lead">מימין: התפלגות הציונים (1–5) בכל ממד — לחיצה על שורה מציגה את השיחות שקיבלו בו <span class="n">1–2</span>. משמאל: מה „עולה” למדד — כמה נקודות מתוך <span class="n">100</span> אבדו בממוצע בכל ממד, ובנפרד — בגלל כשלי שער. הסכום שווה בדיוק לפער בין המדד ל־<span class="n">100</span>.</p>
+      <p class="lead">בגרף העליון: התפלגות הציונים (<span class="n">1–5</span>) בכל ממד — לחיצה על שורה מציגה את השיחות שקיבלו בו <span class="n">1–2</span>. בגרף התחתון: מה „עולה” למדד — כמה נקודות מתוך <span class="n">100</span> אבדו בממוצע בכל ממד, ובנפרד בגלל כשלי שער. סכום הרכיבים שווה לפער בין המדד ל־<span class="n">100</span>.</p>
       {{ callouts("sec-dims") }}
       {% if a.n_scored %}
       <div class="card"><div class="hd"><h4>התפלגות הציונים לפי ממד</h4><span class="sub">אחוז השיחות בכל רמה; לחיצה על שורה — השיחות שקיבלו בממד <span class="n">1–2</span></span></div>
@@ -197,19 +199,19 @@
         <table>
           <caption class="sr">פירוט הממדים</caption>
           <thead><tr><th>ממד</th><th class="num">משקל</th><th class="num">ממוצע (1–5)</th><th class="num">רווח סמך 95%</th>
-            <th class="num">ציון 1–2</th><th class="num">ציון 4–5</th><th class="num">נקודות שאבדו</th><th class="num">פוטנציאל שיפור*</th><th></th></tr></thead>
+            <th class="num">ציון 1–2</th><th class="num">ציון 4–5</th><th class="num">נקודות שאבדו</th><th class="num">פוטנציאל שיפור*</th><th class="no-print"></th></tr></thead>
           <tbody>
           {% for d in a.dims %}
           <tr>
             <td>{{ d.name }}{% if d.gate %} <span class="badge b-warn">שער</span>{% endif %}</td>
             <td class="num n">{{ pct0(d.weight) }}</td>
-            <td class="num n"><b>{{ fmt(d.mean.mean, 2) }}</b></td>
-            <td class="num n">{{ ci(d.mean, 2) }}</td>
+            <td class="num n"><b>{{ fixed(d.mean.mean, 2) }}</b></td>
+            <td class="num n">{{ ci(d.mean, 2, 1, 5) }}</td>
             <td class="num n">{{ pct0(d.low_rate) }}</td>
             <td class="num n">{{ pct0(d.high_rate) }}</td>
             <td class="num n">{{ fmt(d.lost_mean) }}</td>
             <td class="num n">{{ plus(d.gain_if_floor3) }}</td>
-            <td><a href="#explorer" data-filter="{{ {'dim': d.id, 'max': 2} | fjson }}" class="small">שיחות חלשות</a></td>
+            <td class="no-print"><a href="#explorer" data-filter="{{ {'dim': d.id, 'max': 2} | fjson }}" class="small">שיחות חלשות</a></td>
           </tr>
           {% endfor %}
           </tbody>
@@ -236,15 +238,15 @@
             </tbody>
           </table>
           <p class="small muted" style="margin-top:10px">חציון <span class="n">{{ fmt(a.median) }}</span> · רבעון תחתון <span class="n">{{ fmt(a.q1) }}</span> · רבעון עליון <span class="n">{{ fmt(a.q3) }}</span>.
-            ממוצע <span class="n">{{ fmt(a.total.mean) }}</span>, רווח סמך 95% <span class="n">{{ ci(a.total) }}</span>.</p>
+            ממוצע <span class="n">{{ fmt(a.total.mean) }}</span>, רווח סמך 95% <span class="n">{{ ci(a.total, 1, 0, 100) }}</span>.</p>
         </div></div>
       </div>
-      {% else %}<p class="ch-empty">אין שיחות מנוקדות.</p>{% endif %}
+      {% else %}<p class="ch-empty">אין שיחות שקיבלו ציון.</p>{% endif %}
     </div>
 
     <div class="section" id="sec-trend">
       <h3>מגמות לאורך זמן</h3>
-      <p class="lead">המדד הממוצע בכל {{ granularity_he }} (קו), עם רווח סמך 95% (רצועה) ומספר השיחות (עמודות ברקע){% if has_gate_line %}; הקו המקווקו — שיעור כשלי השער{% endif %}.</p>
+      <p class="lead">המדד הממוצע בכל {{ granularity_he }} לפי תאריך {{ 'העיבוד' if a.date_basis == 'processed' else 'השיחה' }} (קו), עם רווח סמך <span class="n">95%</span> (רצועה){% if has_gate_line %}; מתחתיו שיעור כשלי השער{% endif %}, ובתחתית מספר השיחות.</p>
       {{ callouts("sec-trend") }}
       {% if a.periods | length >= 2 %}
       <div class="card"><div class="bd chart-box">{{ charts.trend }}
@@ -255,7 +257,7 @@
 
     <div class="section" id="sec-segments">
       <h3>פילוחים</h3>
-      <p class="lead">ממוצע המדד בכל קבוצה עם רווח סמך. קבוצה מסומנת רק כשהפער שלה משאר השיחות מובהק (רמת ביטחון <span class="n">99%</span>) וגדול מ־<span class="n">3</span> נקודות. לחיצה על שורה מסננת את השיחות ברמה 3.</p>
+      <p class="lead">ממוצע המדד בכל קבוצה עם רווח סמך; הקו המקווקו — הממוצע הכללי. קבוצה מסומנת רק כשהפער שלה משאר השיחות מובהק (רמת ביטחון <span class="n">99%</span>) וגדול מ־<span class="n">3</span> נקודות. לחיצה על שורה מציגה את השיחות ברמה 3.</p>
       {{ callouts("sec-segments") }}
       <div class="grid g2">
         <div class="card"><div class="hd"><h4>לפי סוג שיחה</h4></div><div class="bd chart-box">{{ charts.seg_type or empty }}</div></div>
@@ -268,17 +270,17 @@
 
     <div class="section" id="sec-bankers">
       <h3>בנקאים</h3>
-      <p class="lead">ממוצע כל בנקאי עם רווח סמך <span class="n">95%</span>; הקו המקווקו — חציון הקבוצה. אדום: נמוך באופן מובהק משאר הבנקאים; ירוק: גבוה באופן מובהק; אפור: פחות מ־<span class="n">8</span> שיחות — מוצג אך לא מדורג.</p>
+      <p class="lead">ממוצע כל בנקאי עם רווח סמך; הקו המקווקו — חציון הבנקאים{% if banker_ref is not none %} (<span class="n">{{ fmt(banker_ref) }}</span>){% endif %}, כלומר הבנקאי הטיפוסי. אדום: נמוך באופן מובהק מהבנקאי הטיפוסי; ירוק: גבוה באופן מובהק; אפור: פחות מ־<span class="n">8</span> שיחות — מוצג אך לא מדורג.</p>
       {{ callouts("sec-bankers") }}
       {% if a.bankers %}
       <div class="card"><div class="bd chart-box">{{ charts.bankers }}</div></div>
       <div class="card" style="margin-top:var(--s4)">
-        <div class="hd"><h4>מפת חום: בנקאי × ממד</h4><span class="sub">ממוצע הציון (1–5) בכל ממד. לחיצה על תא מציגה את שיחות הבנקאי בממד.</span></div>
+        <div class="hd"><h4>מפת חום: בנקאי × ממד</h4><span class="sub">ממוצע הציון (1–5) בכל ממד. לחיצה על תא מציגה את שיחות הבנקאי שקיבלו בממד ציון <span class="n">1–2</span> (או את כל שיחותיו, כשאין כאלה).</span></div>
         <div class="bd tbl-wrap">
           <table class="heat">
             <thead><tr><th>בנקאי</th><th class="num">שיחות</th><th class="num">מדד</th>
               {% for d in a.dims %}<th class="dim" title="{{ d.name }}">{{ d.name }}</th>{% endfor %}
-              <th>מצב</th><th></th></tr></thead>
+              <th>מצב</th><th class="no-print"></th></tr></thead>
             <tbody>
             {% for row in heat %}
             <tr>
@@ -286,24 +288,24 @@
               <td class="num n">{{ row.n }}</td>
               <td class="num n"><b>{{ fmt(row.mean) }}</b></td>
               {% for c in row.cells %}
-              <td class="cell">{% if c.v is not none %}<button type="button" class="{{ c.cls }}" data-filter="{{ c.filter | fjson }}" aria-label="{{ row.banker }} · {{ c.name }}: {{ c.text }}">{{ c.text }}</button>{% endif %}</td>
+              <td class="cell">{% if c.v is not none %}<button type="button" class="{{ c.cls }}" data-filter="{{ c.filter | fjson }}" aria-label="{{ row.banker }} · {{ c.name }}: {{ c.text }} — {% if c.low == 1 %}שיחה אחת{% else %}{{ c.low }} שיחות{% endif %} בציון 1–2">{{ c.text }}</button>{% endif %}</td>
               {% endfor %}
               <td><span class="badge b-{{ row.flag_cls }}">{{ row.flag_text }}</span></td>
-              <td class="small">{% if row.link %}<a href="{{ row.link }}">דוח בנקאי</a>{% endif %}</td>
+              <td class="small no-print">{% if row.link %}<a href="{{ row.link }}">דוח בנקאי</a>{% endif %}</td>
             </tr>
             {% endfor %}
             <tr class="ref"><td>כלל הבנקאים</td><td class="num n">{{ a.n_scored }}</td><td class="num n">{{ fmt(a.total.mean) }}</td>
-              {% for d in a.dims %}<td class="num n" style="text-align:center">{{ fmt(d.mean.mean, 1) }}</td>{% endfor %}<td></td><td></td></tr>
+              {% for d in a.dims %}<td class="num n" style="text-align:center">{{ fixed(d.mean.mean, 1) }}</td>{% endfor %}<td></td><td class="no-print"></td></tr>
             </tbody>
           </table>
         </div>
       </div>
-      {% else %}<p class="ch-empty">אין בנקאים עם שיחות מנוקדות.</p>{% endif %}
+      {% else %}<p class="ch-empty">אין בנקאים עם שיחות שקיבלו ציון.</p>{% endif %}
     </div>
 
     <div class="section" id="sec-drivers">
       <h3>גורמים התנהגותיים</h3>
-      <p class="lead">מדדים אובייקטיביים שנמדדו בכל שיחה (ללא שיפוט), והקשר שלהם למדד: ההפרש בין השיחות ברבעון העליון של המדד ההתנהגותי לבין הרבעון התחתון. מוצגים כמובהקים רק קשרים עם <span class="n">30</span> שיחות לפחות, מתאם <span class="n">|ρ| ≥ 0.15</span> והפרש של <span class="n">3</span> נקודות ומעלה. קשר סטטיסטי אינו בהכרח סיבתי.</p>
+      <p class="lead">מאפיינים התנהגותיים שנמדדו בכל שיחה באופן אובייקטיבי (בלי שיפוט), והקשר שלהם למדד: ההפרש בין המדד הממוצע בשיחות שברבעון העליון של המאפיין לבין המדד בשיחות שברבעון התחתון. קשר מוצג כמובהק רק כשיש לפחות <span class="n">30</span> שיחות, מתאם של <span class="n">0.15</span> לפחות (בערך מוחלט) והפרש של <span class="n">3</span> נקודות ומעלה. קשר סטטיסטי אינו בהכרח סיבתי.</p>
       {{ callouts("sec-drivers") }}
       {% if a.drivers %}
       {% if charts.drivers %}
@@ -313,13 +315,13 @@
       {% endif %}
       <div class="card" style="margin-top:var(--s4)"><div class="bd tbl-wrap">
         <table>
-          <thead><tr><th>מדד התנהגותי</th><th class="num">שיחות</th><th class="num">מתאם ρ</th><th class="num">רבעון תחתון: עד</th><th class="num">מדד ממוצע בו</th><th class="num">רבעון עליון: מ־</th><th class="num">מדד ממוצע בו</th><th>קשר מובהק</th></tr></thead>
+          <thead><tr><th>מאפיין התנהגותי</th><th class="num">שיחות</th><th class="num">מתאם</th><th class="num">רבעון תחתון: עד</th><th class="num">המדד בשיחות אלה</th><th class="num">רבעון עליון: מ־</th><th class="num">המדד בשיחות אלה</th><th>קשר מובהק</th></tr></thead>
           <tbody>
           {% for d in a.drivers %}
           <tr>
             <td>{{ d.label }}</td><td class="num n">{{ d.n }}</td><td class="num n">{{ rho(d.corr.rho) }}</td>
-            <td class="num n">{{ fmt(d.q1) }} {{ d.unit }}</td><td class="num n">{{ fmt(d.low_mean) }}</td>
-            <td class="num n">{{ fmt(d.q3) }} {{ d.unit }}</td><td class="num n">{{ fmt(d.high_mean) }}</td>
+            <td class="num"><span class="n">{{ fmt(d.q1) }}{% if d.unit == '%' %}%{% endif %}</span>{% if d.unit != '%' %} {{ d.unit }}{% endif %}</td><td class="num n">{{ fmt(d.low_mean) }}</td>
+            <td class="num"><span class="n">{{ fmt(d.q3) }}{% if d.unit == '%' %}%{% endif %}</span>{% if d.unit != '%' %} {{ d.unit }}{% endif %}</td><td class="num n">{{ fmt(d.high_mean) }}</td>
             <td>{% if d.reportable %}<span class="badge b-medium">כן</span>{% else %}<span class="muted small">לא</span>{% endif %}</td>
           </tr>
           {% endfor %}
@@ -331,17 +333,17 @@
 
     <div class="section" id="sec-risk">
       <h3>סיכוני ציות — כשלי שער</h3>
-      <p class="lead">ממדי השער הם זיהוי ואימות הלקוח וציות וגילוי נאות. ציון <span class="n">2</span> ומטה באחד מהם מגביל את מדד השיחה ל־<span class="n">59</span> לכל היותר, כי מדובר בחשיפה רגולטורית ולא רק בשאלת איכות.</p>
+      <p class="lead">ממדי השער הם {{ gates_text }}. ציון <span class="n">2</span> ומטה באחד מהם מגביל את מדד השיחה ל־<span class="n">59</span> לכל היותר, כי מדובר בחשיפה רגולטורית ולא רק בשאלת איכות.</p>
       {{ callouts("sec-risk") }}
       {% if a.gates %}
       <div class="grid g2">
         {% for g in a.gates %}
         <div class="card">
-          <div class="hd"><h4>{{ g.name }}</h4><span class="sub"><span class="n">{{ g.fails }}</span> כשלים · <span class="n">{{ pct1(g.rate.p) }}</span> מהשיחות</span>
+          <div class="hd"><h4>{{ g.name }}</h4><span class="sub">{% if g.fails == 1 %}כשל אחד{% else %}<span class="n">{{ g.fails }}</span> כשלים{% endif %} · <span class="n">{{ pct1(g.rate.p) }}</span> מהשיחות</span>
             {% if g.fails %}<a class="right small" href="#explorer" data-filter="{{ {'gate': g.id} | fjson }}">הצג את השיחות</a>{% endif %}</div>
           <div class="bd">
             {% if g.fails %}
-            {% if g.concentration is not none %}<p class="small">{{ pct0(g.concentration) }} מהכשלים אצל <span class="n">20%</span> מהבנקאים.</p>{% endif %}
+            {% if g.concentration is not none %}<p class="small"><span class="n">{{ pct0(g.concentration) }}</span> מהכשלים אצל {% if g.top_n == 1 %}בנקאי אחד{% else %}<span class="n">{{ g.top_n }}</span> בנקאים{% endif %} מתוך <span class="n">{{ g.n_bankers }}</span>, שמטפלים ב־<span class="n">{{ pct0(g.call_share) }}</span> מהשיחות.</p>{% endif %}
             <table>
               <thead><tr><th>בנקאים עם הכי הרבה כשלים</th><th class="num">כשלים</th><th class="num">מתוך שיחות</th></tr></thead>
               <tbody>{% for b, k, n in g.top_bankers %}<tr><td class="mono"><a href="#explorer" data-filter="{{ {'banker': b, 'gate': g.id} | fjson }}">{{ b }}</a></td><td class="num n">{{ k }}</td><td class="num n">{{ n }}</td></tr>{% endfor %}</tbody>
@@ -365,7 +367,7 @@
       <div class="grid g3">
         <div class="card"><div class="hd"><h4>מצב השיחות</h4></div><div class="bd">
           <table><tbody>
-            <tr><td>נוקדו ונכללו במדד</td><td class="num n">{{ cov.status.success }}</td></tr>
+            <tr><td>קיבלו ציון ונכללו במדד</td><td class="num n">{{ cov.status.success }}</td></tr>
             <tr><td>ממתינות לבדיקה אנושית</td><td class="num n">{{ cov.status.needs_human_review }}</td></tr>
             <tr><td>לא עובדו (כשל טכני)</td><td class="num n">{{ cov.status.failed }}</td></tr>
             {% if cov.excluded_other_rubric %}<tr><td>לא נכללו: גרסת מחוון או הנחיות אחרת</td><td class="num n">{{ cov.excluded_other_rubric }}</td></tr>{% endif %}
@@ -379,7 +381,7 @@
           <p class="small">כל הטקסט בדוח מגיע מתמלילים שעברו הסתרת פרטים מזהים. בתקופה זו הוסתרו <b class="n">{{ "{:,}".format(cov.entities_total) }}</b> פרטים:</p>
           <table><tbody>{% for label, k in entities %}<tr><td>{{ label }}</td><td class="num n">{{ "{:,}".format(k) }}</td></tr>{% endfor %}</tbody></table>
           {% if cov.redaction_disabled %}<p class="small" style="color:var(--bad-ink);margin-top:8px">בשיחות שבהן ההסתרה כובתה (<span class="n">{{ cov.redaction_disabled }}</span>) מוצגים מספרים בלבד.</p>{% endif %}
-          {% if cov.text_withheld %}<p class="small muted" style="margin-top:8px">ב־<span class="n">{{ cov.text_withheld }}</span> שיחות מנוקדות לא ניתן היה לאמת את ההסתרה, ולכן לא מוצג מהן טקסט.</p>{% endif %}
+          {% if cov.text_withheld %}<p class="small muted" style="margin-top:8px">{% if cov.text_withheld == 1 %}בשיחה אחת{% else %}ב־<span class="n">{{ cov.text_withheld }}</span> שיחות{% endif %} שקיבלו ציון לא ניתן היה לאמת את ההסתרה, ולכן לא מוצג מהן טקסט.</p>{% endif %}
         </div></div>
         <div class="card"><div class="hd"><h4>אמינות הציונים</h4></div><div class="bd">
           {% if cov.calibration %}
@@ -389,7 +391,7 @@
           {% else %}
           <p class="small">טרם בוצע כיול מול מעריכים אנושיים (<span class="mono">callqa calibrate</span>). עד אז מדדים קבוצתיים אמינים יותר מציון של שיחה בודדת.</p>
           {% endif %}
-          <p class="small">מקור התאריך: <span class="n">{{ cov.date_sources.get('call', 0) }}</span> שיחות לפי תאריך השיחה{% if cov.date_sources.get('processed') %}, <span class="n">{{ cov.date_sources.get('processed') }}</span> לפי תאריך העיבוד (תאריך השיחה חסר){% endif %}.</p>
+          <p class="small">מקור התאריך: <span class="n">{{ cov.date_sources.get('call', 0) }}</span> שיחות לפי תאריך השיחה{% if cov.date_sources.get('processed') %}; ל־<span class="n">{{ cov.date_sources.get('processed') }}</span> שיחות חסר תאריך שיחה{% if a.date_basis == 'call' %}, והן אינן נכללות במגמות{% else %}, והמגמות לפי תאריך העיבוד{% endif %}{% endif %}.</p>
           {% if cov.mono %}<p class="small">הקלטות חד־ערוציות (זיהוי דוברים אוטומטי): <span class="n">{{ cov.mono }}</span>.</p>{% endif %}
           <p class="small muted">מודל שיפוט: <span class="mono">{{ models }}</span> · גרסת הנחיות: <span class="mono">{{ prompt_versions }}</span> · מחוון: <span class="mono">{{ rubric_hashes }}</span></p>
         </div></div>
@@ -415,9 +417,9 @@
         <div class="field"><label for="xp-banker">בנקאי</label><select id="xp-banker"><option value="">כל הבנקאים</option></select></div>
         <div class="field"><label for="xp-type">סוג שיחה</label><select id="xp-type"><option value="">כל הסוגים</option></select></div>
         <div class="field"><label for="xp-band">רמת ביצוע</label><select id="xp-band"><option value="">כל הרמות</option>
-          <option value="4">גבוה (80+)</option><option value="3">בינוני (60–79)</option><option value="2">גבולי (40–59)</option><option value="1">חלש (עד 40)</option></select></div>
+          <option value="4">גבוה (80 ומעלה)</option><option value="3">בינוני (60–79)</option><option value="2">גבולי (40–59)</option><option value="1">חלש (מתחת ל־40)</option></select></div>
         <div class="field"><label for="xp-gate">שערי חובה</label><select id="xp-gate"><option value="">הכול</option><option value="any">נכשלו בשער</option><option value="none">ללא כשל שער</option></select></div>
-        <div class="field"><label for="xp-status">מצב</label><select id="xp-status"><option value="scored">נוקדו</option><option value="">כל השיחות</option>
+        <div class="field"><label for="xp-status">מצב</label><select id="xp-status"><option value="scored">קיבלו ציון</option><option value="">כל השיחות</option>
           <option value="needs_human_review">ממתינות לבדיקה</option><option value="failed">לא עובדו</option></select></div>
         <div class="field"><label for="xp-dim">ממד</label><select id="xp-dim"><option value="">—</option></select></div>
         <div class="field"><label for="xp-dimop">ציון בממד</label><select id="xp-dimop"><option value="">כל ציון</option>
@@ -460,7 +462,7 @@
         {% for d in a.dims %}<button type="button" role="tab" id="tab-{{ d.id }}" aria-controls="case-{{ d.id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" data-case="{{ d.id }}">{{ d.name }}</button>{% endfor %}
       </div>
       {% for d in a.dims %}
-      <div class="case-panel" id="case-{{ d.id }}" role="tabpanel" aria-labelledby="tab-{{ d.id }}" {% if not loop.first %}hidden{% endif %}>
+      <div class="case-panel" id="case-{{ d.id }}" role="tabpanel" aria-labelledby="tab-{{ d.id }}">
         <h4 class="print-only" style="margin:10px 0 4px">{{ d.name }}</h4>
         <div class="cases">
           {% for title, items, cls in [("ביצוע מצוין", cases_best[d.id], "ok"), ("ביצוע חלש", cases_worst[d.id], "bad")] %}
@@ -521,14 +523,14 @@
         <dt>מדד האיכות</dt><dd>כל שיחה מקבלת ציון <span class="n">1–5</span> בכל אחד מ־<span class="n">{{ a.dims | length }}</span> ממדי המחוון. המדד (<span class="n">0–100</span>) הוא ממוצע משוקלל: ציון <span class="n">1</span> = <span class="n">0</span>, ציון <span class="n">5</span> = <span class="n">100</span>, לפי המשקלות: {{ weights_text }}.</dd>
         <dt>שערי חובה</dt><dd>{{ gates_text }}: ציון <span class="n">2</span> ומטה באחד מהם מגביל את מדד השיחה ל־<span class="n">59</span> (כשל שער). ההפרש בין המדד לפני ההגבלה לאחריה מוצג כ„קנס שער” בפירוק הנקודות.</dd>
         <dt>רמות ביצוע</dt><dd>גבוה <span class="n">80</span> ומעלה · בינוני <span class="n">60–79</span> · גבולי <span class="n">40–59</span> · חלש מתחת ל־<span class="n">40</span>.</dd>
-        <dt>אילו שיחות נכללות</dt><dd>רק שיחות שעובדו בהצלחה ושנוקדו באותה גרסת מחוון והנחיות שיפוט, כמו בדוחות הבנקאים. שיחות שממתינות לבדיקה אנושית ושיחות שנכשלו נספרות בנפרד ואינן משפיעות על המדד.</dd>
+        <dt>אילו שיחות נכללות</dt><dd>רק שיחות שעובדו בהצלחה וקיבלו ציון באותה גרסת מחוון ובאותה גרסת הנחיות שיפוט, כמו בדוחות הבנקאים. שיחות שממתינות לבדיקה אנושית ושיחות שנכשלו נספרות בנפרד ואינן משפיעות על המדד.</dd>
         <dt>תאריך</dt><dd>תאריך השיחה מקובץ הנתונים; כשהוא חסר — תאריך העיבוד (מסומן בפרק הכיסוי). המגמות מקובצות לפי {{ granularity_he or 'תקופה' }}; שבוע מתחיל ביום ראשון.</dd>
         <dt>רווחי סמך</dt><dd>לממוצעים — רווח סמך <span class="n">95%</span> מבוסס התפלגות t; לשיעורים — שיטת Wilson. רווח סמך רחב פירושו שהמספר פחות ודאי (בדרך כלל: מעט שיחות).</dd>
-        <dt>מובהקות</dt><dd>בהשוואה בין קבוצות רבות (בנקאים, סוגי שיחה, משכים) קבוצה מסומנת רק כשההפרש משאר השיחות מובהק ברמת ביטחון <span class="n">99%</span> (Welch), גדול מ־<span class="n">3</span> נקודות, ובקבוצה יש לפחות <span class="n">8</span> שיחות. כך נמנעות „התרעות שווא” כשמשווים עשרות בנקאים.</dd>
-        <dt>מגמה</dt><dd>שיפוע קו מגמה (ריבועים פחותים) של מדד השיחות לאורך הזמן, בנקודות לחודש, עם רווח סמך <span class="n">95%</span>; מחושב מ־<span class="n">30</span> שיחות ומעל <span class="n">14</span> ימים לפחות.</dd>
+        <dt>מובהקות</dt><dd>סוג שיחה, טווח משך או אופן הקלטה מסומנים רק כשההפרש משאר השיחות מובהק ברמת ביטחון <span class="n">99%</span> (מבחן Welch), גדול מ־<span class="n">3</span> נקודות, ובקבוצה יש לפחות <span class="n">8</span> שיחות. בנקאי מושווה לבנקאי הטיפוסי — חציון הממוצעים של שאר הבנקאים — ומסומן רק כשהחציון נמצא מחוץ לרווח הסמך של <span class="n">99%</span> לממוצע שלו, בפער של <span class="n">3</span> נקודות לפחות. כך בנקאי חלש במיוחד אינו גורם לשאר הצוות להיראות „טוב מהממוצע”, ונמנעות התרעות שווא כשמשווים עשרות בנקאים.</dd>
+        <dt>מגמה</dt><dd>שיפוע קו מגמה (ריבועים פחותים) של מדד השיחות לפי תאריך השיחה, בנקודות לחודש, עם רווח סמך <span class="n">95%</span>. מחושב רק כשיש לפחות <span class="n">30</span> שיחות הפרוסות על פני <span class="n">14</span> ימים לפחות. מגמה נחשבת מהותית כשהיא מובהקת וגם מסתכמת ב־<span class="n">3</span> נקודות לפחות לאורך התקופה.</dd>
         <dt>גורמים התנהגותיים</dt><dd>מתאם ספירמן (ρ) בין מדד אובייקטיבי שנמדד בשיחה (יחס דיבור, קטיעות, שאלות, שקט, משך ועוד) לבין המדד, והפרש הממוצעים בין הרבעון העליון לתחתון של אותו מדד. קטיעות נמדדות רק בהקלטות שבהן כל דובר בערוץ נפרד.</dd>
         <dt>פוטנציאל שיפור</dt><dd>חישוב „מה אם”: כל ציון נמוך מ־<span class="n">3</span> בממד מוחלף ב־<span class="n">3</span> והמדד מחושב מחדש לכל שיחה (כולל ביטול כשלי שער שנגרמו מאותו ממד).</dd>
-        <dt>פרטיות</dt><dd>הדוח נבנה רק מתוצרים שעברו הסתרת פרטים מזהים. ציטוטים ונימוקים מוצגים רק משיחות שבהן אומת שההסתרה פעלה. שמות בנקאים אינם מוצגים — רק מזהים. אין בקובץ חיבור לרשת, והוא נפתח בדפדפן גם ללא אינטרנט.</dd>
+        <dt>פרטיות</dt><dd>הדוח נבנה רק מתוצרים שעברו הסתרת פרטים מזהים. ציטוטים ונימוקים מוצגים רק משיחות שבהן אומת שההסתרה פעלה. מזהה הבנקאי מוצג כפי שהוא בקובץ הנתונים; מזהה שנראה כמו מספר זהות, טלפון או שם מוחלף בכינוי קבוע. אין בקובץ חיבור לרשת, והוא נפתח בדפדפן גם ללא אינטרנט.</dd>
         <dt>הגבלות</dt><dd>הציונים מופקים על ידי מודל שפה לפי מחוון קבוע ועוברים אימות ציטוטים; הם אינם תחליף לשיקול דעת של מנהל. אין להסתמך על ציון של שיחה בודדת, או של בנקאי עם מעט שיחות, כבסיס יחיד להחלטה על עובד.</dd>
       </dl>
     </div></div>

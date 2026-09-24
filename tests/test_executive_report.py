@@ -242,7 +242,7 @@ def test_an_empty_batch_renders_an_explanation_not_an_error(tmp_path, rubric):  
     report = build_executive_report(out, rubric)
     html = report.html.read_text(encoding="utf-8")
     assert report.analysis.n_scored == 0
-    assert "לא נמצאו בתקופה זו שיחות שנוקדו" in html
+    assert "לא נמצאו בתקופה זו שיחות שקיבלו ציון" in html
 
 
 # -- privacy ----------------------------------------------------------------------
@@ -459,3 +459,262 @@ def test_the_page_works_in_a_browser(batch_out, rubric):  # noqa: ANN001
         page.wait_for_timeout(100)
         assert not errors, errors
         browser.close()
+
+
+def test_a_very_large_batch_keeps_text_for_the_calls_that_matter_most(batch_out, rubric,  # noqa: ANN001
+                                                                      monkeypatch):
+    """Beyond the text budget the page carries reasoning only for the weakest
+    calls - gate failures first - so a 5,000-call report stays openable."""
+    from callqa.reporting.executive import render
+
+    monkeypatch.setattr(render, "MAX_TEXT_CALLS", 5)
+    report = build_executive_report(batch_out, rubric)
+    html = report.html.read_text(encoding="utf-8")
+    data = json.loads(re.search(r'id="xr-data">(.*?)</script>', html, re.S).group(1))
+    a = report.analysis
+    cases = {e.call_id for group in (a.best_examples, a.worst_examples)
+             for items in group.values() for e in items}
+    assert data["textCapped"] is True
+    assert set(data["text"]) - cases and len(set(data["text"]) - cases) <= 5
+    # the budget went to gate failures first; case-library calls keep theirs
+    assert all(data["calls"][[c["id"] for c in data["calls"]].index(i)]["g"]
+               for i in set(data["text"]) - cases)
+    assert cases & {r.call_id for r in a.batch.scored if r.text_allowed} <= set(data["text"])
+
+
+# -- regressions from the adversarial review ------------------------------------------
+
+def _html(out: Path, rubric) -> str:  # noqa: ANN001
+    return build_executive_report(out, rubric).html.read_text(encoding="utf-8")
+
+
+def test_a_legacy_redacted_file_without_the_flag_is_numbers_only(tmp_path, rubric):  # noqa: ANN001
+    """Before the flag existed, a disabled run wrote RAW text to redacted/ with
+    no "enabled" key; the model defaults it to True. Only an explicit
+    "enabled": true in the file may clear a call's text."""
+    out = tmp_path / "output"
+    write_call(out, rubric, "LEGACY", summary=f"הלקוח {RAW_NAME}", report_file=True)
+    path = out / "redacted" / "LEGACY.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["enabled"]
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    record = load_batch(out, rubric).records[0]
+    assert not record.text_allowed and record.call_report is None
+    assert RAW_NAME not in _html(out, rubric)
+
+
+def test_rescrub_normalises_before_it_detects():
+    """A tag or an unusual space between digit groups hid an ID from the
+    redactor; stripping the tag afterwards then printed it whole."""
+    from callqa.reporting.executive.render import _prose
+
+    for text in ("ת.ז 12345<b>6782</b>", "מספר 12345<>6782", "ת.ז 123\u2009456\u2009782",
+                 "טלפון 052\u202f1234567"):
+        cleaned = _prose(text)
+        assert "123456782" not in cleaned.replace(" ", "") and "1234567" not in cleaned, cleaned
+
+
+def test_a_banker_id_that_looks_like_an_identifier_is_shown_as_a_pseudonym(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    for i in range(3):
+        write_call(out, rubric, f"P{i}", banker=RAW_ID)
+    write_call(out, rubric, "P9", banker="B002")
+    report = build_executive_report(out, rubric)
+    text = _all_outputs(report)
+    assert RAW_ID not in text
+    assert "בנקאי-" in text
+    scoped = load_batch(out, rubric, BatchFilters(banker_id=RAW_ID)).records
+    assert len(scoped) == 3           # the raw id still selects the banker
+
+
+def test_unknown_redaction_count_keys_are_not_printed(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    write_call(out, rubric, "KEYS")
+    path = out / "redacted" / "KEYS.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["redaction_counts"] = {"052-1234567": 1, "ISRAELI_ID": 2}
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    html = _html(out, rubric)
+    assert "052-1234567" not in html
+
+
+def test_a_misnamed_scorecard_is_not_another_calls_result(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    write_call(out, rubric, "REAL1")
+    write_call(out, rubric, "OTHER", summary=f"סיכום {RAW_NAME}", redaction="off")
+    card = json.loads((out / "scores" / "OTHER.json").read_text(encoding="utf-8"))
+    card["call_id"] = "REAL1"
+    (out / "scores" / "OTHER.json").write_text(json.dumps(card, ensure_ascii=False),
+                                               encoding="utf-8")
+    assert all(c.call_id != "REAL1" or "סיכום השיחה" in c.summary_he
+               for c in load_scorecards(out))
+    assert RAW_NAME not in _html(out, rubric)
+
+
+def test_a_windows_model_path_shows_only_its_base_name(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    write_call(out, rubric, "M1")
+    card = json.loads((out / "scores" / "M1.json").read_text(encoding="utf-8"))
+    card["model"] = "C:\\Users\\ישראל ישראלי\\models\\judge-q4"
+    (out / "scores" / "M1.json").write_text(json.dumps(card, ensure_ascii=False),
+                                            encoding="utf-8")
+    html = _html(out, rubric)
+    assert "judge-q4" in html and "Users" not in html and RAW_NAME not in html
+
+
+def test_undated_calls_do_not_make_a_trend(tmp_path, rubric):  # noqa: ANN001
+    """Calls with no call date used to fall into the batch-run week and create
+    a 'decline' out of the processing date."""
+    out = tmp_path / "output"
+    start = date(2026, 6, 7)
+    for i in range(60):
+        write_call(out, rubric, f"D{i:03d}", banker=f"B{i % 4}",
+                   call_date=(start + timedelta(days=i)).isoformat())
+    for i in range(15):
+        write_call(out, rubric, f"U{i:03d}", banker=f"B{i % 4}", call_date=None,
+                   levels={d.id: 2 for d in rubric.dimensions})
+    a = analyse(load_batch(out, rubric))
+    assert a.date_basis == "call" and a.undated == 15
+    assert all(p.start <= date(2026, 8, 6) for p in a.periods)
+    opinion = build_executive_report(out, rubric).opinion
+    assert not any(f.key in ("trend", "last-period") for f in opinion.findings)
+
+
+def test_the_gate_penalty_counts_toward_the_dimension_that_caused_it(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    for i in range(40):
+        levels = {d.id: 5 for d in rubric.dimensions}
+        levels["clarity"] = levels["resolution"] = 4
+        if i % 3 == 0:
+            levels["identification"] = 2
+        write_call(out, rubric, f"G{i:03d}", levels=levels)
+    report = build_executive_report(out, rubric)
+    pareto = next(f for f in report.opinion.findings if f.key == "pareto")
+    assert "זיהוי ואימות לקוח" in pareto.title
+    assert "זיהוי ואימות לקוח" in " ".join(report.opinion.bottom_line)
+
+
+def test_one_very_weak_banker_does_not_make_the_rest_look_excellent(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    for i in range(80):
+        banker = f"B{i % 8}"
+        base = 1 if banker == "B0" else 4
+        levels = {d.id: base for d in rubric.dimensions}
+        if i % 5 == 0 and banker != "B0":
+            levels["empathy"] = 3
+        write_call(out, rubric, f"W{i:03d}", banker=banker, levels=levels)
+    a = analyse(load_batch(out, rubric))
+    flags = {b.key: b.flag for b in a.bankers}
+    assert flags["B0"] == "bad"
+    assert not any(flag == "ok" for flag in flags.values())
+
+
+def test_concentration_is_claimed_only_when_failures_outrun_calls(tmp_path, rubric):  # noqa: ANN001
+    """Two bankers who take most of the calls 'holding' most of the failures
+    is volume, not concentration."""
+    out = tmp_path / "output"
+    for i in range(200):
+        banker = "B0" if i % 10 < 4 else ("B1" if i % 10 < 7 else f"B{2 + i % 8}")
+        levels = {d.id: 4 for d in rubric.dimensions}
+        if i % 10 == 0 or i % 10 == 5:
+            levels["compliance"] = 2
+        write_call(out, rubric, f"C{i:03d}", banker=banker, levels=levels)
+    a = analyse(load_batch(out, rubric))
+    gate = next(g for g in a.gates if g.id == "compliance")
+    assert gate.fails > 10
+    if gate.concentration is not None:
+        assert gate.concentration - gate.call_share >= 0.15
+
+
+def test_hebrew_counts_one_in_the_singular(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    for i in range(40):
+        levels = {d.id: 4 for d in rubric.dimensions}
+        if i == 7:
+            levels["identification"] = 2
+        write_call(out, rubric, f"S{i:03d}", levels=levels)
+    report = build_executive_report(out, rubric)
+    text = " ".join(report.opinion.bottom_line) + " ".join(
+        f.title + f.text for f in report.opinion.findings)
+    assert "שיחה אחת" in text and "נכשלה" in text
+    assert "⟦1⟧ שיחות" not in text and "וועוד" not in text
+
+
+def test_a_small_batch_gets_a_preliminary_opinion(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    for i in range(3):
+        write_call(out, rubric, f"T{i}")
+    opinion = build_executive_report(out, rubric).opinion
+    assert opinion.assessment.startswith("הערכה ראשונית בלבד")
+
+
+def test_scoped_report_names_are_distinct_and_servable(rubric):  # noqa: ANN001
+    from callqa.reporting.executive.render import REPORT_FILE_RE
+
+    # The Hebrew label and the metadata key select the same calls: one file.
+    assert report_name(BatchFilters(call_type="שירות"), None) == \
+        report_name(BatchFilters(call_type="service"), None) == "executive-service"
+    names = {report_name(BatchFilters(call_type=t), None)
+             for t in ("service", "loans", "ייעוץ פנסיוני", "ביטוח")}
+    assert len(names) == 4                       # unknown Hebrew types never collide
+    assert all(REPORT_FILE_RE.fullmatch(n + ".html") for n in names)
+    assert report_name(BatchFilters(), "executive_q3") == "executive-executive_q3"
+    # a banker id that looks like a national ID stays out of the file name
+    assert RAW_ID not in report_name(BatchFilters(banker_id=RAW_ID), None)
+    # --from D and --to D are different scopes
+    d = date(2026, 7, 1)
+    assert report_name(BatchFilters(date_from=d), None) != report_name(BatchFilters(date_to=d),
+                                                                       None)
+
+
+def test_numbers_round_half_up_everywhere():
+    from callqa.reporting.executive import numfmt
+
+    assert numfmt.fmt(51.25) == "51.3" and numfmt.fmt(-0.04) == "0"
+    assert numfmt.fixed(3.975, 2) == "3.98" and numfmt.fixed(4, 2) == "4.00"
+    assert numfmt.signed(-2.26) == "−2.3" and numfmt.percent(0.1485) == "14.9%"
+
+
+def test_banker_reports_are_linked_when_they_exist(batch_out, rubric, monkeypatch):  # noqa: ANN001
+    """The ownership marker used to sit past the part of the page that was
+    read, so no banker link ever appeared."""
+    from callqa.cli import main
+
+    monkeypatch.setenv("CALLQA_PATHS__OUTPUT_DIR", str(batch_out))
+    monkeypatch.setenv("CALLQA_PATHS__STATE_DB", str(batch_out.parent / "state.db"))
+    assert main(["report"]) == 0
+    html = (batch_out / "reports" / "executive.html").read_text(encoding="utf-8")
+    assert 'href="bankers/B001.html"' in html
+
+
+def test_a_locked_csv_costs_the_csv_not_the_report(batch_out, rubric, monkeypatch):  # noqa: ANN001
+    """On Windows, Excel locks an open CSV; the nightly report must still
+    write the page and finish."""
+    from callqa.reporting.executive import render
+
+    real = render.atomic_write_text
+
+    def locked(path, text):  # noqa: ANN001, ANN202
+        if path.suffix == ".csv":
+            raise PermissionError(13, "in use", str(path))
+        return real(path, text)
+
+    monkeypatch.setattr(render, "atomic_write_text", locked)
+    report = build_executive_report(batch_out, rubric)
+    assert report.html.is_file() and report.json.is_file()
+
+
+def test_command_line_dates_must_be_whole_dates(batch_out, monkeypatch):  # noqa: ANN001
+    from callqa.cli import main
+
+    monkeypatch.setenv("CALLQA_PATHS__OUTPUT_DIR", str(batch_out))
+    monkeypatch.setenv("CALLQA_PATHS__STATE_DB", str(batch_out.parent / "state.db"))
+    assert main(["executive-report", "--from", "2026-08-311"]) == 2
+    assert main(["executive-report", "--run", "CON"]) == 2
+
+
+def test_csv_keeps_leading_zeros_of_ids(tmp_path, rubric):  # noqa: ANN001
+    out = tmp_path / "output"
+    write_call(out, rubric, "000123", banker="04512")
+    content = build_executive_report(out, rubric).csv.read_text(encoding="utf-8")
+    assert "\"=\"\"000123\"\"\"" in content and "\"=\"\"04512\"\"\"" in content

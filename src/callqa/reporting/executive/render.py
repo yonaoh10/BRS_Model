@@ -24,7 +24,7 @@ from markupsafe import Markup, escape
 
 from callqa import __version__
 from callqa.reporting.common import SPEAKER_HE, jinja_env, load_recommendations, safe_filename
-from callqa.reporting.executive import charts
+from callqa.reporting.executive import charts, numfmt
 from callqa.reporting.executive.analysis import (
     BAND_LABEL,
     DRIVERS,
@@ -35,7 +35,13 @@ from callqa.reporting.executive.analysis import (
     duration_bucket,
     type_bucket,
 )
-from callqa.reporting.executive.dataset import BatchFilters, CallRecord, load_batch
+from callqa.reporting.executive.dataset import (
+    BatchFilters,
+    CallRecord,
+    call_type_label,
+    load_batch,
+    shown_banker,
+)
 from callqa.reporting.executive.findings import SEVERITY_HE, Opinion, build_opinion
 from callqa.rubric import Rubric
 from callqa.state import atomic_write_text
@@ -44,8 +50,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_NAME = "executive"
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}$")
+# The one shape of a management report's file name. The dashboard serves,
+# and the index lists, exactly the files that match it.
+REPORT_FILE_RE = re.compile(r"executive(?:-[A-Za-z0-9][A-Za-z0-9._-]{0,60})?\.html")
 MAX_PROSE = 600      # characters of one reasoning / summary line
 MAX_QUOTE = 320
+# Reasoning and quotes are ~3.5 KB a call. Beyond this many calls the page
+# would pass 7 MB and a VDI's Edge starts to feel it, so the text goes to the
+# calls a manager opens first - gate failures, then the lowest scores - and
+# the rest keep their numbers and their link to the full call report.
+MAX_TEXT_CALLS = 2000
 GRANULARITY_HE = {"day": "יום", "week": "שבוע", "month": "חודש"}
 DEMO_TEXT = {
     "mock": ("דוח הדגמה — שיפוט מדומה",
@@ -81,11 +95,16 @@ def _prose(text: str | None, limit: int = MAX_PROSE) -> str:
         return ""
     from callqa.redaction import _MASK_TOKEN_RE, redact_text
 
-    redacted = redact_text(text)[0]
-    redacted = _MASK_TOKEN_RE.sub(lambda m: "[" + m.group(0)[1:-1] + "]", redacted)
-    redacted = _TAG_RE.sub("", redacted)
-    redacted = re.sub(r"\s+", " ", redacted).strip()
-    return redacted[:limit] + ("…" if len(redacted) > limit else "")
+    def plain(value: str) -> str:
+        # Mask tokens kept visibly as [label:████]; any other tag becomes a
+        # SPACE, never nothing, so it cannot glue two digit groups together.
+        value = _MASK_TOKEN_RE.sub(lambda m: "[" + m.group(0)[1:-1] + "]", value)
+        return re.sub(r"\s+", " ", _TAG_RE.sub(" ", value)).strip()
+
+    # Normalised BEFORE detection, then cleaned again after it: stripping tags
+    # only afterwards reassembled "12345<b>6782</b>" into the ID it hid.
+    cleaned = plain(redact_text(plain(text))[0])
+    return cleaned[:limit] + ("…" if len(cleaned) > limit else "")
 
 
 def script_json(data: object) -> str:
@@ -103,38 +122,40 @@ def script_json(data: object) -> str:
 # -- template helpers ----------------------------------------------------------
 
 def _fmt(value: float | None, digits: int = 1) -> str:
-    """At most `digits` decimals; a true minus sign; never '-0'."""
-    if value is None:
-        return "—"
-    r = round(value, digits)
-    if r == 0:
-        r = 0.0
-    body = str(int(abs(r))) if digits <= 1 and r == int(r) else f"{abs(r):.{digits}f}"
-    return ("−" if r < 0 else "") + body
+    return numfmt.fmt(value, digits)
 
 
-def _fixed1(value: float | None) -> str:
-    return "—" if value is None else f"{value:.1f}"
+def _fixed(value: float | None, places: int = 2) -> str:
+    return numfmt.fixed(value, places)
 
 
 def _pct0(p: float | None) -> str:
-    return "—" if p is None else f"{round(p * 100)}%"
+    return numfmt.percent(p, 0)
 
 
 def _pct1(p: float | None) -> str:
-    return "—" if p is None else f"{_fmt(p * 100)}%"
+    return numfmt.percent(p, 1)
 
 
 def _plus(x: float | None) -> str:
-    if x is None:
-        return "—"
-    return f"+{_fmt(x)}" if x > 0.05 else "0"
+    return numfmt.signed(x)
 
 
-def _ci(stat, digits: int = 1) -> str:  # noqa: ANN001 - MeanCI
+def _ci(stat, digits: int = 1, lo: float | None = None,  # noqa: ANN001 - MeanCI
+        hi: float | None = None) -> str:
+    """A confidence interval, clamped to its scale (1-5, 0-100): with two or
+    three calls a t interval runs past both ends of it."""
     if stat.low is None or stat.high is None:
         return "—"
-    return f"{_fmt(stat.low, digits)}–{_fmt(stat.high, digits)}"
+    low = stat.low if lo is None else max(lo, stat.low)
+    high = stat.high if hi is None else min(hi, stat.high)
+    if digits == 2:
+        return f"{numfmt.fixed(low, 2)}–{numfmt.fixed(high, 2)}"
+    return f"{_fmt(low, digits)}–{_fmt(high, digits)}"
+
+
+def _calls(n: int) -> str:
+    return "שיחה אחת" if n == 1 else f"⟦{n:,}⟧ שיחות"
 
 
 def _date_he(d: date | None) -> str:
@@ -170,7 +191,7 @@ def _charts(a: Analysis) -> dict[str, Markup | None]:
         return out
     out["stacked"] = charts.stacked_levels(
         [{"label": d.name + (" (שער)" if d.gate else ""), "counts": d.counts,
-          "note": f"ממוצע {_fmt(d.mean.mean, 2)}", "filter": {"dim": d.id, "max": 2}}
+          "note": f"ממוצע {_fixed(d.mean.mean, 2)}", "filter": {"dim": d.id, "max": 2}}
          for d in a.dims],
         label="התפלגות הציונים 1–5 בכל ממד", level_labels=["1", "2", "3", "4", "5"],
         width=W_FULL)
@@ -185,7 +206,7 @@ def _charts(a: Analysis) -> dict[str, Markup | None]:
         unit="נק'", total_label="סה״כ מתחת ל־100",
         filters=[filters[i] for i in order], width=W_FULL)
     bands = [(0.0, 40.0, 1), (40.0, 60.0, 2), (60.0, 80.0, 3), (80.0, 100.0, 4)]
-    markers = [(a.median, f"חציון {_fmt(a.median)}")] if a.median is not None else []
+    markers = [(a.median, "חציון")] if a.median is not None else []
     out["histogram"] = charts.histogram_chart(
         a.histogram, label="התפלגות מדד האיכות בשיחות", x_title="מדד (0–100)",
         y_title="שיחות", bands=bands, markers=markers, width=W_WIDE)
@@ -195,16 +216,22 @@ def _charts(a: Analysis) -> dict[str, Markup | None]:
               "n": p.n, "rate": p.gate_rate} for p in a.periods],
             label="מדד האיכות לאורך זמן", y_title="מדד",
             y_range=_trend_range(a), rate_title="כשל שער", width=W_FULL)
-    out["seg_type"] = _dot(a.segments.get("call_type", []), a, "המדד לפי סוג שיחה", W_HALF)
-    out["seg_duration"] = _dot(a.segments.get("duration", []), a, "המדד לפי משך השיחה", W_HALF)
-    out["seg_layout"] = _dot(a.segments.get("layout", []), a, "המדד לפי אופן ההקלטה", W_FULL)
+    overall = (a.total.mean, "ממוצע כללי")
+    out["seg_type"] = _dot(a.segments.get("call_type", []), "המדד לפי סוג שיחה", W_HALF,
+                           overall)
+    out["seg_duration"] = _dot(a.segments.get("duration", []), "המדד לפי משך השיחה", W_HALF,
+                               overall)
+    out["seg_layout"] = _dot(a.segments.get("layout", []), "המדד לפי אופן ההקלטה", W_FULL,
+                             overall)
     if a.bankers:
-        out["bankers"] = _dot(a.bankers, a, "המדד הממוצע של כל בנקאי", W_FULL)
+        out["bankers"] = _dot(a.bankers, "המדד הממוצע של כל בנקאי", W_FULL,
+                              (a.banker_reference, "חציון הבנקאים"))
     # Only relationships that passed every bar: a red or green bar reads as a
     # finding, and chance-level differences do not get to look like one. The
     # table below the chart lists every behaviour, significant or not.
     rows = [{"label": d.label, "value": round(d.contrast.diff, 1),
-             "detail": f"ρ={_fmt(d.corr.rho, 2)} · {d.n} שיחות",
+             "detail": f"מתאם {_fmt(d.corr.rho, 2)} · "
+                       + ("שיחה אחת" if d.n == 1 else f"{d.n:,} שיחות"),
              "filter": d.filter_high or None}
             for d in a.drivers if d.reportable]
     out["drivers"] = charts.diverging_bars(
@@ -225,20 +252,28 @@ def _trend_range(a: Analysis) -> tuple[float, float]:
     return (lo, hi)
 
 
-def _dot(groups, a: Analysis, label: str, width: int):  # noqa: ANN001, ANN202
-    if not groups:
-        return None
+def _dot(groups, label: str, width: int,  # noqa: ANN001, ANN202
+         reference: tuple[float | None, str]):
+    """A dot plot of groups against the SAME reference their flags were tested
+    against: bankers against the median banker, segments against the overall
+    mean. A group with no mean is left out rather than drawn at zero."""
     rows = []
     for g in groups:
+        if g.mean.mean is None:
+            continue
         flag = {"bad": "bad", "ok": "ok", "few": "muted"}.get(g.flag)
-        sub = f"{g.n} שיחות" + (" · מעט שיחות" if g.flag == "few" else "")
-        rows.append({"label": g.label, "mean": g.mean.mean if g.mean.mean is not None else 0.0,
-                     "low": g.mean.low, "high": g.mean.high, "n": g.n, "flag": flag,
-                     "filter": g.filter, "sub": sub})
+        sub = ("שיחה אחת" if g.n == 1 else f"{g.n:,} שיחות") + (
+            " · מעט שיחות" if g.flag == "few" else "")
+        rows.append({"label": g.label, "mean": g.mean.mean, "low": g.mean.low,
+                     "high": g.mean.high, "n": g.n, "flag": flag, "filter": g.filter,
+                     "sub": sub})
+    if not rows:
+        return None
     values = [x for g in groups for x in (g.mean.low, g.mean.high, g.mean.mean) if x is not None]
     lo = max(0.0, (min(values) // 10) * 10 - 10) if values else 0.0
     hi = min(100.0, (max(values) // 10 + 1) * 10 + 5) if values else 100.0
-    return charts.dot_plot(rows, label=label, reference=a.median, reference_label="חציון",
+    ref, ref_label = reference
+    return charts.dot_plot(rows, label=label, reference=ref, reference_label=ref_label,
                            x_range=(lo, hi), width=width)
 
 
@@ -254,39 +289,49 @@ def _kpis(a: Analysis) -> list[dict]:
         return charts.sparkline(values, label=label, y_range=rng) if has_spark else None
 
     gate_p = a.gate_rate.p or 0.0
+    gate_low = a.gate_rate.low or 0.0
+    fails = round(gate_p * a.n_scored)
     weakest = min((d for d in a.dims if d.mean.mean is not None), key=lambda d: d.mean.mean,
                   default=None)
     n_bankers = len(a.bankers)
     ranked = [b for b in a.bankers if b.flag != "few"]
+    gate_names = " או ".join(f"„{d.name}”" for d in a.dims if d.gate)
+    material = gate_low >= 0.05
+    watch = not material and (gate_low >= 0.02 or gate_p >= 0.05)
+    ci = _ci(a.total, 1, 0, 100)
     kpis = [
         {"label": "מדד איכות ממוצע", "value": _fmt(a.total.mean), "unit": "/ 100",
-         "sub": f"רווח סמך 95%: ⟦{_ci(a.total)}⟧ · חציון ⟦{_fmt(a.median)}⟧",
+         "sub": (f"רווח סמך 95%: ⟦{ci}⟧ · " if ci != "—" else "") + f"חציון ⟦{_fmt(a.median)}⟧",
          "spark": spark(spark_mean, "מדד ממוצע לאורך זמן"), "href": "#sec-dist",
          "badge": BAND_LABEL[band_of(a.total.mean)] if a.total.mean is not None else None,
          "badge_cls": "muted", "cls": ""},
-        {"label": "שיחות ברמה גבוהה (80+)", "value": _pct1(a.high_rate.p), "unit": "",
-         "sub": f"⟦{a.band_counts.get(4, 0):,}⟧ שיחות · מתחת ל־60: ⟦{_pct1(a.low_rate.p)}⟧",
+        {"label": "שיחות ברמה גבוהה (80 ומעלה)", "value": _pct1(a.high_rate.p), "unit": "",
+         "sub": _calls(a.band_counts.get(4, 0)) + f" · מתחת ל־60: ⟦{_pct1(a.low_rate.p)}⟧",
          "spark": spark(spark_high, "שיעור השיחות ברמה גבוהה לאורך זמן", (0, 100)),
          "href": "#sec-dist", "cls": ""},
         {"label": "כשל בשער חובה", "value": _pct1(a.gate_rate.p), "unit": "",
-         "sub": f"⟦{round(gate_p * a.n_scored):,}⟧ שיחות · זיהוי לקוח או גילוי נאות",
+         "sub": _calls(fails) + f" · {gate_names}",
          "spark": spark(spark_gate, "שיעור כשלי השער לאורך זמן",
-                        (0, max([10.0] + [v for v in spark_gate if v is not None]))),
-         "href": "#sec-risk", "badge": "סיכון מהותי" if gate_p >= 0.05 else
-         ("דורש מעקב" if gate_p >= 0.02 else None),
-         "badge_cls": "bad" if gate_p >= 0.05 else "warn",
-         "cls": "risk" if gate_p >= 0.05 else ("warnk" if gate_p >= 0.02 else "")},
-        {"label": "השיחות בדוח", "value": f"{a.n_scored:,}", "unit": f"מתוך {a.n_scope:,}",
-         "sub": f"⟦{n_bankers}⟧ בנקאים · ⟦{len(ranked)}⟧ עם ⟦8⟧ שיחות ומעלה",
+                        (0, min(100.0, max([10.0] + [v for v in spark_gate if v is not None])))),
+         "href": "#sec-risk",
+         "badge": "סיכון מהותי" if material else ("דורש מעקב" if watch else None),
+         "badge_cls": "bad" if material else "warn",
+         "cls": "risk" if material else ("warnk" if watch else "")},
+        {"label": "שיחות שנכללו במדד", "value": f"{a.n_scored:,}",
+         "unit": f"מתוך {a.n_scope:,} בתקופה",
+         "sub": ("בנקאי אחד" if n_bankers == 1 else f"⟦{n_bankers}⟧ בנקאים")
+         + f" · ⟦{len(ranked)}⟧ עם ⟦8⟧ שיחות ומעלה",
          "spark": None, "href": "#sec-coverage", "cls": ""},
         {"label": "ממתינות לבדיקה אנושית", "value": _pct1(a.review_rate.p), "unit": "",
-         "sub": f"⟦{a.n_held:,}⟧ שיחות · ⟦{a.n_failed:,}⟧ לא עובדו",
+         "sub": _calls(a.n_held) + " · "
+         + ("שיחה אחת לא עובדה" if a.n_failed == 1 else f"⟦{a.n_failed:,}⟧ לא עובדו"),
          "spark": None, "href": "#sec-coverage",
          "badge": "גבוה" if (a.review_rate.p or 0) >= 0.1 else None, "badge_cls": "warn",
          "cls": "warnk" if (a.review_rate.p or 0) >= 0.1 else ""},
-        {"label": "הממד החלש ביותר", "value": _fmt(weakest.mean.mean, 2) if weakest else "—",
-         "unit": "/ 5", "sub": (f"„{weakest.name}” · ⟦{_pct0(weakest.low_rate)}⟧ מהשיחות בציון ⟦1–2⟧"
-                                if weakest else ""),
+        {"label": "הממד החלש ביותר", "value": _fixed(weakest.mean.mean, 2) if weakest else "—",
+         "unit": "/ 5",
+         "sub": (f"„{weakest.name}” · ⟦{_pct0(weakest.low_rate)}⟧ מהשיחות קיבלו בו ⟦1–2⟧"
+                 if weakest else ""),
          "spark": None, "href": "#sec-dims", "cls": ""},
     ]
     return kpis
@@ -295,14 +340,19 @@ def _kpis(a: Analysis) -> list[dict]:
 def _heat(a: Analysis) -> list[dict]:
     rows = []
     flag_text = {"bad": ("נמוך מובהק", "bad"), "ok": ("גבוה מובהק", "ok"),
-                 "none": ("בטווח", "muted"), "few": ("מעט שיחות", "muted")}
+                 "none": ("ללא הבדל מובהק", "muted"), "few": ("מעט שיחות", "muted")}
     for b in a.bankers:
         cells = []
         for d in a.dims:
             v = b.dim_means.get(d.id)
-            cells.append({"v": v, "text": _fixed1(v), "name": d.name,
+            low = b.dim_low.get(d.id, 0)
+            # A cell opens the banker's low-scored calls on that dimension -
+            # or, when there are none, all the banker's calls, never an
+            # empty list under a caption promising calls.
+            cells.append({"v": v, "text": _fixed(v, 1), "name": d.name, "low": low,
                           "cls": charts.level_class(v) if v is not None else "",
-                          "filter": {"banker": b.key, "dim": d.id, "max": 2}})
+                          "filter": ({"banker": b.key, "dim": d.id, "max": 2} if low
+                                     else {"banker": b.key})})
         text, cls = flag_text[b.flag]
         rows.append({"banker": b.key, "n": b.n, "mean": b.mean.mean, "cells": cells,
                      "flag_text": text, "flag_cls": cls, "link": b.link})
@@ -319,7 +369,9 @@ def _feature_values(record: CallRecord) -> dict[str, float]:
         except (TypeError, ZeroDivisionError):
             value = None
         if value is not None:
-            out[key] = round(float(value), 2)
+            # Full precision: the filter compares with the unrounded quartile,
+            # and rounding here let calls just below it into the list.
+            out[key] = round(float(value), 6)
     return out
 
 
@@ -329,6 +381,16 @@ def _explorer_data(a: Analysis, with_text: bool, recs: dict[str, list[str]]) -> 
     bucket = type_bucket(a.batch.scored)
     calls = []
     text: dict[str, dict] = {}
+    allowed = [r for r in a.batch.records if r.card is not None and r.text_allowed]
+    allowed.sort(key=lambda r: (not r.card.gate_failed, r.card.weighted_total, r.call_id))
+    with_text_ids = {r.call_id for r in allowed[:MAX_TEXT_CALLS]} if with_text else set()
+    if with_text:
+        # The case library's calls always keep their text: its "בסייר" links
+        # open them in the explorer.
+        allowed_ids = {r.call_id for r in allowed}
+        with_text_ids |= {e.call_id for group in (a.best_examples, a.worst_examples)
+                          for items in group.values() for e in items
+                          if e.call_id in allowed_ids}
     for r in a.batch.records:
         card = r.card
         entry = {
@@ -344,11 +406,12 @@ def _explorer_data(a: Analysis, with_text: bool, recs: dict[str, list[str]]) -> 
             "sc": [card.scores[d.id].score if d.id in card.scores else None for d in dims]
             if card else None,
             "rep": r.call_report,
+            "x": 1 if r.text_allowed else 0,
             "r": (", ".join(r.held_reasons) if r.held_reasons else (r.failed_reason or "")),
             "f": _feature_values(r) if card else {},
         }
         calls.append(entry)
-        if card is not None and with_text and r.text_allowed:
+        if card is not None and r.call_id in with_text_ids:
             text[r.call_id] = {
                 "sum": _prose(card.summary_he),
                 "dev": _prose(card.development_area_he),
@@ -366,6 +429,7 @@ def _explorer_data(a: Analysis, with_text: bool, recs: dict[str, list[str]]) -> 
         "dims": [{"id": d.id, "name": d.name, "short": short[d.id], "gate": d.gate} for d in dims],
         "gd": [d.mean.mean for d in dims], "gm": a.total.mean,
         "calls": calls, "text": text, "bankers": bankers, "withText": with_text,
+        "textCapped": with_text and len(allowed) > MAX_TEXT_CALLS,
         "features": [{"key": k, "label": label, "unit": unit} for k, label, unit, _ in DRIVERS],
         "durations": {k: label for k, label, _, _ in DURATION_BUCKETS},
     }
@@ -409,9 +473,9 @@ def _scope_chips(filters: BatchFilters) -> list[str]:
     if filters.date_to:
         chips.append(f"עד תאריך {_date_he(filters.date_to)}")
     if filters.call_type:
-        chips.append(f"סוג שיחה: {filters.call_type[:40]}")
+        chips.append(f"סוג שיחה: {call_type_label(filters.call_type)}")
     if filters.banker_id:
-        chips.append(f"בנקאי: {filters.banker_id[:40]}")
+        chips.append(f"בנקאי: {shown_banker(filters.banker_id)}")
     if filters.run_id:
         chips.append(f"הרצה: {filters.run_id}")
     return chips
@@ -421,15 +485,19 @@ def _trend_text(a: Analysis) -> str | None:
     t = a.trend
     if t is None or t.slope_per_30d is None:
         return None
-    def signed1(x: float) -> str:
-        r = round(x, 1)
-        return ("+" if r > 0 else "−" if r < 0 else "") + f"{abs(r):.1f}"
-
-    ci = (f" (רווח סמך 95%: ⟦{signed1(t.low)}⟧ עד ⟦{signed1(t.high)}⟧)"
+    ci = (f" (רווח סמך 95%: ⟦{numfmt.signed(t.low)}⟧ עד ⟦{numfmt.signed(t.high)}⟧)"
           if t.low is not None and t.high is not None else "")
     word = "מובהק" if t.significant else "לא מובהק"
+    change = t.slope_per_30d * t.span_days / 30.0
+    note = ""
+    if a.date_basis == "processed":
+        note = " הציר מבוסס על תאריך העיבוד, כי תאריכי השיחות חסרים."
+    elif a.undated:
+        note = (" שיחה אחת ללא תאריך שיחה לא נכללה במגמה." if a.undated == 1 else
+                f" ⟦{a.undated:,}⟧ שיחות ללא תאריך שיחה לא נכללו במגמה.")
     return (f"קו מגמה על פני ⟦{t.n:,}⟧ שיחות ו־⟦{round(t.span_days)}⟧ ימים: "
-            f"⟦{signed1(t.slope_per_30d)}⟧ נקודות בחודש{ci} — {word}.")
+            f"⟦{numfmt.signed(t.slope_per_30d)}⟧ נקודות בחודש{ci} — {word}; "
+            f"כ־⟦{numfmt.signed(change)}⟧ נקודות על פני התקופה.{note}")
 
 
 def _weakest_of(record: CallRecord) -> str:
@@ -454,7 +522,10 @@ def render_html(a: Analysis, opinion: Opinion, *, with_text: bool = True,
              for b in (4, 3, 2, 1)]
     from callqa.redaction import ENTITY_LABELS_HE
 
-    entities = [(ENTITY_LABELS_HE.get(k, k), n) for k, n in a.coverage["entities"]]
+    # Only known entity types: a key on disk is free text and was once seen
+    # carrying a phone number as its "type".
+    entities = [(ENTITY_LABELS_HE[k], n) for k, n in a.coverage["entities"]
+                if k in ENTITY_LABELS_HE]
     gate_names = [d.name for d in a.dims if d.gate]
     sev = opinion.top_findings[0].severity if opinion.top_findings else "info"
     context = {
@@ -490,13 +561,15 @@ def render_html(a: Analysis, opinion: Opinion, *, with_text: bool = True,
         "cases_any": with_text and any(a.best_examples.get(d.id) or a.worst_examples.get(d.id)
                                        for d in a.dims),
         "weights_text": " · ".join(f"{d.name} {round(d.weight * 100)}%" for d in a.dims),
-        "gates_text": " ו".join(f"„{n}”" for n in gate_names) or "—",
+        "gates_text": " ו־".join(f"„{n}”" for n in gate_names) or "—",
+        "gates_or": " או ".join(f"„{n}”" for n in gate_names) or "—",
         "speaker_he": SPEAKER_HE,
         "footer": _footer(a, generated),
         "data_json": Markup(script_json(_explorer_data(a, with_text, recs))),
         "fmt": _fmt, "pct0": _pct0, "pct1": _pct1, "plus": _plus, "ci": _ci,
         "date_he": _date_he, "pct_width": _pct_width, "weakest_of": _weakest_of,
-        "rho": lambda v: _fmt(v, 2),
+        "rho": lambda v: _fmt(v, 2), "fixed": _fixed, "calls_he": _calls,
+        "banker_ref": a.banker_reference,
     }
     return env.get_template("executive_report.html.j2").render(**context)
 
@@ -513,23 +586,29 @@ def _index_delta(a: Analysis) -> dict | None:
     d = a.last_vs_prev
     if d is None or d.diff is None or len(a.periods) < 2:
         return None
-    if round(abs(d.diff), 1) == 0:
-        return {"cls": "flat", "text": "ללא שינוי מול התקופה הקודמת"}
-    cls = "flat"
-    if d.significant and abs(d.diff) >= 1:
-        cls = "up" if d.diff > 0 else "down"
-    sign = "+" if d.diff > 0 else "−"
-    return {"cls": cls, "text": f"⟦{sign}{_fmt(abs(d.diff))}⟧ מול התקופה הקודמת"
-                                + ("" if d.significant else " (לא מובהק)")}
+    # The headline number is the whole period's mean; the delta compares the
+    # last sub-period with the one before, so both are named and the last
+    # period's own mean is shown - never a bare "+14" beside the headline.
+    last = a.periods[-1]
+    unit = {"day": "יום", "week": "שבוע", "month": "חודש"}.get(a.granularity or "", "תקופה")
+    if numfmt.fmt(d.diff) == "0":
+        change = "ללא שינוי"
+        cls = "flat"
+    else:
+        change = f"⟦{numfmt.signed(d.diff)}⟧"
+        cls = ("up" if d.diff > 0 else "down") if d.significant and abs(d.diff) >= 1 else "flat"
+    return {"cls": cls,
+            "text": f"{unit} אחרון (⟦{last.label}⟧): ⟦{_fmt(last.mean.mean)}⟧, {change} "
+                    f"מול ה{unit} שקדם לו" + ("" if d.significant else " (לא מובהק)")}
 
 
 def _footer(a: Analysis, generated: datetime) -> str:
     b = a.batch
     parts = [f"callqa {__version__}", f"הופק {generated.strftime('%d.%m.%Y %H:%M')}",
-             f"{a.n_scope:,} שיחות בהיקף, {a.n_scored:,} מנוקדות"]
+             f"{a.n_scope:,} שיחות בתקופה, {a.n_scored:,} קיבלו ציון"]
     if b.scored_at:
-        parts.append(f"ניקוד: {b.scored_at[0][:10]} עד {b.scored_at[1][:10]}")
-    parts.append(f"מנוע שיפוט: {', '.join(b.judge_engines) or '—'}")
+        parts.append(f"מועד ההערכה: {b.scored_at[0][:10]} עד {b.scored_at[1][:10]}")
+    parts.append(f"מנוע שיפוט: {', '.join(b.engines_shown) or '—'}")
     return " · ".join(parts)
 
 
@@ -543,6 +622,14 @@ def _csv_cell(value: object) -> str:
     return text
 
 
+def _csv_id(value: str) -> str:
+    """An id column: '004512' would open in Excel as 4512 and no longer match
+    the report. Digits only, so the formula form cannot carry anything else."""
+    if value.isdigit() and value.startswith("0"):
+        return f'="{value}"'
+    return _csv_cell(value)
+
+
 def render_csv(a: Analysis) -> str:
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\r\n")
@@ -552,15 +639,17 @@ def render_csv(a: Analysis) -> str:
     bucket = type_bucket(a.batch.scored)
     for r in a.batch.records:
         card = r.card
-        writer.writerow([_csv_cell(v) for v in (
-            r.call_id, r.call_date.isoformat() if r.call_date else "", r.banker_id,
+        rest = (
             bucket.get(r.call_id, r.call_type),
             round(r.duration_sec) if r.duration_sec is not None else "", r.status,
             card.weighted_total if card else "",
             BAND_LABEL[band_of(card.weighted_total)] if card else "",
             ("yes" if card.gate_failed else "no") if card else "",
             "|".join(card.failed_gates) if card else "",
-            *[(card.scores[d].score if card and d in card.scores else "") for d in dims])])
+            *[(card.scores[d].score if card and d in card.scores else "") for d in dims])
+        writer.writerow([_csv_id(r.call_id),
+                         _csv_cell(r.call_date.isoformat() if r.call_date else ""),
+                         _csv_id(r.banker_id), *(_csv_cell(v) for v in rest)])
     return "\ufeff" + out.getvalue()
 
 
@@ -600,20 +689,52 @@ def render_json(a: Analysis, opinion: Opinion) -> str:
 # -- entry point ----------------------------------------------------------------
 
 def report_name(filters: BatchFilters, name: str | None) -> str:
-    """The output file stem: executive, or executive-<scope> for a scoped report."""
+    """The output file stem: executive, or executive-<scope> for a scoped report.
+
+    Always 'executive' or 'executive-...' (the shape the dashboard serves and
+    the index lists), always a valid file name on Windows, and one scope per
+    name: a value that is not plain ASCII ('שירות', a banker's name) gets a
+    keyed digest instead of collapsing into a name another scope shares.
+    """
     if name:
         if not _NAME_RE.match(name):
             raise ValueError("report name: letters, digits, dot, underscore, hyphen only")
-        return name if name.startswith(DEFAULT_NAME) else f"{DEFAULT_NAME}-{name}"
+        stem = name if name == DEFAULT_NAME or name.startswith(DEFAULT_NAME + "-") \
+            else f"{DEFAULT_NAME}-{name}"
+        if not REPORT_FILE_RE.fullmatch(stem + ".html"):
+            raise ValueError("report name is too long")
+        return stem
     if not filters.active:
         return DEFAULT_NAME
+    from callqa.ingestion import _digest, _looks_like_an_identifier
+    from callqa.reporting.executive.dataset import CALL_TYPE_HE
+
     parts = []
-    if filters.date_from or filters.date_to:
-        parts.append(f"{filters.date_from or ''}_{filters.date_to or ''}".strip("_"))
-    for value in (filters.call_type, filters.banker_id, filters.run_id):
+    if filters.date_from and filters.date_to:
+        parts.append(f"{filters.date_from}_{filters.date_to}")
+    elif filters.date_from:
+        parts.append(f"from-{filters.date_from}")
+    elif filters.date_to:
+        parts.append(f"to-{filters.date_to}")
+    call_type = filters.call_type
+    if call_type:
+        # The Hebrew label and the metadata key select the same calls, so
+        # they name the same file.
+        by_label = {he: key for key, he in CALL_TYPE_HE.items()}
+        call_type = by_label.get(call_type.strip(), call_type.strip())
+    for value in (call_type, filters.banker_id, filters.run_id):
         if value:
-            parts.append(safe_filename(value))
-    return f"{DEFAULT_NAME}-" + safe_filename("-".join(p for p in parts if p))[:60]
+            part = safe_filename(value, fallback="")
+            if value is filters.banker_id and shown_banker(value) != value:
+                # A banker id that looks like a national ID stays out of the
+                # file name, which is what gets e-mailed.
+                part = "b-" + _digest(value)[:8]
+            elif part != value or _looks_like_an_identifier(value):
+                part = f"{part[:30]}-{_digest(value)[:8]}".strip("-") \
+                    if not _looks_like_an_identifier(value) else _digest(value)[:8]
+            parts.append(part)
+    tail = "-".join(p for p in parts if p)[:60].strip("._-")
+    return f"{DEFAULT_NAME}-{tail}" if tail else DEFAULT_NAME
 
 
 def build_executive_report(output_dir: Path, rubric: Rubric, filters: BatchFilters | None = None,
@@ -630,8 +751,15 @@ def build_executive_report(output_dir: Path, rubric: Rubric, filters: BatchFilte
     csv_path = reports / f"{stem}_calls.csv"
     json_path = reports / f"{stem}.json"
     atomic_write_text(html_path, html)
-    atomic_write_text(csv_path, render_csv(analysis))
-    atomic_write_text(json_path, render_json(analysis, opinion))
+    # The exports are written one by one after the page: on Windows a CSV a
+    # manager has open in Excel is locked, and that must cost the CSV, not
+    # the report (nor end the nightly run with a traceback).
+    for path, text in ((csv_path, render_csv(analysis)), (json_path, render_json(analysis, opinion))):
+        try:
+            atomic_write_text(path, text)
+        except PermissionError:
+            logger.warning("could not update %s: it is open in another program (Excel?) - "
+                           "close it and run the report again", path.name)
     logger.info("executive report: %d call(s), %d scored -> %s", analysis.n_scope,
                 analysis.n_scored, html_path.name)
     return ExecutiveReport(html=html_path, csv=csv_path, json=json_path, analysis=analysis,

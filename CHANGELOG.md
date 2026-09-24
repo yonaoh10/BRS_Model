@@ -68,6 +68,14 @@ three depths, with every figure traceable to the calls behind it.
   index; `first_run.py` and `make mock-e2e` run `calibrate` before `report`,
   so the report shows the calibration status.
 
+### Fixed
+- Redaction treats unusual spaces (thin, no-break, line separator, vertical
+  tab...) as separators: "123 456 782" written with thin spaces was invisible
+  to every identifier pattern.
+- A scorecard is counted only as the call whose file it is: a copied or
+  renamed card no longer reports under, and borrows the redaction clearance
+  of, another call.
+
 ## [1.2.0] — 2026-09-24
 
 Windows. The bank's desktops are Microsoft VDI - Windows, no administrator

@@ -74,10 +74,13 @@ def test_exact_solver_reproduces_the_table() -> None:
 
 def test_t_crit_closed_forms_for_df_1_and_2() -> None:
     # df=1 is Cauchy: t = tan(pi*level/2); df=2: t = level*sqrt(2/(1-level^2)).
-    for level in (0.8, 0.9, 0.975, 0.999):
-        assert t_crit(1, level) == pytest.approx(math.tan(math.pi * level / 2), rel=1e-9)
+    # The small levels are a regression: 1 - P(|T| > t) cancelled, so at df=1
+    # a 1e-12 level came out as 1.05e-8 instead of 1.57e-12.
+    for level in (1e-12, 1e-6, 0.01, 0.3, 0.5, 0.8, 0.9, 0.975, 0.999):
+        cauchy = math.tan(math.pi * level / 2)
+        assert t_crit(1, level) == pytest.approx(cauchy, rel=1e-9, abs=0)
         assert t_crit(2, level) == pytest.approx(level * math.sqrt(2 / (1 - level**2)),
-                                                 rel=1e-9)
+                                                 rel=1e-9, abs=0)
 
 
 @pytest.mark.parametrize(("df", "level", "expected"), [
@@ -296,12 +299,13 @@ def test_spearman_monotone_is_one() -> None:
 
 
 def test_spearman_ties_use_average_ranks() -> None:
-    # reference: scipy.stats.spearmanr; CI = tanh(atanh(rho) -+ 1.96/sqrt(5))
+    # reference: scipy.stats.spearmanr for rho; CI = tanh(atanh(rho) -+ z*se) with the
+    # Bonett-Wright se = sqrt((1 + rho^2/2) / (n - 3))
     c = spearman([10, 20, 20, 30, 40, 50, 50, 60], [3, 1, 4, 1, 5, 9, 2, 6])
     assert c.n == 8
     assert c.rho == pytest.approx(0.527282411152491, abs=1e-12)
-    assert c.low == pytest.approx(-0.28227194390790217, abs=1e-10)
-    assert c.high == pytest.approx(0.8982136150207498, abs=1e-10)
+    assert c.low == pytest.approx(-0.33556947246642543, abs=1e-10)
+    assert c.high == pytest.approx(0.9090175078079343, abs=1e-10)
     assert not c.significant
     assert spearman([1, 2, 2, 3, 4], [1, 3, 2, 4, 4]).rho == pytest.approx(0.9473684210526317)
 
@@ -313,7 +317,8 @@ def test_spearman_significance_follows_the_interval() -> None:
     c = spearman(x.tolist(), y.tolist())
     assert c.significant and c.low > 0
     z = math.atanh(c.rho)
-    assert c.low == pytest.approx(math.tanh(z - z_crit(0.95) / math.sqrt(297)), abs=1e-12)
+    se = math.sqrt((1 + c.rho ** 2 / 2) / 297)          # Bonett & Wright (2000)
+    assert c.low == pytest.approx(math.tanh(z - z_crit(0.95) * se), abs=1e-12)
     noise = spearman(x.tolist(), rng.normal(size=300).tolist())
     assert noise.significant == (noise.low > 0 or noise.high < 0)
 
@@ -356,6 +361,13 @@ def test_linear_trend_reference_regression() -> None:
     shifted = linear_trend([d + date(2026, 6, 1).toordinal() for d in days], ys)
     assert shifted.slope_per_30d == pytest.approx(tr.slope_per_30d, abs=1e-9)
     assert shifted.low == pytest.approx(tr.low, abs=1e-8)
+
+
+def test_linear_trend_constant_values_is_exactly_flat() -> None:
+    # regression: the mean of 3 x 0.1 is not exactly 0.1, which used to leave
+    # a slope of about -1.4e-31 instead of 0
+    assert linear_trend([0, 0.7, 1.4], [0.1] * 3) == Trend(3, 1.4, 0.0, 0.0, 0.0, False)
+    assert linear_trend([0.0, 1.3, 2.9, 7.0], [1 / 3] * 4).slope_per_30d == 0.0
 
 
 def test_linear_trend_small_and_degenerate() -> None:
@@ -449,6 +461,93 @@ def test_accepts_ints_tuples_and_numpy_scalars() -> None:
     assert mean_ci((1, 2, 3)) == mean_ci([1.0, 2.0, 3.0])
     assert mean_ci([np.int64(1), np.float64(2), 3]) == mean_ci([1, 2, 3])
     assert quantile(np.array([3.0, 1.0, 2.0]), 0.5) == 2.0
+
+
+INF = math.inf
+
+
+def test_infinite_values_count_as_missing() -> None:
+    # regression: inf used to give sd/CI = nan, raise in fsum (inf + -inf),
+    # make quantile return nan, and mark a NaN trend as significant
+    assert mean_ci([1, INF, 2, -INF, 3]) == mean_ci([1, 2, 3])
+    assert mean_ci([INF, -INF]) == MeanCI(0, None, None, None, None)
+    assert welch_diff([1, 2, INF], [5, -INF, 6]) == welch_diff([1, 2], [5, 6])
+    assert quantile([INF, 1, 2], 0.5) == 1.5
+    assert histogram([INF, 1, -INF], [0, 5, INF]) == [1, 0]
+    x, y = [1, 2, 3, 4, 5, INF], [2, 1, 4, 3, 5, 6]
+    assert spearman(x, y) == spearman(x[:5], y[:5])
+    tr = linear_trend([0, 1, 2, INF], [1, 2, 2, 3])
+    assert tr == linear_trend([0, 1, 2], [1, 2, 2])
+    assert tr.n == 3 and math.isfinite(tr.slope_per_30d) and not tr.significant
+
+
+def test_huge_values_scale_instead_of_overflowing() -> None:
+    # regression: (v - mean) ** 2 raised OverflowError from about 1e154 on;
+    # the intervals must simply scale with the data
+    k = 1e200
+    base, big = mean_ci(A1), mean_ci([v * k for v in A1])
+    assert big.mean == pytest.approx(base.mean * k, rel=1e-12)
+    assert big.low == pytest.approx(base.low * k, rel=1e-12)
+    assert big.high == pytest.approx(base.high * k, rel=1e-12)
+    d, dk = welch_diff(A1, A2), welch_diff([v * k for v in A1], [v * k for v in A2])
+    assert dk.low == pytest.approx(d.low * k, rel=1e-12)
+    assert dk.high == pytest.approx(d.high * k, rel=1e-12)
+    assert dk.significant == d.significant
+    days = [0, 7, 14, 21, 28, 35, 42, 49, 56, 63]
+    ys = [60, 62, 61, 65, 64, 66, 70, 69, 71, 73]
+    tr, trk = linear_trend(days, ys), linear_trend(days, [v * k for v in ys])
+    assert trk.slope_per_30d == pytest.approx(tr.slope_per_30d * k, rel=1e-12)
+    assert trk.low == pytest.approx(tr.low * k, rel=1e-12)
+    assert trk.significant
+
+
+def test_tiny_variances_do_not_divide_by_zero() -> None:
+    # regression: se1**2 underflowed to 0 in the Welch df -> ZeroDivisionError.
+    # One constant group: df = n1 - 1 = 1, half = t(1) * sd1 / sqrt(2) = t(1) * 5e-161
+    d = welch_diff([0, 1e-160], [0, 0])
+    # abs=0: approx's default abs=1e-12 would accept anything this small
+    assert d.diff == pytest.approx(5e-161, rel=1e-12, abs=0)
+    assert d.low == pytest.approx(5e-161 - 12.706204736 * 5e-161, rel=1e-9, abs=0)
+    assert d.high == pytest.approx(5e-161 + 12.706204736 * 5e-161, rel=1e-9, abs=0)
+    assert not d.significant
+
+
+def test_values_beyond_float_range_give_none_not_inf_or_nan() -> None:
+    assert quantile([-1e308, 1e308], 0.0) == -1e308           # was nan (inf * 0)
+    assert quantile([-1e308, 1e308], 0.5) == 0.0              # was -inf
+    assert quantile([-1e308, 1e308], 1.0) == 1e308
+    wide = mean_ci([1e308, -1e308, 1e308])                   # sd itself overflows
+    assert wide.n == 3 and wide.mean == pytest.approx(1e308 / 3)
+    assert (wide.sd, wide.low, wide.high) == (None, None, None)
+    assert welch_diff([1e308, 1.7e308], [-1e308, -1.7e308]) == DiffCI(
+        2, 2, None, None, None, False)                          # the diff overflows
+    tr = linear_trend([0, 1, 2, 3], [1e308, -1e308, 1e308, -1e308])
+    assert tr.n == 4 and tr.slope_per_30d is None and not tr.significant
+
+
+@pytest.mark.parametrize("sample", [
+    [1e308, -1e308, 5.0, 1e308],
+    [1.7e308, 1.7e308, -1.7e308, 0.0, 3.0],
+    [1e200, 0.0, 5.0, -3e199],
+    [5e-324, 1e-323, 0.0, 2e-323],
+    [1e-300, -1e-300, 1e300, 7.0],
+])
+def test_extreme_magnitudes_never_raise_or_leak_non_finite_numbers(sample: list[float]) -> None:
+    other = [v / 3 - 1.0 for v in reversed(sample)]
+    days = [float(i * 3) for i in range(len(sample))]
+    results = [
+        mean_ci(sample), mean_ci(sample, 0.99), welch_diff(sample, other),
+        welch_diff(other, sample, 0.99), spearman(sample, other), spearman(days, sample),
+        linear_trend(days, sample), linear_trend(sample, other),
+    ]
+    for res in results:
+        for field in dataclasses.fields(res):
+            value = getattr(res, field.name)
+            if isinstance(value, float) and field.name != "span_days":
+                assert math.isfinite(value), (res, field.name)
+    for q in (0.0, 0.1, 0.5, 0.77, 1.0):
+        assert math.isfinite(quantile(sample, q))
+    assert sum(histogram(sample, [-1e308, 0.0, 1e308])) <= len(sample)
 
 
 def test_invalid_level_raises_even_on_empty_input() -> None:

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import math
+import numbers
 import re
 from collections.abc import Mapping, Sequence
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -58,20 +59,31 @@ _FS_TICK = 10.5          # ch-tick, ch-ref-label
 _FS_TEXT = 11.0          # plain text, ch-lbl (600 weight), ch-title
 _BOLD = 1.1
 
-_LRI, _PDI = "⁦", "⁩"
+_LRI, _PDI = "\u2066", "\u2069"    # LEFT-TO-RIGHT ISOLATE, POP DIRECTIONAL ISOLATE
 _MINUS = "−"
 _ELLIPSIS = "…"
 _BREAKS = re.compile(r"[\t\n\r\f\v]+")
 # Other C0 controls, plus bidi marks/overrides/isolates: a label must not
 # reorder the text around it or break the isolates added here.
-_CONTROLS = re.compile("[\x00-\x1f\x7f‎‏‪-‮⁦-⁩]")
+_CONTROLS = re.compile("[\x00-\x1f\x7f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 # Numeric runs that the bidi algorithm reorders in RTL text: a leading sign
 # or a range dash. "74.3", "62%" and "21.09" display correctly as they are.
 _NUM = r"\d+(?:[.,:/]\d+)*(?:\s?%)?"
 _DASHED = rf"\s?[–\-{_MINUS}]\s?[+\-{_MINUS}]?{_NUM}"
+# A short Latin or Greek symbol set to a number ("ρ=−0.40", "n=34"). The
+# letter is strongly LTR and pulls the numbers after it into its own run, so
+# without the isolate "ρ=0.36 · 960 שיחות" prints "960" at the far end of
+# the line, separated from "שיחות".
+_SYMBOL_EQ = rf"[A-Za-z\u0370-\u03ff]{{1,3}}\s?[=≈<>≤≥]\s?[+\-{_MINUS}]?{_NUM}"
 _BIDI_RISK = re.compile(
-    rf"(?<![\w.])(?:[+\-{_MINUS}]{_NUM}(?:{_DASHED})*|{_NUM}(?:{_DASHED})+)")
-_ZERO_WIDTH = frozenset(f"{_LRI}{_PDI}​")
+    rf"(?<![\w.])(?:{_SYMBOL_EQ}|[+\-{_MINUS}]{_NUM}(?:{_DASHED})*|{_NUM}(?:{_DASHED})+)")
+# A number already written in a caller's label ("חציון 66.2"), and the
+# decimals it was written with.
+_LABEL_NUM = re.compile(rf"[+\-{_MINUS}]?\d+(?:,\d{{3}})*(?:\.(\d+))?")
+# Beyond any score, count or rate this module is given. Keeping chart inputs
+# within it keeps every span and sum finite, so no coordinate is NaN.
+_LIMIT = 1e12
+_ZERO_WIDTH = frozenset(f"{_LRI}{_PDI}\u200b")
 
 
 # -- public helpers ---------------------------------------------------------------
@@ -84,7 +96,7 @@ def fmt(value: float | None, digits: int = 1) -> str:
     rounding), and a report that shows 74.2 next to a table saying 74.25 looks
     wrong. Missing, NaN and infinite values are an em dash.
     """
-    v = _num(value)
+    v = _num(value, bounded=False)
     if v is None:
         return "—"
     places = max(0, int(digits))
@@ -102,7 +114,7 @@ def fmt(value: float | None, digits: int = 1) -> str:
 
 def level_class(score: float | None) -> str:
     """'ch-lvl-1'..'ch-lvl-5' for a 1..5 score or mean (half-up); '' when missing."""
-    v = _num(score)
+    v = _num(score, bounded=False)
     if v is None:
         return ""
     return f"ch-lvl-{min(5, max(1, math.floor(v + 0.5)))}"
@@ -110,7 +122,7 @@ def level_class(score: float | None) -> str:
 
 def band_of(total: float | None) -> int:
     """Score band of a 0-100 total: 4 >= 80, 3 >= 60, 2 >= 40, 1 below; 0 when missing."""
-    v = _num(total)
+    v = _num(total, bounded=False)
     if v is None:
         return 0
     if v >= 80:
@@ -130,7 +142,7 @@ def sparkline(values: Sequence[float | None], *, label: str, width: int = 120,
     figure: the tile's own number is the accessible value, and a data table
     inside a tile would crowd it. None values break the line."""
     name = _plain(label)
-    w, h = max(24, int(width)), max(12, int(height))
+    w, h = _size(width, 120, 24, 1200), _size(height, 32, 12, 400)
     vals = [_num(v) for v in values]
     present = [v for v in vals if v is not None]
     head = (f'<svg class="ch-svg ch-spark" viewBox="0 0 {w} {h}" width="100%" '
@@ -178,7 +190,8 @@ def histogram_chart(bins: Sequence[tuple[float, float, int]], *, label: str, x_t
 
     bands shade the background behind the bars (``ch-band-1..4``) and are
     named along the top. markers are vertical reference lines, labelled
-    "<label> <value>" (the value is appended, so pass "חציון", not "חציון 74").
+    "<label> <value>". The value is appended to a bare label ("חציון"), and a
+    label that already shows it ("חציון 74.3") is used as given.
     Bars carry their counts when every count fits on its bar, and then the
     y axis is dropped as redundant ink. Otherwise the counts go on a right-hand
     axis, which is where a Hebrew reader starts.
@@ -200,7 +213,7 @@ def histogram_chart(bins: Sequence[tuple[float, float, int]], *, label: str, x_t
 
     pad_l = 8.0
     slot_min = min(hi - lo for lo, hi, _ in clean) / (dom_hi - dom_lo) * (W - 60)
-    labelled = len(clean) <= 16 and slot_min - 2 >= _tw(str(top_count), bold=True) + 2
+    labelled = len(clean) <= 16 and slot_min - 2 >= _tw(fmt(top_count, 0), bold=True) + 2
     if labelled:
         y_top, y_ticks = float(top_count), []
     else:
@@ -214,7 +227,7 @@ def histogram_chart(bins: Sequence[tuple[float, float, int]], *, label: str, x_t
     # vertical rhythm: y title, marker labels (up to two staggered rows), plot
     rows_y = [28.0, 44.0]
     placed = _place_labels(
-        [(x(v), f"{_plain(t)} {fmt(v)}", v) for v, t in _clean_markers(markers, dom_lo, dom_hi)],
+        [(x(v), _marker_text(t, v), v) for v, t in _clean_markers(markers, dom_lo, dom_hi)],
         pad_l, plot_r, rows=len(rows_y))
     plot_top = (rows_y[max(r for r, *_ in placed)] + 10) if placed else 20.0
     strip = 17.0 if band_list else 0.0
@@ -247,9 +260,9 @@ def histogram_chart(bins: Sequence[tuple[float, float, int]], *, label: str, x_t
         deco.append(_text(plot_r + 6, ty, fmt(t, 0), cls="ch-tick", size=_FS_TICK))
     if not y_ticks:
         deco.append(_hline(pad_l, plot_r, base, "ch-axis"))
-    x_ticks = _ticks(dom_lo, dom_hi, max(2, int((plot_r - pad_l) / 56)))
-    for t in x_ticks:
-        deco.append(_text(x(t), base + 12, fmt(t), cls="ch-tick", size=_FS_TICK, align="middle"))
+    x_ticks = _ticks(dom_lo, dom_hi, _tick_count(plot_r - pad_l, 56))
+    for t, tt in zip(x_ticks, _tick_texts(x_ticks), strict=True):
+        deco.append(_text(x(t), base + 12, tt, cls="ch-tick", size=_FS_TICK, align="middle"))
     deco.append(_text((pad_l + plot_r) / 2, base + 31, xt, cls="ch-title", align="middle",
                       rtl=True))
 
@@ -452,14 +465,19 @@ def trend_chart(points: Sequence[Mapping[str, Any]], *, label: str, y_title: str
     rt = _plain(rate_title) if rate_title else ""
     has_rate = bool(rt) and any(p["rate"] is not None for p in pts)
     W = _width(width)
-    lo, hi = _num_range(y_range) or (0.0, 100.0)
+    lo, hi = _cover(_num_range(y_range) or (0.0, 100.0),
+                    [p["mean"] for p in pts if p["mean"] is not None])
     y_ticks = _ticks(lo, hi, 5)
     rate_top, rate_ticks = 1.0, []
     if has_rate:
-        rate_top, rate_ticks = _nice_axis(
-            max(max((p["rate"] or 0.0) for p in pts) * 1.1, 0.02), 2)
-    tick_texts = [fmt(t) for t in y_ticks] + [_pct(t) for t in rate_ticks]
-    ml, plot_r = 8.0, W - (max(_tw(t, _FS_TICK) for t in tick_texts) + 14)
+        peak = max(max((p["rate"] or 0.0) for p in pts) * 1.1, 0.02)
+        # A share never passes 100%: headroom above a 95% period must not
+        # print a 200% tick.
+        rate_top, rate_ticks = ((1.0, [0.0, 0.5, 1.0]) if peak > 1.0
+                                else _nice_axis(peak, 2))
+    y_texts = _tick_texts(y_ticks)
+    rate_texts = [f"{t}%" for t in _tick_texts(rate_ticks, scale=100.0)]
+    ml, plot_r = 8.0, W - (max(_tw(t, _FS_TICK) for t in y_texts + rate_texts) + 14)
     n = len(pts)
     slot = (plot_r - ml) / n
     xs = [ml + (i + 0.5) * slot for i in range(n)]
@@ -484,15 +502,15 @@ def trend_chart(points: Sequence[Mapping[str, Any]], *, label: str, y_title: str
 
     n_max = max(p["n"] for p in pts) or 1
     deco = [_text(W - 2, 9, yt, cls="ch-title", align="right", rtl=True)]
-    for t in y_ticks:
+    for t, tt in zip(y_ticks, y_texts, strict=True):
         deco.append(_hline(ml, plot_r, y(t), "ch-axis" if t == y_ticks[0] and t <= lo
                            else "ch-grid"))
-        deco.append(_text(plot_r + 7, y(t), fmt(t), cls="ch-tick", size=_FS_TICK))
+        deco.append(_text(plot_r + 7, y(t), tt, cls="ch-tick", size=_FS_TICK))
     if has_rate:
         deco.append(_text(W - 2, rate_t - 17, rt, cls="ch-title", align="right", rtl=True))
-        for t in rate_ticks:
+        for t, tt in zip(rate_ticks, rate_texts, strict=True):
             deco.append(_hline(ml, plot_r, yr(t), "ch-axis" if t == 0 else "ch-grid"))
-            deco.append(_text(plot_r + 7, yr(t), _pct(t), cls="ch-tick", size=_FS_TICK))
+            deco.append(_text(plot_r + 7, yr(t), tt, cls="ch-tick", size=_FS_TICK))
     deco.append(_text(W - 2, vol_t - 17, "מספר שיחות", cls="ch-title", align="right", rtl=True))
     deco.append(_hline(ml, plot_r, vol_t, "ch-grid"))
     deco.append(_text(plot_r + 7, vol_t, fmt(n_max, 0), cls="ch-tick", size=_FS_TICK))
@@ -598,9 +616,11 @@ def dot_plot(rows: Sequence[Mapping[str, Any]], *, label: str, reference: float 
     if not prepared:
         return _empty(name)
     W = _width(width)
-    rh = float(max(16, int(row_height)))
-    x_lo, x_hi = _num_range(x_range) or (0.0, 100.0)
+    rh = float(_size(row_height, 22, 16, 80))
     ref = _num(reference)
+    x_lo, x_hi = _cover(_num_range(x_range) or (0.0, 100.0),
+                        [p["mean"] for p in prepared if p["mean"] is not None]
+                        + ([ref] if ref is not None else []))
     lab_w = _clamp(max(_tw(p["label"]) for p in prepared) + 14, 48, W * 0.28)
     subs = [p["sub"] for p in prepared if p["sub"]]
     sub_w = min(max(_tw(s, _FS_TICK) for s in subs) + 14, W * 0.2) if subs else 0.0
@@ -610,7 +630,7 @@ def dot_plot(rows: Sequence[Mapping[str, Any]], *, label: str, reference: float 
     def x(v: float) -> float:
         return plot_l + (_clamp(v, x_lo, x_hi) - x_lo) / (x_hi - x_lo) * (plot_r - plot_l)
 
-    x_ticks = _ticks(x_lo, x_hi, max(2, int((plot_r - plot_l) / 60)))
+    x_ticks = _ticks(x_lo, x_hi, _tick_count(plot_r - plot_l, 60))
     y_cursor = 4.0
     ref_y = None
     if ref is not None:
@@ -623,12 +643,16 @@ def dot_plot(rows: Sequence[Mapping[str, Any]], *, label: str, reference: float 
     H = rows_bottom + 24
 
     deco: list[str] = []
-    for t in x_ticks:
+    for t, tt in zip(x_ticks, _tick_texts(x_ticks), strict=True):
         deco.append(_vline(x(t), rows_top, rows_bottom, "ch-grid"))
-        deco.append(_text(x(t), rows_bottom + 12, fmt(t), cls="ch-tick", size=_FS_TICK,
+        deco.append(_text(x(t), rows_bottom + 12, tt, cls="ch-tick", size=_FS_TICK,
                           align="middle"))
-        if top_ticks_y is not None:
-            deco.append(_text(x(t), top_ticks_y, fmt(t), cls="ch-tick", size=_FS_TICK,
+        # the repeated top axis sits under the reference label, and the
+        # reference line runs down through it: a tick it would strike through
+        # is left to the bottom axis
+        crossed = ref is not None and abs(x(t) - x(ref)) < _tw(tt, _FS_TICK) / 2 + 3
+        if top_ticks_y is not None and not crossed:
+            deco.append(_text(x(t), top_ticks_y, tt, cls="ch-tick", size=_FS_TICK,
                               align="middle"))
     if ref is not None and ref_y is not None:
         ref_txt = f"{ref_name} {fmt(ref)}".strip()
@@ -746,15 +770,22 @@ def diverging_bars(rows: Sequence[Mapping[str, Any]], *, label: str, unit: str =
 
 # -- text and numbers -------------------------------------------------------------
 
-def _num(value: object) -> float | None:
-    """A finite float, or None for missing / NaN / infinite / non-numeric."""
+def _num(value: object, *, bounded: bool = True) -> float | None:
+    """A finite float, or None for missing / NaN / infinite / non-numeric.
+
+    Chart inputs are also bounded by ``_LIMIT``: a value past it is garbage
+    for a quality report, and treating it as missing keeps every span, sum
+    and coordinate finite (1e308 - (-1e308) is inf, and inf/inf is NaN).
+    """
     if value is None or isinstance(value, bool):
         return None
     try:
         f = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    return f if math.isfinite(f) else None
+    if not math.isfinite(f) or (bounded and abs(f) > _LIMIT):
+        return None
+    return f
 
 
 def _num_range(pair: Sequence[Any] | None) -> tuple[float, float] | None:
@@ -809,6 +840,33 @@ def _signed(v: float | None) -> str:
     return f"+{text}" if v > 0 else f"{_MINUS}{text}"
 
 
+def _marker_text(label: object, v: float) -> str:
+    """'<label> <value>', unless the label already shows the value ("חציון
+    66.2", perhaps rounded by the caller's own formatter): then the label as
+    given, so the value is never printed twice."""
+    text = _plain(label)
+    for m in _LABEL_NUM.finditer(text):
+        try:
+            shown = float(m.group(0).replace(_MINUS, "-").replace(",", ""))
+        except ValueError:  # pragma: no cover - the pattern only matches numbers
+            continue
+        if abs(shown - v) <= 0.5 * 10 ** -len(m.group(1) or "") + 1e-6:
+            return text
+    return f"{text} {fmt(v)}".strip()
+
+
+def _tick_texts(ticks: Sequence[float], *, scale: float = 1.0) -> list[str]:
+    """Labels for evenly spaced ticks, with as many decimals as the step
+    needs: a 0.25 step prints 70.25, never a rounded 70.3 at 70.25."""
+    digits = 1
+    if len(ticks) >= 2:
+        step = abs(ticks[1] - ticks[0]) * scale
+        digits = 0
+        while digits < 4 and abs(round(step, digits) - step) > 1e-9 * max(1.0, step):
+            digits += 1
+    return [fmt(t * scale, digits) for t in ticks]
+
+
 def _fixed(v: float | None) -> str:
     """Exactly one decimal, for a column of values that must align on the
     decimal point ('76.0' under '75.9', where fmt() would give '76')."""
@@ -857,19 +915,27 @@ def _tw(text: str, size: float = _FS_TEXT, bold: bool = False) -> float:
 
 def _fit(text: str, max_w: float, size: float = _FS_TEXT, bold: bool = False) -> str:
     """Truncate with an ellipsis to fit ``max_w``. The full text stays in
-    the tooltip and the table."""
+    the tooltip and the table. One pass over the text: a label thousands of
+    characters long costs no more than measuring it once."""
     if _tw(text, size, bold) <= max_w:
         return text
-    cut = text
-    while cut and _tw(cut + _ELLIPSIS, size, bold) > max_w:
-        cut = cut[:-1]
-    return cut.rstrip() + _ELLIPSIS if cut else _ELLIPSIS
+    budget = max_w - _tw(_ELLIPSIS, size, bold)
+    used, cut = 0.0, 0
+    for i, ch in enumerate(text):
+        used += _tw(ch, size, bold)
+        if used > budget + 1e-9:
+            break
+        cut = i + 1
+    head = text[:cut].rstrip()
+    return head + _ELLIPSIS if head else _ELLIPSIS
 
 
 # -- geometry -------------------------------------------------------------------
 
 def _c(x: float) -> str:
     """A coordinate with at most one decimal: compact and deterministic."""
+    if not math.isfinite(x):     # never "nan" in an attribute; inputs are bounded
+        return "0"               # so this is a last line of defence
     r = round(x, 1)
     if r == 0:
         return "0"
@@ -881,12 +947,18 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return lo if v < lo else hi if v > hi else v
 
 
+def _size(value: object, default: int, lo: int, hi: int) -> int:
+    """A pixel size from a caller: numeric, within [lo, hi], else the default."""
+    v = _num(value)
+    return int(_clamp(v, lo, hi)) if v is not None else default
+
+
 def _width(width: int) -> int:
-    return max(280, int(width))
+    return _size(width, DEFAULT_WIDTH, 280, 4000)
 
 
 def _ticks(lo: float, hi: float, max_ticks: int, *, integer: bool = False) -> list[float]:
-    """Round tick values (1/2/2.5/5 x 10^k steps) inside [lo, hi]."""
+    """Round tick values (1/2/5 x 10^k steps, as d3 uses) inside [lo, hi]."""
     if hi <= lo:
         return [lo]
     step = _nice_step((hi - lo) / max(1, max_ticks), integer)
@@ -899,9 +971,15 @@ def _ticks(lo: float, hi: float, max_ticks: int, *, integer: bool = False) -> li
     return out
 
 
+def _tick_count(length: float, spacing: float) -> int:
+    """How many ticks an axis of ``length`` px can take: one per ``spacing``
+    px, 2 to 10. A wide chart gets more room per tick, not more ticks."""
+    return int(_clamp(length // spacing, 2, 10))
+
+
 def _nice_step(raw: float, integer: bool = False) -> float:
     mag = 10 ** math.floor(math.log10(raw))
-    for m in ((1, 2, 5, 10) if integer else (1, 2, 2.5, 5, 10)):
+    for m in (1, 2, 5, 10):
         if m * mag >= raw - 1e-12:
             step = m * mag
             return max(1.0, round(step)) if integer else step
@@ -916,6 +994,19 @@ def _nice_axis(max_value: float, max_ticks: int, *,
     step = _nice_step(max_value / max(1, max_ticks), integer)
     top = math.ceil(max_value / step - 1e-9) * step
     return top, _ticks(0.0, top, int(round(top / step)), integer=integer)
+
+
+def _cover(rng: tuple[float, float], values: Sequence[float]) -> tuple[float, float]:
+    """The caller's axis range, widened to a round step when a mean or the
+    reference falls outside it. Clamping would draw such a dot on the edge,
+    at a value it does not have. (CI whiskers are clamped: they may run long
+    for a small group without the axis giving up its resolution for them.)"""
+    lo, hi = rng
+    if not values or (min(values) >= lo and max(values) <= hi):
+        return lo, hi
+    lo, hi = min(lo, *values), max(hi, *values)
+    step = _nice_step((hi - lo) / 5)
+    return math.floor(lo / step + 1e-9) * step, math.ceil(hi / step - 1e-9) * step
 
 
 def _runs(seq: Sequence[tuple[int, Any]]) -> list[list[tuple[int, Any]]]:
@@ -1057,10 +1148,38 @@ def _row_group(parts: Sequence[str], filt: Any, aria: str, *, title: str,
             f'height="{_c(hh)}" fill="none" pointer-events="all"/>')
     attrs = ""
     if filt is not None:
-        payload = json.dumps(filt, ensure_ascii=False, default=str)
+        payload = json.dumps(_jsonable(filt), ensure_ascii=False)
         attrs = (f' class="ch-link" data-filter="{escape(payload)}" tabindex="0" role="button" '
                  f'aria-label="{_attr(f"{aria} — {SHOW_CALLS_HE}")}"')
     return f'<g{attrs}><title>{_vis(title)}</title>{rect}{"".join(parts)}</g>'
+
+
+def _jsonable(obj: Any, depth: int = 0) -> Any:
+    """A ``data-filter`` payload the page's JSON.parse always accepts.
+
+    json.dumps writes NaN/Infinity (invalid JSON, so the click would silently
+    do nothing) and raises on a tuple key. Non-finite numbers become null,
+    numpy-style numbers plain ones, other keys and objects their str(), and a
+    set a sorted list, so the output never depends on hash order.
+    """
+    if obj is None or isinstance(obj, (bool, str)):
+        return obj
+    if isinstance(obj, numbers.Integral):
+        return int(obj)
+    if isinstance(obj, numbers.Real):
+        f = float(obj)
+        return f if math.isfinite(f) else None
+    if depth >= 32:
+        return str(obj)
+    if isinstance(obj, Mapping):
+        return {(k if isinstance(k, (str, int, float, bool)) or k is None else str(k)):
+                _jsonable(v, depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (set, frozenset)):
+        return sorted((_jsonable(v, depth + 1) for v in obj),
+                      key=lambda v: json.dumps(v, ensure_ascii=False, sort_keys=True))
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v, depth + 1) for v in obj]
+    return str(obj)
 
 
 def _svg(w: float, h: float, name: str, body: str, *, interactive: bool) -> str:

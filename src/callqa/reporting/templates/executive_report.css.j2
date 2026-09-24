@@ -24,7 +24,10 @@
   --shadow:0 1px 2px rgb(20 22 28/.05); --shadow-pop:0 12px 40px rgb(20 22 28/.16);
   --dur:.13s;
 }
-@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+/* Dark on SCREEN only: printed in dark mode, cards came out as black blocks
+   and headings as white ink on white paper. */
+@media screen and (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  color-scheme: dark;
   --page:#0e0f13; --card:#16181d; --sunken:#1b1e24; --border:#262a32; --border-2:#333843;
   --ink:#eef0f4; --ink-2:#b6bcc7; --ink-3:#8b929e;
   --bar:#aeb5c2; --bar-2:#6d7482; --bar-soft:#262a32;
@@ -33,12 +36,13 @@
   --warn:#e0972f; --warn-soft:#2a1f0d; --warn-ink:#f0b661;
   --bad:#e46060; --bad-soft:#2a1414; --bad-ink:#f0a0a0;
   --info-soft:#20232b; --info-ink:#c3c8d2;
-  --l1:#d9574e; --l2:#7a3a35; --l3:#3a3f4a; --l4:#5d6b86; --l5:#a9b6d3;
+  --l1:#b8433b; --l2:#7a3a35; --l3:#3a3f4a; --l4:#5d6b86; --l5:#a9b6d3;
   --l1-ink:#fff; --l2-ink:#f6dcd9; --l3-ink:#eef0f4; --l4-ink:#fff; --l5-ink:#0e0f13;
   --b1:#2a1616; --b2:#2a2012; --b3:#1b1e24; --b4:#10261f;
   --shadow:0 1px 2px rgb(0 0 0/.3); --shadow-pop:0 12px 40px rgb(0 0 0/.55);
 }}
-:root[data-theme="dark"]{
+@media screen{ :root[data-theme="dark"]{
+  color-scheme: dark;
   --page:#0e0f13; --card:#16181d; --sunken:#1b1e24; --border:#262a32; --border-2:#333843;
   --ink:#eef0f4; --ink-2:#b6bcc7; --ink-3:#8b929e;
   --bar:#aeb5c2; --bar-2:#6d7482; --bar-soft:#262a32;
@@ -47,11 +51,11 @@
   --warn:#e0972f; --warn-soft:#2a1f0d; --warn-ink:#f0b661;
   --bad:#e46060; --bad-soft:#2a1414; --bad-ink:#f0a0a0;
   --info-soft:#20232b; --info-ink:#c3c8d2;
-  --l1:#d9574e; --l2:#7a3a35; --l3:#3a3f4a; --l4:#5d6b86; --l5:#a9b6d3;
+  --l1:#b8433b; --l2:#7a3a35; --l3:#3a3f4a; --l4:#5d6b86; --l5:#a9b6d3;
   --l1-ink:#fff; --l2-ink:#f6dcd9; --l3-ink:#eef0f4; --l4-ink:#fff; --l5-ink:#0e0f13;
   --b1:#2a1616; --b2:#2a2012; --b3:#1b1e24; --b4:#10261f;
   --shadow:0 1px 2px rgb(0 0 0/.3); --shadow-pop:0 12px 40px rgb(0 0 0/.55);
-}
+}}
 
 *{box-sizing:border-box}
 html{direction:rtl; scroll-behavior:smooth; scroll-padding-top:76px}
@@ -71,18 +75,19 @@ a:hover{text-decoration:underline}
 .sr{position:absolute !important; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
 /* Off-screen by moving UP, not sideways: in RTL "inline-start: -9999px" is a
    9999px overflow to the right, and the whole page scrolls sideways. */
-.skip{position:absolute; top:-200px; inset-inline-start:8px; background:var(--card); padding:8px 12px; z-index:50; border-radius:var(--r)}
+.skip{position:absolute; top:-200px; right:8px; inset-inline-start:8px; background:var(--card); padding:8px 12px; z-index:50; border-radius:var(--r)}
 .skip:focus{top:8px}
 
 /* ------------------------------------------------------------------ top bar */
-.topbar{position:sticky; top:0; z-index:30; background:color-mix(in srgb, var(--page) 88%, transparent);
+.topbar{position:sticky; top:0; z-index:30; background:var(--page); background:color-mix(in srgb, var(--page) 88%, transparent);
   backdrop-filter:saturate(1.4) blur(8px); border-bottom:1px solid var(--border)}
 .topbar .in{max-width:1220px; margin:0 auto; padding:10px 24px; display:flex; align-items:center; gap:var(--s4)}
 .brand{display:flex; align-items:center; gap:10px; font-weight:650; font-size:14px; white-space:nowrap}
 .brand .mark{width:26px; height:26px; border-radius:7px; background:var(--accent); color:#fff;
   display:grid; place-items:center; font-size:12px; font-weight:700; flex:none}
-:root[data-theme="dark"] .brand .mark{color:#0e0f13}
-@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .brand .mark{color:#0e0f13} }
+@media screen{ :root[data-theme="dark"] .brand .mark{color:#0e0f13} }
+@media screen and (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .brand .mark{color:#0e0f13} }
+:root[data-theme="light"]{color-scheme: light}
 .levels{display:flex; gap:2px; margin-inline-start:var(--s4); overflow-x:auto; scrollbar-width:none}
 .levels a{display:flex; align-items:center; gap:7px; padding:7px 12px; border-radius:var(--r); color:var(--ink-2);
   font-weight:500; font-size:13px; white-space:nowrap; min-height:34px}
@@ -96,8 +101,8 @@ a:hover{text-decoration:underline}
   cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap}
 .btn:hover{background:var(--sunken); color:var(--ink)}
 .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
-:root[data-theme="dark"] .btn.primary{color:#0e0f13}
-@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .btn.primary{color:#0e0f13} }
+@media screen{ :root[data-theme="dark"] .btn.primary{color:#0e0f13} }
+@media screen and (prefers-color-scheme:dark){ :root:not([data-theme="light"]) .btn.primary{color:#0e0f13} }
 .btn.icon{width:32px; padding:0; justify-content:center}
 
 /* ------------------------------------------------------------------ layout */
@@ -142,6 +147,8 @@ a:hover{text-decoration:underline}
 /* minmax(0,1fr), not 1fr: a plain 1fr track grows to its widest table and
    pushes the page sideways on a phone. */
 @media (max-width: 980px){ .g3{grid-template-columns:repeat(2, minmax(0,1fr))} .g-wide{grid-template-columns:minmax(0,1fr)} }
+@media (max-width: 1100px){ .g2{grid-template-columns:minmax(0,1fr)} }
+@media screen and (max-width: 1100px){ .chart-box .ch .ch-svg{min-width:880px} }
 @media (max-width: 720px){ .g2,.g3{grid-template-columns:minmax(0,1fr)} }
 
 /* ------------------------------------------------------------------ level 1 */
@@ -166,7 +173,7 @@ a:hover{text-decoration:underline}
 .kpi .k-value{font-size:30px; font-weight:680; letter-spacing:-.02em; line-height:1.1}
 .kpi .k-value small{font-size:13px; color:var(--ink-3); font-weight:500; margin-inline-start:4px}
 .kpi .k-sub{font-size:12px; color:var(--ink-3)}
-.kpi .k-spark{position:absolute; inset-inline-end:var(--s4); top:var(--s4); width:110px; opacity:.95}
+.kpi .k-spark{position:absolute; left:var(--s4); inset-inline-end:var(--s4); top:var(--s4); width:110px; opacity:.95}
 .kpi .k-foot{margin-top:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap}
 .kpi.risk{box-shadow:inset 0 3px 0 var(--bad), var(--shadow)}
 .kpi.warnk{box-shadow:inset 0 3px 0 var(--warn), var(--shadow)}
@@ -212,7 +219,7 @@ a:hover{text-decoration:underline}
 .dimbar .nm{color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .dimbar .gate{font-size:10.5px; color:var(--warn-ink); background:var(--warn-soft); border-radius:4px; padding:0 5px; margin-inline-start:4px; font-weight:600}
 .track{position:relative; height:8px; background:var(--bar-soft); border-radius:100px}
-.track .fill{position:absolute; inset-block:0; inset-inline-start:0; background:var(--bar); border-radius:100px}
+.track .fill{position:absolute; top:0; bottom:0; right:0; inset-block:0; inset-inline-start:0; background:var(--bar); border-radius:100px}
 .track .mark{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--ink); border-radius:1px}
 .dimbar .v{text-align:end; font-weight:650}
 
@@ -260,7 +267,8 @@ td.num,th.num{text-align:end}
 .ch-lvl-4{fill:var(--l4); background:var(--l4); color:var(--l4-ink)}
 .ch-lvl-5{fill:var(--l5); background:var(--l5); color:var(--l5-ink)}
 .ch-link{cursor:pointer}
-.ch-link:hover .ch-dot, .ch-link:hover rect, .ch-link:focus-visible rect{opacity:.8}
+.ch-link:hover .ch-dot, .ch-link:hover rect{opacity:.8}
+.ch-link:focus-visible rect{opacity:.8}
 .ch-link:focus-visible{outline:2px solid var(--ring)}
 .ch-legend{display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11.5px; color:var(--ink-2); margin-top:8px}
 .ch-legend-item{display:inline-flex; align-items:center; gap:6px}
@@ -294,7 +302,8 @@ td.num,th.num{text-align:end}
 .xp-dims .track .mark{top:-3px; bottom:-3px; width:1.5px}
 .profile{margin:var(--s4) var(--s5) 0; padding:var(--s4); border:1px solid var(--border); border-radius:var(--r-lg); background:var(--card)}
 .profile h4{font-size:15px; margin-bottom:6px}
-.xp-table th button{appearance:none; border:0; background:none; font:inherit; color:inherit; cursor:pointer; padding:0; display:inline-flex; gap:4px; align-items:center}
+.xp-table th button{appearance:none; border:0; background:none; font:inherit; color:inherit; cursor:pointer; padding:0; display:inline-flex; gap:4px; align-items:center; min-height:24px}
+td a, .case .top a, .links a{display:inline-block; min-height:24px; line-height:24px}
 .xp-table th[aria-sort="ascending"] button::after{content:"▲"; font-size:9px}
 .xp-table th[aria-sort="descending"] button::after{content:"▼"; font-size:9px}
 .xp-table tbody tr.row{cursor:pointer}
@@ -348,22 +357,27 @@ footer.foot{max-width:1220px; margin:0 auto; padding:var(--s5) 24px var(--s7); c
   .card > .hd{padding:var(--s3) var(--s4) 0}
   .dimbar{grid-template-columns:minmax(96px, 130px) minmax(0,1fr) 40px}
   .kpi .k-spark{display:none}
-  /* a chart keeps a readable size and scrolls inside its card */
-  .chart-box .ch .ch-svg{min-width:560px}
 }
 
 /* ------------------------------------------------------------------ print */
 @media print{
   @page{size:A4; margin:14mm 12mm}
+  /* Level 2 is charts and wide tables: landscape keeps their labels ~10px. */
+  @page wide{size:A4 landscape; margin:10mm}
+  #level2{page:wide}
   :root{--page:#fff}
   body{font-size:11.5px; background:#fff}
   .topbar,.skip,.tools,.explorer,.tabs,.no-print,.ch-table summary{display:none !important}
   .print-only{display:block !important}
   .wrap{padding:0; max-width:none}
   .level{break-before:page; margin-top:0}
-  .level:first-of-type{break-before:auto}
-  .card,.finding,.action,.kpi,figure{break-inside:avoid; box-shadow:none}
+  #level1{break-before:auto}
+  .card,.finding,.action,.kpi,figure,.case{break-inside:avoid; box-shadow:none}
   .section{break-inside:auto}
+  .section > h3, .section > .lead, .case-panel > h4, .card > .hd, .level-head{break-after:avoid-page}
+  footer.foot{break-inside:avoid}
+  .chart-box .ch .ch-svg{min-width:0}
+  th{white-space:normal}
   a{color:inherit}
   *{-webkit-print-color-adjust:exact; print-color-adjust:exact}
   .case-panel{display:block !important}

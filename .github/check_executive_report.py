@@ -59,7 +59,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("report", type=Path)
     ap.add_argument("--calls", type=int, required=True, help="calls expected in the batch")
-    ap.add_argument("--dom", type=Path, default=None, help="DOM dumped by a real browser")
+    ap.add_argument("--dom", type=Path, default=None, help="DOM dumped by a real browser (optional)")
     args = ap.parse_args()
 
     problems: list[str] = []

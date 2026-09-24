@@ -35,6 +35,11 @@ def load_scorecards(output_dir: Path, include_unpublished: bool = False) -> list
         except (OSError, ValueError) as exc:
             logger.warning("skipping unreadable scorecard %s: %s", path.name, type(exc).__name__)
             continue
+        if card.call_id != path.stem:
+            # A copied or renamed card would otherwise report under - and borrow
+            # the redaction clearance of - a call it is not.
+            logger.warning("skipping scorecard %s: it belongs to another call", path.name)
+            continue
         status = statuses.get(card.call_id, "success")
         if status != "success" and not include_unpublished:
             skipped.append(f"{card.call_id}({status})")

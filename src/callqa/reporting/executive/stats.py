@@ -10,9 +10,15 @@ number built on three calls. Hence the conventions every function here keeps:
   report says "לא די נתונים". Invalid arguments (a level outside (0, 1),
   ``k > n``, non-increasing histogram edges) still raise - those are bugs in
   the caller, not thin data.
-- ``None`` and NaN mean "missing" everywhere: they are dropped (pairwise for
-  the two-variable functions) and the returned ``n`` counts only what was
-  actually used, so a missing feature can never turn into a NaN on the page.
+- ``None``, NaN and +-inf mean "missing" everywhere: they are dropped
+  (pairwise for the two-variable functions) and the returned ``n`` counts
+  only what was actually used, so a missing feature can never turn into a
+  NaN on the page.
+- Every estimate and interval bound is finite or ``None``, whatever the
+  magnitude of the input: sums of squares are formed on power-of-two scaled
+  copies (exact, so ordinary data gives bit-identical results), and a value
+  that would overflow (data near 1e308) is reported as ``None`` rather than
+  inf/NaN. Nothing raises OverflowError.
 - Pure and deterministic: stdlib only, no randomness, no global state.
 
 The t distribution is the one piece that needs care without scipy. The
@@ -137,7 +143,7 @@ def _clean(values: Values) -> list[float]:
         if v is None:
             continue
         f = float(v)
-        if not math.isnan(f):
+        if math.isfinite(f):  # NaN and +-inf are "missing", not measurements
             out.append(f)
     return out
 
@@ -151,7 +157,7 @@ def _clean_pairs(x: Values, y: Values) -> tuple[list[float], list[float]]:
         if a is None or b is None:
             continue
         fa, fb = float(a), float(b)
-        if math.isnan(fa) or math.isnan(fb):
+        if not (math.isfinite(fa) and math.isfinite(fb)):
             continue
         xs.append(fa)
         ys.append(fb)
@@ -163,18 +169,37 @@ def _check_level(level: float) -> None:
         raise ValueError(f"confidence level must be in (0, 1), got {level!r}")
 
 
-def _mean_var(xs: list[float]) -> tuple[float, float]:
-    """Mean and sample variance (n-1), two-pass with fsum.
+def _finite(*values: float) -> bool:
+    return all(math.isfinite(v) for v in values)
+
+
+def _pow2_scale(xs: list[float]) -> float:
+    """A power of two close to max |x| (xs non-empty and finite).
+
+    Dividing by it is exact, so sums of squares and cross-products can be
+    formed on values in [-2, 2] and scaled back: bit-identical results for
+    ordinary data, and no OverflowError (``1e200 ** 2``) or fsum
+    "intermediate overflow" for huge values.
+    """
+    m = max(abs(v) for v in xs)
+    return math.ldexp(1.0, math.frexp(m)[1] - 1) if m > 0.0 else 1.0
+
+
+def _mean_sd(xs: list[float]) -> tuple[float, float]:
+    """Mean and sample sd (n-1) of a non-empty finite sample, two-pass with fsum.
 
     A constant sample is special-cased: fsum(xs)/n is not always exactly the
-    common value (3 x 0.1 sums to 0.30000000000000004), and a variance of
-    1e-34 instead of 0 would make "no spread" look like a tiny but real one.
+    common value (3 x 0.1 sums to 0.30000000000000004), and an sd of 1e-17
+    instead of 0 would make "no spread" look like a tiny but real one.
     """
     n = len(xs)
     if min(xs) == max(xs):
         return xs[0], 0.0
-    mean = math.fsum(xs) / n
-    return mean, math.fsum((v - mean) ** 2 for v in xs) / (n - 1)
+    s = _pow2_scale(xs)
+    ys = [v / s for v in xs]
+    mean = math.fsum(ys) / n
+    var = math.fsum((v - mean) * (v - mean) for v in ys) / (n - 1)
+    return mean * s, math.sqrt(var) * s
 
 
 def _excludes_zero(low: float, high: float) -> bool:
@@ -268,18 +293,35 @@ def _t_two_sided_tail(t: float, df: float) -> float:
     return _betainc(df / 2.0, 0.5, 1.0 / (1.0 + t * t / df))
 
 
+def _t_central(t: float, df: float) -> float:
+    """P(|T_df| <= t) = I_{t^2/(df+t^2)}(1/2, df/2)."""
+    t2 = t * t
+    return _betainc(0.5, df / 2.0, t2 / (df + t2))
+
+
 @lru_cache(maxsize=512)
 def _t_crit_exact(df: float, level: float) -> float:
-    alpha = 1.0 - level
-    lo, hi = 1e-9, 1.0
-    while _t_two_sided_tail(hi, df) > alpha:
+    # Compare on whichever side of the distribution is the small probability:
+    # 1 - P(|T| > t) cancels catastrophically once level is below ~1e-4
+    # (at df=1 a 1e-12 level came out 1.05e-8 instead of 1.57e-12).
+    if level > 0.5:
+        alpha = 1.0 - level  # exact here (Sterbenz)
+
+        def too_small(t: float) -> bool:
+            return _t_two_sided_tail(t, df) > alpha
+    else:
+        def too_small(t: float) -> bool:
+            return _t_central(t, df) < level
+
+    lo, hi = 1e-300, 1.0
+    while too_small(hi):
         lo, hi = hi, hi * 2.0
         if hi > 1e150:  # df far below 1: the interval is unbounded in practice
             return math.inf
-    # Geometric bisection: t spans orders of magnitude for small df.
+    # Geometric bisection: t spans orders of magnitude for small df or level.
     for _ in range(200):
-        mid = math.sqrt(lo * hi)
-        if _t_two_sided_tail(mid, df) > alpha:
+        mid = math.sqrt(lo) * math.sqrt(hi)  # no underflow of lo * hi
+        if too_small(mid):
             lo = mid
         else:
             hi = mid
@@ -298,12 +340,14 @@ def mean_ci(values: Values, level: float = 0.95) -> MeanCI:
     n = len(xs)
     if n == 0:
         return MeanCI(0, None, None, None, None)
-    mean, var = _mean_var(xs)
+    mean, sd = _mean_sd(xs)
     if n == 1:
         return MeanCI(1, mean, None, None, None)
-    sd = math.sqrt(var)
     half = t_crit(n - 1, level) * sd / math.sqrt(n)
-    return MeanCI(n, mean, sd, mean - half, mean + half)
+    low, high = mean - half, mean + half
+    if not _finite(sd, low, high):  # spread beyond float range (|x| ~ 1e308)
+        return MeanCI(n, mean, None, None, None)
+    return MeanCI(n, mean, sd, low, high)
 
 
 def proportion_ci(k: int, n: int, level: float = 0.95) -> PropCI:
@@ -336,18 +380,27 @@ def welch_diff(a: Values, b: Values, level: float = 0.95) -> DiffCI:
     n1, n2 = len(xa), len(xb)
     if n1 == 0 or n2 == 0:
         return DiffCI(n1, n2, None, None, None, False)
-    m1, v1 = _mean_var(xa)
-    m2, v2 = _mean_var(xb)
+    m1, sd1 = _mean_sd(xa)
+    m2, sd2 = _mean_sd(xb)
     diff = m1 - m2
+    if not math.isfinite(diff):  # e.g. 1e308 - (-1e308)
+        return DiffCI(n1, n2, None, None, None, False)
     if n1 < 2 or n2 < 2:
         return DiffCI(n1, n2, diff, None, None, False)
-    se1, se2 = v1 / n1, v2 / n2
+    se1, se2 = sd1 / math.sqrt(n1), sd2 / math.sqrt(n2)
     if se1 == 0.0 and se2 == 0.0:
         return DiffCI(n1, n2, diff, diff, diff, diff != 0.0)
-    # Welch-Satterthwaite; lies between min(n1, n2) - 1 and n1 + n2 - 2.
-    df = (se1 + se2) ** 2 / (se1**2 / (n1 - 1) + se2**2 / (n2 - 1))
-    half = t_crit(df, level) * math.sqrt(se1 + se2)
+    # Welch-Satterthwaite, (V1 + V2)^2 / (V1^2/(n1-1) + V2^2/(n2-1)) with
+    # V = se^2, written with the weights w = V / (V1 + V2) so that neither
+    # huge nor subnormal variances can overflow or divide by an underflowed
+    # zero. It lies between min(n1, n2) - 1 and n1 + n2 - 2.
+    se = math.hypot(se1, se2)
+    w1, w2 = (se1 / se) ** 2, (se2 / se) ** 2
+    df = 1.0 / (w1 * w1 / (n1 - 1) + w2 * w2 / (n2 - 1))
+    half = t_crit(df, level) * se
     low, high = diff - half, diff + half
+    if not _finite(low, high):
+        return DiffCI(n1, n2, diff, None, None, False)
     return DiffCI(n1, n2, diff, low, high, _excludes_zero(low, high))
 
 
@@ -364,11 +417,14 @@ def quantile(values: Values, q: float) -> float | None:
         return xs[-1]
     frac = h - i
     lo, hi = xs[i], xs[i + 1]
+    gap = hi - lo
+    if not math.isfinite(gap):  # |lo|, |hi| ~ 1e308: inf * 0 would be NaN
+        return lo if frac == 0.0 else lo * (1.0 - frac) + hi * frac
     # numpy's lerp: interpolate from the nearer end so the result is monotone
     # in q and exact at the data points - identical to np.quantile.
     if frac >= 0.5:
-        return hi - (hi - lo) * (1.0 - frac)
-    return lo + (hi - lo) * frac
+        return hi - gap * (1.0 - frac)
+    return lo + gap * frac
 
 
 def _average_ranks(xs: list[float]) -> list[float]:
@@ -387,7 +443,11 @@ def _average_ranks(xs: list[float]) -> list[float]:
 
 
 def spearman(x: Values, y: Values, level: float = 0.95) -> Corr:
-    """Spearman rank correlation with a Fisher-z CI (se = 1/sqrt(n-3)).
+    """Spearman rank correlation with a Fisher-z CI.
+
+    The standard error is Bonett & Wright's sqrt((1 + rho**2 / 2) / (n - 3)):
+    the Pearson 1/sqrt(n-3) is 3-6% too narrow for a rank correlation, which
+    at n=30 is the difference between "significant" and not.
 
     Pairs with a missing side are dropped; ties get average ranks. None when
     fewer than 4 pairs or either side is constant (rho is undefined).
@@ -407,7 +467,7 @@ def spearman(x: Values, y: Values, level: float = 0.95) -> Corr:
         # atanh(+-1) is infinite: the Fisher interval degenerates to the point.
         return Corr(n, rho, rho, rho, True)
     z = math.atanh(rho)
-    half = z_crit(level) / math.sqrt(n - 3)
+    half = z_crit(level) * math.sqrt((1 + rho * rho / 2) / (n - 3))
     low, high = math.tanh(z - half), math.tanh(z + half)
     return Corr(n, rho, low, high, _excludes_zero(low, high))
 
@@ -424,15 +484,27 @@ def linear_trend(days: Values, values: Values, level: float = 0.95) -> Trend:
     span = (max(xs) - min(xs)) if xs else 0.0
     if n < 3 or span == 0.0:
         return Trend(n, span, None, None, None, False)
+    if min(ys) == max(ys):
+        # Exactly flat. Computed, the rounding error of the mean (3 x 0.1)
+        # would leave a slope of about 1e-31 instead of 0.
+        return Trend(n, span, 0.0, 0.0, 0.0, False)
+    # Work on power-of-two scaled copies (exact), then scale the slope back.
+    sx, sy = _pow2_scale(xs), _pow2_scale(ys)
+    xs = [v / sx for v in xs]
+    ys = [v / sy for v in ys]
     xm = math.fsum(xs) / n
     ym = math.fsum(ys) / n
-    sxx = math.fsum((v - xm) ** 2 for v in xs)
+    sxx = math.fsum((v - xm) * (v - xm) for v in xs)
     sxy = math.fsum((u - xm) * (v - ym) for u, v in zip(xs, ys, strict=True))
     slope = sxy / sxx
-    ssr = math.fsum((v - ym - slope * (u - xm)) ** 2 for u, v in zip(xs, ys, strict=True))
+    resid = [v - ym - slope * (u - xm) for u, v in zip(xs, ys, strict=True)]
+    ssr = math.fsum(r * r for r in resid)
     se = math.sqrt(ssr / (n - 2) / sxx)
+    unit = sy / sx * 30.0
     half = t_crit(n - 2, level) * se
-    slope30, low, high = slope * 30.0, (slope - half) * 30.0, (slope + half) * 30.0
+    slope30, low, high = slope * unit, (slope - half) * unit, (slope + half) * unit
+    if not _finite(slope30, low, high):  # slope beyond float range
+        return Trend(n, span, None, None, None, False)
     significant = _excludes_zero(low, high) if half > 0.0 else slope != 0.0
     return Trend(n, span, slope30, low, high, significant)
 

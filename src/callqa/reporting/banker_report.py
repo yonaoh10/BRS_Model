@@ -119,7 +119,10 @@ def _write_index(output_dir: Path, cards: list[ScoreCard],
                  aggregates: dict[str, BankerAggregate], slugs: dict[str, str],
                  footer: str) -> Path:
     reports = output_dir / "reports"
-    executive = sorted(p.name for p in reports.glob("executive*.html")) if reports.is_dir() else []
+    from callqa.reporting.executive.render import REPORT_FILE_RE
+
+    executive = sorted(p.name for p in reports.glob("executive*.html")
+                       if REPORT_FILE_RE.fullmatch(p.name)) if reports.is_dir() else []
     index_template = jinja_env().get_template("index.html.j2")
     index_html = index_template.render(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),

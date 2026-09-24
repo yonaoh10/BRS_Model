@@ -487,26 +487,44 @@ def cmd_report(args: argparse.Namespace) -> int:
         )
     except (FileNotFoundError, ReportError) as exc:
         logger.error("%s", exc)
+        # No scored call yet - but the management report still explains why
+        # (how many calls are held, and for what reason).
+        _write_executive_report(config, rubric)
         return EXIT_FAILED
     for path in written:
         logger.info("report written: %s", path)
     # The management report over the whole batch comes with every `report`, so
     # a scheduled run keeps it current without anyone learning a new command.
     status = _write_executive_report(config, rubric)
-    if status == 0:
-        # index.html was rendered before the management report existed.
-        from callqa.reporting.banker_report import refresh_index
-
-        refresh_index(config.paths.output_dir, rubric, config.reporting.group_comparison)
+    _refresh_index(config, rubric)
     return status
+
+
+def _refresh_index(config: Config, rubric) -> None:  # noqa: ANN001
+    """index.html lists the management reports; re-render it after one was
+    written. Nothing to refresh before the first scored call."""
+    from callqa.reporting.banker_report import refresh_index
+
+    try:
+        refresh_index(config.paths.output_dir, rubric, config.reporting.group_comparison)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("could not refresh index.html (%s)", type(exc).__name__)
 
 
 def _parse_day(value: str | None, flag: str):  # noqa: ANN202 - date | None
     if value is None:
         return None
+    import re
+
     from callqa.reporting.executive import parse_call_date
 
-    parsed = parse_call_date(value)
+    # Whole value only: the metadata reader tolerates a trailing time, but a
+    # typo such as 2026-08-311 in a command must not silently mean the 31st.
+    text = value.strip()
+    parsed = parse_call_date(text) if re.fullmatch(
+        r"\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[/.]\d{1,2}[/.]\d{4}", text) else None
     if parsed is None:
         raise ValueError(f"{flag}: expected a date such as 2026-08-31 or 31/08/2026, got {value!r}")
     return parsed
@@ -522,6 +540,12 @@ def _write_executive_report(config: Config, rubric, filters=None, *,  # noqa: AN
                                         with_text=with_text, name=name, title=title)
     except (FileNotFoundError, ValueError) as exc:
         logger.error("management report: %s", exc)
+        return EXIT_FAILED
+    except OSError as exc:
+        # Named by file only: the full path can carry the user's profile name.
+        name_ = Path(getattr(exc, "filename", "") or "").name or "a report file"
+        logger.error("management report: could not write %s (%s) - is it open in another "
+                     "program?", name_, type(exc).__name__)
         return EXIT_FAILED
     a = report.analysis
     logger.info("management report written: %s (%d call(s), %d scored, %d held, %d failed)",
@@ -548,8 +572,12 @@ def cmd_executive_report(args: argparse.Namespace) -> int:
     if filters.date_from and filters.date_to and filters.date_from > filters.date_to:
         logger.error("--from is after --to")
         return EXIT_FAILED
-    return _write_executive_report(config, load_rubric(), filters, with_text=not args.no_quotes,
-                                   name=args.name, title=args.title)
+    rubric = load_rubric()
+    status = _write_executive_report(config, rubric, filters, with_text=not args.no_quotes,
+                                     name=args.name, title=args.title)
+    if status == 0 and (config.paths.output_dir / "reports" / "index.html").exists():
+        _refresh_index(config, rubric)
+    return status
 
 
 def cmd_calibrate(args: argparse.Namespace) -> int:

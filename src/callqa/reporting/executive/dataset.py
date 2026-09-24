@@ -23,7 +23,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from pydantic import ValidationError
 
@@ -90,7 +90,7 @@ class CallRecord:
 
     call_id: str
     status: str                      # success | needs_human_review | failed
-    banker_id: str
+    banker_id: str                   # as DISPLAYED (a pseudonym if the id looks like an ID)
     call_date: date | None
     date_source: str                 # "call" (metadata) | "processed" (judge time) | "none"
     call_type_key: str | None        # as written in the metadata (never displayed raw)
@@ -106,6 +106,7 @@ class CallRecord:
     failed_reason: str | None = None
     call_report: str | None = None   # relative link from reports/, if the file exists
     banker_report: str | None = None
+    banker_raw: str = ""             # as in the metadata: for filters and links only
 
     @property
     def scored(self) -> bool:
@@ -155,6 +156,10 @@ class Batch:
     @property
     def is_demo(self) -> bool:
         return any(e in DEMO_ENGINES for e in self.judge_engines)
+
+    @property
+    def engines_shown(self) -> list[str]:
+        return sorted({_audit_name(e) for e in self.judge_engines})
 
 
 # -- small tolerant readers ---------------------------------------------------
@@ -225,9 +230,41 @@ def call_type_label(raw: str | None) -> str:
         return known
     from callqa.redaction import redact_text
 
-    cleaned = re.sub(r"\s+", " ", redact_text(key)[0]).strip()
-    cleaned = re.sub(r"<[^>]{0,200}>", "", cleaned).strip() or UNSPECIFIED_TYPE
+    # Tags out and spaces normalised BEFORE detection: removed afterwards, a
+    # tag between digit groups ("12345<b>6782</b>") would reassemble the ID
+    # the redactor never saw whole.
+    cleaned = _plain_text(key)
+    cleaned = _plain_text(redact_text(cleaned)[0]) or UNSPECIFIED_TYPE
     return cleaned[:MAX_TYPE_LEN]
+
+
+_TAG = re.compile(r"<[^>]{0,200}>")
+
+
+def _plain_text(text: str) -> str:
+    return re.sub(r"\s+", " ", _TAG.sub(" ", text)).strip()
+
+
+def shown_banker(banker_id: str) -> str:
+    """How a banker id is displayed. The id is free text from the bank's CSV;
+    one that looks like a national ID or a phone number, or contains anything
+    the redactor would mask, is shown as a stable pseudonym instead."""
+    from callqa.ingestion import _digest, _looks_like_an_identifier
+    from callqa.redaction import redact_text
+
+    if (len(banker_id) <= 40 and not _looks_like_an_identifier(banker_id)
+            and redact_text(banker_id)[0] == banker_id):
+        return banker_id
+    return f"בנקאי-{_digest(banker_id)[:6]}"
+
+
+def _audit_name(value: str) -> str:
+    """A model path or engine name for the footer: base name only (on any OS),
+    redacted and capped - it can hold a Windows user-profile path."""
+    from callqa.redaction import redact_text
+
+    name = PureWindowsPath(value).name or value
+    return _plain_text(redact_text(name)[0])[:60]
 
 
 def held_reasons(error: str | None) -> list[str]:
@@ -267,7 +304,8 @@ def _results(output_dir: Path) -> dict[str, CallResult]:
 
 
 def _run_members(output_dir: Path, run_id: str) -> set[str]:
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", run_id):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,80}", run_id) or is_windows_reserved(run_id):
+        # CON, NUL, COM1... open a device on Windows, not a file.
         raise FileNotFoundError(f"not a run id: {run_id!r}")
     data = _read_json(output_dir / "runs" / f"{run_id}.json")
     if not isinstance(data, dict):
@@ -277,13 +315,24 @@ def _run_members(output_dir: Path, run_id: str) -> set[str]:
 
 
 def _text_gate(output_dir: Path, call_id: str) -> tuple[bool, bool, dict[str, int]]:
-    """(text allowed, redaction explicitly disabled, redaction counts)."""
-    redacted = _read_model(output_dir / "redacted" / f"{call_id}.json", RedactedTranscript)
-    if redacted is None or redacted.call_id != call_id:
+    """(text allowed, redaction explicitly disabled, redaction counts).
+
+    Text is allowed only when the file itself says `"enabled": true`. The
+    model defaults the flag to True, and files from before the flag existed
+    (a disabled run then wrote RAW text there) parse as enabled: trusting the
+    default would fail open on exactly the files that most need it.
+    """
+    from callqa.redaction import ENTITY_LABELS_HE
+
+    path = output_dir / "redacted" / f"{call_id}.json"
+    raw = _read_json(path)
+    redacted = _read_model(path, RedactedTranscript)
+    if redacted is None or redacted.call_id != call_id or not isinstance(raw, dict):
         return False, False, {}
+    flag = raw.get("enabled")
     counts = {k: int(v) for k, v in redacted.redaction_counts.items()
-              if isinstance(v, int) and v >= 0}
-    return redacted.enabled is True, redacted.enabled is False, counts
+              if k in ENTITY_LABELS_HE and isinstance(v, int) and v >= 0}
+    return flag is True, flag is False, counts
 
 
 def banker_report_links(output_dir: Path, cohort: list[ScoreCard]) -> dict[str, str]:
@@ -294,12 +343,26 @@ def banker_report_links(output_dir: Path, cohort: list[ScoreCard]) -> dict[str, 
     the whole set, and slugs computed over a subset (one month, one call type)
     could point a link at the wrong person's page.
     """
+    from markupsafe import escape
+
     from callqa.reporting.banker_report import _banker_slugs
 
     slugs = _banker_slugs([c.banker_id for c in cohort])
     links: dict[str, str] = {}
     for banker_id, slug in slugs.items():
-        if (output_dir / "reports" / "bankers" / f"{slug}.html").is_file():
+        if shown_banker(banker_id) != banker_id:
+            # The page's file name is the raw id the report pseudonymises.
+            continue
+        page = output_dir / "reports" / "bankers" / f"{slug}.html"
+        try:
+            head = page.read_text(encoding="utf-8", errors="replace")[:2000]
+        except OSError:
+            continue
+        # A page written for an earlier set of bankers can carry another
+        # banker's collision suffix; link it only if it says whose it is.
+        # The <title> is the marker: it sits in the first few hundred bytes,
+        # before the inlined stylesheet.
+        if f"<title>דוח בנקאי {escape(banker_id)}</title>" in head:
             links[banker_id] = f"bankers/{slug}.html"
     return links
 
@@ -323,6 +386,7 @@ def load_batch(output_dir: Path, rubric: Rubric, filters: BatchFilters | None = 
     reports_dir = output_dir / "reports"
 
     records: list[CallRecord] = []
+    shown: dict[str, str] = {}
     for call_id in sorted(set(results) | set(cards)):
         if members is not None and call_id not in members:
             continue
@@ -337,8 +401,9 @@ def load_batch(output_dir: Path, rubric: Rubric, filters: BatchFilters | None = 
             features = None
         text_ok, disabled, counts = _text_gate(output_dir, call_id)
 
-        banker_id = (card.banker_id if card else None) or (meta.banker_id if meta else None)
-        banker_id = str(banker_id or "unknown")
+        banker_raw = (card.banker_id if card else None) or (meta.banker_id if meta else None)
+        banker_raw = str(banker_raw or "unknown")
+        banker_id = shown.setdefault(banker_raw, shown_banker(banker_raw))
         call_date = parse_call_date(meta.call_date) if meta else None
         date_source = "call" if call_date else "none"
         if call_date is None and card is not None:
@@ -360,6 +425,7 @@ def load_batch(output_dir: Path, rubric: Rubric, filters: BatchFilters | None = 
             call_type_key=type_key, call_type=call_type_label(type_key),
             duration_sec=duration, mono=mono, card=card, features=features,
             text_allowed=text_ok, redaction_disabled=disabled, redaction_counts=counts,
+            banker_raw=banker_raw,
         )
         if status == "needs_human_review":
             record.held_reasons = held_reasons(result.error if result else None)
@@ -368,13 +434,13 @@ def load_batch(output_dir: Path, rubric: Rubric, filters: BatchFilters | None = 
         if (card is not None and text_ok and result is not None and result.report_path
                 and (reports_dir / "calls" / f"{call_id}.html").is_file()):
             record.call_report = f"calls/{call_id}.html"
-        record.banker_report = banker_links.get(banker_id)
+        record.banker_report = banker_links.get(banker_raw)
         if _matches(record, filters):
             records.append(record)
 
     scored_cards = [r.card for r in records if r.card is not None]
     engines = sorted({c.judge_engine for c in scored_cards})
-    models = sorted({Path(c.model).name or c.model for c in scored_cards})
+    models = sorted({_audit_name(c.model) for c in scored_cards})
     stamps = sorted(c.timestamp for c in scored_cards if c.timestamp)
     logger.info("executive batch: %d call(s) in scope, %d scored", len(records),
                 len(scored_cards))
@@ -419,4 +485,5 @@ def _matches(record: CallRecord, f: BatchFilters) -> bool:
         if (record.call_type_key or "").casefold() != wanted and \
                 record.call_type.casefold() != wanted:
             return False
-    return not (f.banker_id is not None and record.banker_id != f.banker_id)
+    return not (f.banker_id is not None and record.banker_raw != f.banker_id
+                and record.banker_id != f.banker_id)

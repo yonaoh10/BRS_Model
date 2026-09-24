@@ -10,10 +10,14 @@ nondeterminism is a report that changes between two identical runs.
 from __future__ import annotations
 
 import json
+import math
 import re
+import time
 from collections.abc import Callable
 from html.parser import HTMLParser
+from pathlib import Path
 
+import numpy as np
 import pytest
 from markupsafe import Markup
 
@@ -32,7 +36,7 @@ from callqa.reporting.executive.charts import (
 )
 
 EVIL = '<script>alert(1)</script> "q" \'s\' & <img src=x onerror=alert(2)>'
-LRI, PDI = "⁦", "⁩"
+LRI, PDI = "\u2066", "\u2069"
 
 
 # -- a tiny DOM, enough to check structure the way a browser would -----------------
@@ -280,9 +284,9 @@ def test_markup_arguments_are_reduced_to_text_not_trusted() -> None:
 
 
 def test_bidi_controls_in_labels_cannot_reorder_the_chart() -> None:
-    out = str(dot_plot([{"label": "B‮101", "mean": 70, "n": 9}], label="x",
+    out = str(dot_plot([{"label": "B\u202e101", "mean": 70, "n": 9}], label="x",
                        reference=None, reference_label=""))
-    assert "‮" not in out and "B101" in out
+    assert "\u202e" not in out and "B101" in out
 
 
 # -- empty and missing data ---------------------------------------------------------
@@ -429,3 +433,243 @@ def test_text_width_estimate_is_monotone_and_errs_wide() -> None:
     assert C._tw("88.8", 11, bold=True) >= 0.95 * (3 * 0.696 + 0.38) * 11
     assert C._fit("זיהוי ואימות לקוח", 40).endswith("…")
     assert C._tw(C._fit("זיהוי ואימות לקוח", 40)) <= 40
+
+
+# -- review regressions ----------------------------------------------------------------
+
+def _path_coords(d: str) -> tuple[list[float], list[float]]:
+    """End points of the M/H/V/A commands the bar helpers write."""
+    xs: list[float] = []
+    ys: list[float] = []
+    for cmd, args in re.findall(r"([MHVAZ])([^MHVAZ]*)", d):
+        nums = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", args)]
+        if cmd == "M":
+            xs.append(nums[0])
+            ys.append(nums[1])
+        elif cmd == "H":
+            xs.append(nums[0])
+        elif cmd == "V":
+            ys.append(nums[0])
+        elif cmd == "A":
+            xs.append(nums[5])
+            ys.append(nums[6])
+    return xs, ys
+
+
+def _ticks_at(raw: str, *, axis: str) -> list[tuple[float, str]]:
+    """(position, text) of the numeric tick labels, isolates removed."""
+    out = []
+    for x, y, text in re.findall(
+            r'<text class="ch-tick" x="([\d.]+)" y="([\d.]+)"[^>]*>([^<]*)</text>', raw):
+        text = text.replace(LRI, "").replace(PDI, "")
+        if re.fullmatch(r"[-−]?[\d,]+(?:\.\d+)?%?", text):
+            out.append((float(x if axis == "x" else y), text))
+    return out
+
+
+def _value(text: str) -> float:
+    return float(text.rstrip("%").replace("−", "-").replace(",", ""))
+
+
+def _assert_linear(pairs: list[tuple[float, float]]) -> None:
+    """Each label names the value at its own position (coordinates are rounded
+    to 0.1px, hence the tolerance)."""
+    (p0, v0), (p1, v1) = pairs[0], pairs[-1]
+    slope = (v1 - v0) / (p1 - p0)
+    for pos, v in pairs:
+        assert abs(v0 + slope * (pos - p0) - v) <= abs(slope) * 0.2 + 1e-9, pairs
+
+
+def test_source_files_carry_no_invisible_bidi_controls() -> None:
+    """Trojan Source (CVE-2021-42574): a literal bidi override inside a string
+    makes a line read differently from how it runs, and code review tools
+    flag the file. These characters are written only as \\u escapes."""
+    controls = re.compile("[\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]")
+    for path in (Path(C.__file__), Path(__file__)):
+        found = controls.search(path.read_text(encoding="utf-8"))
+        assert found is None, f"{path.name}: U+{ord(found.group(0)):04X}" if found else ""
+
+
+def test_histogram_marker_value_is_not_printed_twice() -> None:
+    """render.py passes the median already formatted ("חציון 66.2", from its
+    own round()); the chart printed "חציון 66.2 66.2"."""
+    def text(markers: list[tuple[float, str]]) -> str:
+        return "".join(parse(histogram_chart(_bins(), label="x", x_title="a", y_title="b",
+                                             markers=markers)).text)
+    shown = text([(66.25, "חציון 66.2")])
+    assert "חציון 66.2" in shown and "66.2 66" not in shown and "66.3" not in shown
+    assert "חציון 66.3" in text([(66.25, "חציון")]), "a bare label gets the value"
+    assert "יעד 2026 80" in text([(80, "יעד 2026")]), "an unrelated number is not the value"
+
+
+@pytest.mark.parametrize(("ticks", "scale", "expected"), [
+    ([70, 70.25, 70.5], 1.0, ["70", "70.25", "70.5"]),
+    ([0, 0.025, 0.05], 100.0, ["0", "2.5", "5"]),
+    ([0, 10, 20], 1.0, ["0", "10", "20"]),
+    ([1000, 2000], 1.0, ["1,000", "2,000"]),
+    ([0.0], 1.0, ["0"]),
+])
+def test_tick_texts_keep_the_decimals_the_step_needs(ticks: list[float], scale: float,
+                                                     expected: list[str]) -> None:
+    assert C._tick_texts(ticks, scale=scale) == expected
+
+
+def test_gate_rate_gridlines_are_labelled_with_their_own_value() -> None:
+    """A 2.5% gridline was labelled "3%" (a 0-decimal percent on a 2.5 step)."""
+    raw = str(trend_chart([{"label": f"{d:02d}.09", "mean": 70, "n": 50, "rate": r}
+                           for d, r in ((1, 0.03), (8, 0.04), (15, 0.041))],
+                          label="x", y_title="y", rate_title="כשל שער"))
+    rate = [(pos, _value(t)) for pos, t in _ticks_at(raw, axis="y") if t.endswith("%")]
+    assert len(rate) >= 2 and rate[0][1] == 0
+    _assert_linear(rate)
+
+
+@pytest.mark.parametrize("x_range", [(70, 71), (40, 100), (50, 75), (0, 0.5), (-10, 10),
+                                     (0, 100)])
+@pytest.mark.parametrize("width", [540, 1110])
+def test_dot_plot_tick_labels_are_exact_and_not_crowded(x_range: tuple[float, float],
+                                                        width: int) -> None:
+    raw = str(dot_plot([{"label": "a", "mean": sum(x_range) / 2, "n": 3}], label="x",
+                       reference=None, reference_label="", x_range=x_range, width=width))
+    ticks = _ticks_at(raw, axis="x")
+    assert 3 <= len(ticks) <= 11, ticks
+    assert len({t for _, t in ticks}) == len(ticks), f"two gridlines share a label: {ticks}"
+    _assert_linear([(pos, _value(t)) for pos, t in ticks])
+    step = abs(_value(ticks[1][1]) - _value(ticks[0][1]))
+    mantissa = round(step / 10 ** math.floor(math.log10(step) + 1e-9), 6)
+    assert mantissa in (1, 2, 5), f"1/2/5 steps, no 52.5-style ticks: {ticks}"
+
+
+def test_histogram_x_ticks_are_linear() -> None:
+    raw = str(histogram_chart([(0, 0.25, 3), (0.25, 0.5, 5)], label="x", x_title="a",
+                              y_title="b"))
+    ticks = [(pos, _value(t)) for pos, t in _ticks_at(raw, axis="x")
+             if float(re.search(rf'x="{pos:g}" y="([\d.]+)"', raw).group(1)) > 100]
+    assert len(ticks) >= 3 and len({v for _, v in ticks}) == len(ticks)
+    _assert_linear(ticks)
+
+
+def test_a_mean_or_reference_outside_the_range_widens_the_axis() -> None:
+    """Clamping drew a mean of 30 on the 40 edge of a (40, 80) axis."""
+    raw = str(dot_plot([{"label": "a", "mean": 30.0, "n": 9}], label="x", reference=90.0,
+                       reference_label="r", x_range=(40, 80)))
+    ticks = dict((t, pos) for pos, t in _ticks_at(raw, axis="x"))
+    cx = float(re.search(r'<circle class="ch-dot"[^>]*cx="([\d.]+)"', raw).group(1))
+    ref_x = float(re.search(r'<line class="ch-ref" x1="([\d.]+)"', raw).group(1))
+    assert abs(cx - ticks["30"]) < 0.2 and abs(ref_x - ticks["90"]) < 0.2
+    trend = str(trend_chart([{"label": "a", "mean": 30, "n": 3},
+                             {"label": "b", "mean": 70, "n": 3}],
+                            label="x", y_title="y", y_range=(40, 100)))
+    ys = dict((t, pos) for pos, t in _ticks_at(trend, axis="y"))
+    cy = float(re.search(r'<circle class="ch-dot"[^>]*cy="([\d.]+)"', trend).group(1))
+    assert abs(cy - (ys["20"] + ys["40"]) / 2) < 0.2, "the mean of 30 sits at 30"
+
+
+def test_marks_are_drawn_to_scale() -> None:
+    """Lengths recomputed from the data, independently of the layout code."""
+    # pareto: bar length proportional to value
+    raw = str(pareto_chart([("a", 6.0), ("b", 3.0), ("c", 1.5)], label="x"))
+    lens = [max(xs) - min(xs) for xs, _ in
+            (_path_coords(d) for d in re.findall(r'<path class="ch-bar" d="([^"]+)"', raw))]
+    assert abs(lens[0] / 2 - lens[1]) < 0.3 and abs(lens[0] / 4 - lens[2]) < 0.3
+    # histogram: bar height proportional to count
+    raw = str(CHARTS["histogram"]())
+    heights = [max(ys) - min(ys) for _, ys in
+               (_path_coords(d) for d in re.findall(r'<path class="ch-bar" d="([^"]+)"', raw))]
+    counts = [c for *_, c in _bins() if c]
+    for h, c in zip(heights, counts, strict=True):
+        assert abs(h - heights[counts.index(321)] * c / 321) < 0.3, (h, c)
+    # diverging: both sides on one scale, every bar starting at the zero axis
+    raw = str(CHARTS["diverging"]())
+    zero = float(re.search(r'<line class="ch-axis" x1="([\d.]+)"', raw).group(1))
+    bad = _path_coords(re.search(r'<path class="ch-bar-bad" d="([^"]+)"', raw).group(1))[0]
+    ok = _path_coords(re.search(r'<path class="ch-bar-ok" d="([^"]+)"', raw).group(1))[0]
+    assert abs(max(bad) - zero) < 0.1 and abs(min(ok) - zero) < 0.1
+    assert abs((zero - min(bad)) / (max(ok) - zero) - 6.4 / 3.8) < 0.01
+    # stacked: segment widths (plus the 2px gaps) proportional to the shares
+    raw = str(CHARTS["stacked"]()).split('<g class="ch-lvl-5">')[0] + "<"
+    widths = [float(w) for w in re.findall(r'<g class="ch-lvl-\d"><rect x="[\d.]+" y="[\d.]+" '
+                                           r'width="([\d.]+)"', raw)]
+    segs = [w + (1 if i in (0, 4) else 2) for i, w in enumerate(
+        widths + [float(re.search(r'<g class="ch-lvl-5"><rect x="[\d.]+" y="[\d.]+" '
+                                  r'width="([\d.]+)"', str(CHARTS["stacked"]())).group(1))])]
+    total = sum(segs)
+    for seg, count in zip(segs, [40, 110, 260, 380, 210], strict=True):
+        assert abs(seg / total - count / 1000) < 0.001, (seg, count)
+
+
+def test_huge_and_non_finite_inputs_never_reach_coordinates() -> None:
+    """Spans of +-1e308 overflowed to inf: the histogram raised OverflowError
+    and other charts wrote x="nan"."""
+    outs = [
+        histogram_chart([(-1e308, 1e308, 5), (0, 1, 2)], label="x", x_title="a", y_title="b"),
+        diverging_bars([{"label": "a", "value": 1e308}, {"label": "b", "value": -1e308},
+                        {"label": "c", "value": 2}], label="x"),
+        sparkline([1e308, -1e308, 3], label="x"),
+        pareto_chart([("a", 1e308), ("b", 1e308), ("c", 1)], label="x", total_label="t"),
+        trend_chart([{"label": "a", "mean": 1e300, "n": 1e300},
+                     {"label": "b", "mean": 50, "n": 3}], label="x", y_title="y"),
+        dot_plot([{"label": "a", "mean": -1e300, "n": 1}, {"label": "b", "mean": 5, "n": 1}],
+                 label="x", reference=1e300, reference_label="r"),
+    ]
+    for out in outs:
+        parse(out)
+        assert not re.search(r'="[^"]*\b(?:nan|inf|infinity)\b', str(out), re.I), out
+
+
+def test_filter_payload_is_strict_json_whatever_the_caller_passes() -> None:
+    """NaN made invalid JSON (the page's JSON.parse fails, so the click does
+    nothing), a tuple key raised TypeError, and a set's order followed the
+    hash seed."""
+    filters = [{"v": float("nan"), "w": np.float64("inf"), "n": np.int64(5)},
+               {("k", 1): 1}, {"s": {"b", "a", "c"}}]
+    out = str(pareto_chart([("a", 3.0), ("b", 2.0), ("c", 1.0)], label="x", filters=filters))
+
+    def strict(const: str) -> None:
+        raise ValueError(f"not JSON: {const}")
+    got = [json.loads(a["data-filter"] or "", parse_constant=strict)
+           for _t, a in parse(out).with_class("ch-link")]
+    assert got == [{"v": None, "w": None, "n": 5}, {"('k', 1)": 1}, {"s": ["a", "b", "c"]}]
+
+
+def test_symbol_equals_number_is_isolated_so_counts_stay_with_their_noun() -> None:
+    """The drivers chart's detail "ρ=−0.40 · 960 שיחות" displayed as
+    "שיחות ρ=−0.40 · 960": the Latin ρ pulled 960 into its LTR run."""
+    assert C._bidi("ρ=−0.40 · 960 שיחות") == f"{LRI}ρ=−0.40{PDI} · 960 שיחות"
+    assert C._bidi("ρ=0.36 · 960 שיחות") == f"{LRI}ρ=0.36{PDI} · 960 שיחות"
+    for safe in ("B101", "B-101", "74.3", "הקשבה=טובה", "סה״כ ל־100"):
+        assert C._bidi(safe) == safe
+
+
+def test_long_labels_are_truncated_in_linear_time() -> None:
+    """_fit re-measured the whole label once per dropped character: ten
+    3,000-character labels took ~6 s, and this input minutes."""
+    label = "זיהוי ואימות לקוח " * 1500
+    start = time.perf_counter()
+    out = str(pareto_chart([(label, 2.0), ("b", 1.0)] * 5, label="x"))
+    assert time.perf_counter() - start < 1.0
+    assert "…" in out
+    for max_w in (5, 40, 120, 300):
+        cut = C._fit(label, max_w)
+        assert cut == "…" or (C._tw(cut) <= max_w + 1e-6 and label.startswith(cut[:-1]))
+
+
+def test_sizes_that_are_not_numbers_fall_back_to_defaults() -> None:
+    for bad in (None, "wide", float("nan"), float("inf")):
+        svg = parse(pareto_chart([("a", 1.0)], label="x", width=bad)).all("svg")[0]  # type: ignore[arg-type]
+        assert (svg["viewbox"] or "").split()[2] == "720"
+    assert (parse(pareto_chart([("a", 1.0)], label="x", width="540")).all("svg")[0]["viewbox"]
+            or "").split()[2] == "540"  # type: ignore[arg-type]
+    parse(dot_plot([{"label": "a", "mean": 5, "n": 1}], label="x", reference=None,
+                   reference_label="", row_height=None))  # type: ignore[arg-type]
+    assert 'viewBox="0 0 120 32"' in str(sparkline([1, 2], label="x", width=None,  # type: ignore[arg-type]
+                                                   height="x"))  # type: ignore[arg-type]
+
+
+def test_reference_line_does_not_strike_through_the_repeated_top_axis() -> None:
+    rows = [{"label": f"B{i}", "mean": 60 + i, "n": 9} for i in range(20)]
+    raw = str(dot_plot(rows, label="x", reference=70.0, reference_label="חציון",
+                       x_range=(40, 100)))
+    texts = [t for _pos, t in _ticks_at(raw, axis="x")]
+    assert texts.count("60") == 2, "long lists repeat the axis at the top"
+    assert texts.count("70") == 1, "the tick under the reference line is left to the bottom axis"
