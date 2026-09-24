@@ -64,7 +64,7 @@ JOURNEY_REPORT_FILE_RE = re.compile(r"journey(?:-[A-Za-z0-9][A-Za-z0-9._-]{0,60}
 # Each story card carries a timeline drawing (~6 KB). Past this many stories
 # the rest keep their card and table, and the drawing goes to the stories a
 # reader opens first: most returns, then most failures.
-MAX_TIMELINES = 400
+MAX_TIMELINES = 300
 MAX_QUOTE = 320
 
 W_FULL, W_HALF = 1110, 540
@@ -469,7 +469,10 @@ def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDa
             "branch": s.branch or "—", "topic": tax.topic_label(s.topic),
             "status": STATUS_HE.get(s.status, s.status), "status_key": s.status,
             "status_basis": BASIS_HE.get(s.status_basis, ""),
-            "status_note": verdict.status_note_he if verdict else "",
+            # the rules' note is ours; the model's is text from calls, like a quote
+            "status_note": (_prose(verdict.status_note_he)
+                            if verdict and (with_text or verdict.status_basis != "content")
+                            else ""),
             "model_status": STATUS_HE.get(verdict.model_status or "", "") if verdict else "",
             "headline": _prose(verdict.headline_he) if (verdict and with_text) else "",
             "narrative": _prose(verdict.narrative_he, 1200) if (verdict and with_text) else "",

@@ -73,6 +73,7 @@ def _content(config) -> ContentLayer:
         quotes=[ev]) for i in recorded}
     verdicts = {s.story_key: StoryVerdict(story_key=s.story_key, topic="loans_mortgages",
                                           status="open", status_basis="content",
+                                          status_note_he="הערת סטטוס שכתב המודל",
                                           headline_he="לקוח שחיכה לטלפון",
                                           narrative_he=f"הלקוח (ת.ז. {FAKE_ID}) פנה שלוש פעמים.")
                 for s in ds.stories}
@@ -134,6 +135,7 @@ def test_no_quotes_version_carries_no_text_from_calls(config):
     assert "כבר התקשרתי אתמול" not in html
     assert "נימוק ייחודי שכתב המודל" not in html
     assert "לקוח שחיכה לטלפון" not in html
+    assert "הערת סטטוס שכתב המודל" not in html
     assert "ללא ציטוטים ונימוקים" in html
 
 
