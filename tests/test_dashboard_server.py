@@ -222,6 +222,22 @@ def test_serves_generated_reports(live_server: str) -> None:
     assert _status(f"{live_server}/reports/index.html?t=test-token-value") == 200
 
 
+def test_serves_the_management_report_without_raw_text(live_server: str,
+                                                        pipeline_output: Path) -> None:
+    """`callqa report` writes reports/executive.html; the dashboard links and
+    serves it, and it carries none of the raw identifiers in the fixture."""
+    assert "executive.html" in collect_state(pipeline_output)["reports"]["executive"]
+    url = f"{live_server}/reports/executive.html?t=test-token-value"
+    assert _status(url) == 200
+    with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310 - loopback test server
+        body = resp.read().decode("utf-8")
+    assert "דוח מנהלים" in body
+    assert RAW_ID not in body and RAW_PHONE not in body
+    for rel in ("executivex.html", "executive-.html", "executive/x.html",
+                "executive-%5C%5Chost%5Cx.html", "executive-a/b.html"):
+        assert _status(f"{live_server}/reports/{rel}?t=test-token-value") == 404, rel
+
+
 # ------------------------------------------------------- transcript endpoint
 
 def _get_json(url: str) -> dict:

@@ -65,10 +65,13 @@ logger = logging.getLogger("callqa.dashboard")
 
 PAGE = Path(__file__).parent / "prototype.html"
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
-# Everything the report tree contains, as a pattern: index and calibration
-# pages at the top, one page per call and per banker below.
+# Everything the report tree contains, as a pattern: index, calibration and
+# the management reports (executive.html, executive-<scope>.html) at the top,
+# one page per call and per banker below.
+_EXECUTIVE_RE = r"executive(?:-[A-Za-z0-9][A-Za-z0-9._-]{0,60})?"
 _REPORT_PATH_RE = re.compile(
-    r"(index|calibration)\.html|(calls|bankers)/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.html")
+    rf"(index|calibration|{_EXECUTIVE_RE})\.html"
+    r"|(calls|bankers)/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.html")
 # Bounds on one /api/transcript response - a real call is far under these; the
 # caps stop a corrupt or pathological artifact from serving an unbounded body.
 MAX_TRANSCRIPT_TURNS = 5000
@@ -190,7 +193,12 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
         logger.debug("could not read run state: %s", exc)
 
     needs_review = sum(1 for c in calls if c["gate"] or c["status"] == "needs_human_review")
+    reports_dir = output_dir / "reports"
+    executive = sorted(
+        p.name for p in (reports_dir.glob("executive*.html") if reports_dir.is_dir() else [])
+        if _REPORT_PATH_RE.fullmatch(p.name))
     return {
+        "reports": {"executive": executive},
         "calls": calls,
         "dims": dims,
         "bankers": bankers,

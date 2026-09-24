@@ -334,7 +334,8 @@ echo exit: %ERRORLEVEL%          # cmd.exe;  PowerShell: $LASTEXITCODE;  bash: $
 | `callqa process --audio F` | One call. **Exit `0` success, `1` needs human review, `2` failed.** Wire a scheduler straight into this. |
 | `callqa watch` | Polls the input directory and processes new recordings as they land. |
 | `callqa run` | Processes everything listed in `metadata.csv`. |
-| `callqa report` | Per-banker aggregate reports plus an index. |
+| `callqa report` | Per-banker aggregate reports, an index, and the management report over the whole batch. |
+| `callqa executive-report` | The management report (three levels: executive summary, analysis, every call) for a period, call type or banker; `--no-quotes` for wide distribution. See `docs/executive_report_he.md`. |
 | `callqa review-queue` / `callqa review` | Lists calls held for a human, and records the human's verdict back into the calibration set. |
 | `callqa calibrate` | Agreement between the judge and human raters (QWK). Needs ≥20 human-rated calls to mean anything. |
 | `callqa verify <call>` | Is a stored result still reproducible, and if not, which input changed. |
@@ -387,6 +388,13 @@ with `icacls` to the current user, SYSTEM and Administrators (§2.1).
 | `transcripts/*.redacted.json` | no | kept |
 | `audio/redacted/` | no — silenced wherever the text was masked | kept |
 | `scores/`, `features/`, `reports/`, `runs/`, `drift/` | no | kept |
+
+The management report (`reports/executive*.html`) gathers a whole batch's
+redacted evidence quotes into one portable file, which makes it the file most
+likely to be forwarded. It shows text only from calls whose redaction is
+verified on, and names bankers by id only; residual names a redactor can miss
+travel with it all the same. For distribution beyond the quality team, produce
+it with `callqa executive-report --no-quotes`, which carries numbers only.
 
 `callqa retention` enforces the window and logs every deletion. Note that
 unlinking a file on an SSD does not overwrite the bytes; full-disk encryption is

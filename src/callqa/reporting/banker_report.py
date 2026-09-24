@@ -111,6 +111,15 @@ def generate_banker_reports(
         atomic_write_text(path, html)
         written.append(path)
 
+    written.append(_write_index(output_dir, cards, aggregates, slugs, footer))
+    return written
+
+
+def _write_index(output_dir: Path, cards: list[ScoreCard],
+                 aggregates: dict[str, BankerAggregate], slugs: dict[str, str],
+                 footer: str) -> Path:
+    reports = output_dir / "reports"
+    executive = sorted(p.name for p in reports.glob("executive*.html")) if reports.is_dir() else []
     index_template = jinja_env().get_template("index.html.j2")
     index_html = index_template.render(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -118,10 +127,23 @@ def generate_banker_reports(
         bankers=list(aggregates.values()),
         banker_slugs=slugs,
         cards=sorted(cards, key=lambda c: c.call_id),
-        calibration_exists=(output_dir / "reports" / "calibration.html").exists(),
+        calibration_exists=(reports / "calibration.html").exists(),
+        executive_reports=executive,
         footer_meta=footer,
     )
-    index_path = output_dir / "reports" / "index.html"
+    index_path = reports / "index.html"
     atomic_write_text(index_path, index_html)
-    written.append(index_path)
-    return written
+    return index_path
+
+
+def refresh_index(output_dir: Path, rubric: Rubric, group_comparison: str = "median") -> Path:
+    """Re-render only reports/index.html - after a management report was
+    written, so the index links it."""
+    cards = load_scorecards(output_dir)
+    if not cards:
+        raise FileNotFoundError(
+            f"no scorecards found under {output_dir / 'scores'} - run the pipeline first"
+        )
+    aggregates, _, _ = aggregate_bankers(cards, rubric, group_comparison)
+    slugs = _banker_slugs([agg.banker_id for agg in aggregates.values()])
+    return _write_index(output_dir, cards, aggregates, slugs, _footer_meta(cards))

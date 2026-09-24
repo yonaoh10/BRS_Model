@@ -248,6 +248,9 @@ def test_full_run_report_calibrate_no_leaks(tmp_path: Path, workspace) -> None: 
         assert (out / "reports" / "calls" / f"{call_id}.html").exists()
         assert state.completed_stages(call_id) == ALL_STAGES
     assert (out / "reports" / "index.html").exists()
+    # The management report and its exports - covered by the sweep below.
+    for name in ("executive.html", "executive_calls.csv", "executive.json"):
+        assert (out / "reports" / name).exists(), name
     assert (out / "reports" / "calibration.html").exists()
     assert (out / "reports" / "calibration.json").exists()
     banker_reports = list((out / "reports" / "bankers").glob("*.html"))

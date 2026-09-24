@@ -70,16 +70,22 @@ def main(argv: list[str] | None = None) -> int:
     if not (DEMO / "input" / "metadata.csv").is_file():
         if _step("scripts/generate_sample_data.py", "--input-dir", str(DEMO / "input")) != 0:
             return 1
-    for cmd in (("-m", "callqa", "run", "--mock"), ("-m", "callqa", "report", "--mock")):
-        if _step(*cmd) != 0:
-            print("\nFIRST RUN FAILED at the step above.", file=sys.stderr)
-            return 1
+    if _step("-m", "callqa", "run", "--mock") != 0:
+        print("\nFIRST RUN FAILED at the step above.", file=sys.stderr)
+        return 1
     # Calibration FAILs on six synthetic calls by design (too few to measure
-    # agreement); it is run to prove it works, not for its verdict.
+    # agreement); it is run to prove it works, not for its verdict - and before
+    # the reports, so the management report shows the calibration status.
     _step("-m", "callqa", "calibrate", "--mock")
+    if _step("-m", "callqa", "report", "--mock") != 0:
+        print("\nFIRST RUN FAILED at the step above.", file=sys.stderr)
+        return 1
 
-    index = DEMO / "output" / "reports" / "index.html"
-    print(f"\nFirst run OK. Reports: {index}")
+    reports = DEMO / "output" / "reports"
+    print(f"\nFirst run OK. Reports: {reports / 'index.html'}")
+    print(f"Management report: {reports / 'executive.html'}")
+    print("To see the management report on 1,000 calls: "
+          "scripts/generate_batch_demo.py (see README).")
     dashboard = ROOT / "dashboard" / "server.py"
     if args.no_dashboard or not dashboard.is_file():
         return 0

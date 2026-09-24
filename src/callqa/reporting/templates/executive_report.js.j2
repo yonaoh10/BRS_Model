@@ -1,0 +1,577 @@
+/* Management report behaviour. Plain ES2017, no libraries, no network.
+   Every string from the data is placed with textContent - never innerHTML -
+   so a quote containing markup can only ever be shown, not run. Nothing from
+   the report is stored: only the colour-theme preference. */
+(function () {
+  "use strict";
+  var doc = document;
+  var data;
+  try {
+    data = JSON.parse(doc.getElementById("xr-data").textContent);
+  } catch (e) {
+    data = {calls: [], dims: [], bankers: {}, text: {}, gd: [], gm: null, features: []};
+  }
+  var DIMS = data.dims || [];
+  var CALLS = data.calls || [];
+  var TEXT = data.text || {};
+  var BANKERS = data.bankers || {};
+  var DIM_INDEX = {};
+  DIMS.forEach(function (d, i) { DIM_INDEX[d.id] = i; });
+  var STATUS_HE = {success: "נוקדה", needs_human_review: "ממתינה לבדיקה", failed: "לא עובדה"};
+  var SPEAKER_HE = {banker: "בנקאי", customer: "לקוח"};
+  var BAND_HE = {4: "גבוה", 3: "בינוני", 2: "גבולי", 1: "חלש"};
+  var DUR_HE = data.durations || {};
+
+  function el(tag, attrs, text) {
+    var node = doc.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) {
+        if (attrs[k] === null || attrs[k] === undefined || attrs[k] === false) { return; }
+        if (k === "class") { node.className = attrs[k]; } else { node.setAttribute(k, attrs[k]); }
+      });
+    }
+    if (text !== undefined && text !== null) { node.textContent = String(text); }
+    return node;
+  }
+  function fmt(v, digits) {
+    if (v === null || v === undefined || isNaN(v)) { return "—"; }
+    var d = digits === undefined ? 1 : digits;
+    var r = Math.round(v * Math.pow(10, d)) / Math.pow(10, d);
+    return (r === Math.round(r) && d <= 1) ? String(Math.round(r)) : r.toFixed(d);
+  }
+  function pct(k, n) { return n ? fmt(100 * k / n) + "%" : "—"; }
+  function band(t) { return t >= 80 ? 4 : t >= 60 ? 3 : t >= 40 ? 2 : 1; }
+  function lvl(s) { return "lvl lvl-" + Math.max(1, Math.min(5, Math.round(s))); }
+  function mmss(sec) {
+    if (sec === null || sec === undefined) { return "—"; }
+    var m = Math.floor(sec / 60), s = Math.round(sec % 60);
+    if (s === 60) { m += 1; s = 0; }
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+  function dateHe(iso) {
+    if (!iso) { return "—"; }
+    var p = iso.split("-");
+    return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : iso;
+  }
+
+  /* ------------------------------------------------ dashboard token
+     Served by the dashboard, the page carries its access token in ?t=; a
+     relative link without it is refused. Opened from disk there is no token
+     and links are left alone. */
+  (function () {
+    var token = null;
+    try { token = new URLSearchParams(location.search).get("t"); } catch (e) { token = null; }
+    if (!token) { return; }
+    Array.prototype.forEach.call(doc.querySelectorAll("a[href]"), function (a) {
+      var href = a.getAttribute("href");
+      if (!href || href.charAt(0) === "#" || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.charAt(0) === "/") { return; }
+      var hash = "";
+      var i = href.indexOf("#");
+      if (i >= 0) { hash = href.slice(i); href = href.slice(0, i); }
+      a.setAttribute("href", href + (href.indexOf("?") >= 0 ? "&" : "?") + "t=" + encodeURIComponent(token) + hash);
+    });
+  })();
+
+  /* ------------------------------------------------ theme + print */
+  (function () {
+    var root = doc.documentElement;
+    try {
+      var saved = localStorage.getItem("callqa-report-theme");
+      if (saved === "light" || saved === "dark") { root.setAttribute("data-theme", saved); }
+    } catch (e) { /* storage blocked: follow the system */ }
+    var btn = doc.getElementById("btn-theme");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var dark = root.getAttribute("data-theme") === "dark" ||
+          (!root.getAttribute("data-theme") && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+        var next = dark ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem("callqa-report-theme", next); } catch (e) { /* ignore */ }
+      });
+    }
+    var pr = doc.getElementById("btn-print");
+    if (pr) { pr.addEventListener("click", function () { window.print(); }); }
+  })();
+
+  /* ------------------------------------------------ level navigation */
+  (function () {
+    var links = doc.querySelectorAll(".levels a[data-level]");
+    if (!links.length) { return; }
+    var ids = Array.prototype.map.call(links, function (a) { return a.getAttribute("data-level"); });
+    var pending = false;
+    function update() {
+      pending = false;
+      var current = ids[0];
+      ids.forEach(function (id) {
+        var sec = doc.getElementById(id);
+        if (sec && sec.getBoundingClientRect().top < 140) { current = id; }
+      });
+      Array.prototype.forEach.call(links, function (a) {
+        if (a.getAttribute("data-level") === current) { a.setAttribute("aria-current", "true"); }
+        else { a.removeAttribute("aria-current"); }
+      });
+    }
+    window.addEventListener("scroll", function () {
+      if (!pending) { pending = true; window.requestAnimationFrame(update); }
+    }, {passive: true});
+    update();
+  })();
+
+  /* ------------------------------------------------ case library tabs */
+  (function () {
+    var tabs = doc.querySelectorAll("[data-case]");
+    Array.prototype.forEach.call(tabs, function (tab) {
+      tab.addEventListener("click", function () {
+        Array.prototype.forEach.call(tabs, function (t) {
+          var on = t === tab;
+          t.setAttribute("aria-selected", on ? "true" : "false");
+          var panel = doc.getElementById("case-" + t.getAttribute("data-case"));
+          if (panel) { panel.hidden = !on; }
+        });
+      });
+    });
+  })();
+
+  /* ------------------------------------------------ explorer */
+  var S = {};
+  function resetState() {
+    S = {q: "", banker: "", bankers: null, type: "", band: "", gate: "", status: "scored",
+         dim: "", dimop: "", from: "", to: "", dur: "", layout: "", feature: "", fmin: null,
+         sort: "tot", dir: -1, page: 0, size: 50, open: null};
+  }
+  resetState();
+
+  var $ = function (id) { return doc.getElementById(id); };
+  var controls = {q: "xp-q", banker: "xp-banker", type: "xp-type", band: "xp-band", gate: "xp-gate",
+                  status: "xp-status", dim: "xp-dim", dimop: "xp-dimop", from: "xp-from", to: "xp-to",
+                  dur: "xp-dur", size: "xp-size"};
+
+  function fillOptions() {
+    var bankerSel = $("xp-banker"), typeSel = $("xp-type"), dimSel = $("xp-dim");
+    if (!bankerSel) { return; }
+    Object.keys(BANKERS).sort().forEach(function (b) { bankerSel.appendChild(el("option", {value: b}, b)); });
+    var types = {};
+    CALLS.forEach(function (c) { if (c.t) { types[c.t] = (types[c.t] || 0) + 1; } });
+    Object.keys(types).sort().forEach(function (t) { typeSel.appendChild(el("option", {value: t}, t + " (" + types[t] + ")")); });
+    DIMS.forEach(function (d) { dimSel.appendChild(el("option", {value: d.id}, d.name)); });
+    var key = $("xp-dimkey");
+    if (key) { key.textContent = "(" + DIMS.map(function (d, i) { return (i + 1) + " " + d.short; }).join(" · ") + ")"; }
+  }
+
+  function syncControls() {
+    Object.keys(controls).forEach(function (k) {
+      var c = $(controls[k]);
+      if (!c) { return; }
+      var v = S[k] === null || S[k] === undefined ? "" : String(S[k]);
+      if (c.tagName === "SELECT" && !Array.prototype.some.call(c.options, function (o) { return o.value === v; })) {
+        v = "";
+      }
+      c.value = v;
+    });
+  }
+
+  function matches(c) {
+    if (S.status === "scored") { if (c.s !== "success" || c.tot === null) { return false; } }
+    else if (S.status && c.s !== S.status) { return false; }
+    if (S.q && c.id.toLowerCase().indexOf(S.q.toLowerCase()) < 0) { return false; }
+    if (S.banker && c.b !== S.banker) { return false; }
+    if (S.bankers && S.bankers.indexOf(c.b) < 0) { return false; }
+    if (S.type && c.t !== S.type) { return false; }
+    if (S.from && (!c.d || c.d < S.from)) { return false; }
+    if (S.to && (!c.d || c.d > S.to)) { return false; }
+    if (S.dur && c.du !== S.dur) { return false; }
+    if (S.layout && c.ly !== S.layout) { return false; }
+    if (S.band) { if (c.tot === null || String(band(c.tot)) !== String(S.band)) { return false; } }
+    if (S.gate === "any" && !(c.g && c.g.length)) { return false; }
+    if (S.gate === "none" && c.g && c.g.length) { return false; }
+    if (S.gate && S.gate !== "any" && S.gate !== "none" && (!c.g || c.g.indexOf(S.gate) < 0)) { return false; }
+    if (S.dim && S.dimop) {
+      var i = DIM_INDEX[S.dim];
+      if (!c.sc || i === undefined) { return false; }
+      var v = c.sc[i], op = S.dimop.split(":"), lim = Number(op[1]);
+      if (op[0] === "max" && !(v <= lim)) { return false; }
+      if (op[0] === "min" && !(v >= lim)) { return false; }
+      if (op[0] === "eq" && v !== lim) { return false; }
+    }
+    if (S.feature && S.fmin !== null) {
+      var fv = c.f ? c.f[S.feature] : null;
+      if (fv === null || fv === undefined || fv < S.fmin) { return false; }
+    }
+    return true;
+  }
+
+  function sortKey(c) {
+    var k = S.sort;
+    if (k === "tot") { return c.tot === null ? -1 : c.tot; }
+    if (k === "dur") { return c.sec === null ? -1 : c.sec; }
+    return c[k] || "";
+  }
+
+  var filtered = [];
+  function compute() {
+    filtered = CALLS.filter(matches);
+    filtered.sort(function (a, b) {
+      var x = sortKey(a), y = sortKey(b);
+      if (x < y) { return -1 * S.dir; }
+      if (x > y) { return 1 * S.dir; }
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+  }
+
+  function activeChips() {
+    var box = $("xp-active");
+    if (!box) { return; }
+    box.textContent = "";
+    var chips = [];
+    if (S.bankers) { chips.push(["bankers", "בנקאים: " + S.bankers.join(", ")]); }
+    if (S.feature && S.fmin !== null) {
+      var feat = (data.features || []).filter(function (f) { return f.key === S.feature; })[0];
+      chips.push(["feature", (feat ? feat.label : S.feature) + " ≥ " + fmt(S.fmin)]);
+    }
+    if (S.layout) { chips.push(["layout", S.layout === "mono" ? "הקלטות חד־ערוציות" : "הקלטות סטריאו"]); }
+    if (S.gate && S.gate !== "any" && S.gate !== "none") {
+      var d = DIMS[DIM_INDEX[S.gate]];
+      chips.push(["gate", "כשל שער: " + (d ? d.name : S.gate)]);
+    }
+    chips.forEach(function (c) {
+      var chip = el("span", {class: "chip"}, c[1]);
+      var x = el("button", {type: "button", "aria-label": "הסרת הסינון"}, "×");
+      x.addEventListener("click", function () {
+        if (c[0] === "bankers") { S.bankers = null; }
+        if (c[0] === "feature") { S.feature = ""; S.fmin = null; }
+        if (c[0] === "layout") { S.layout = ""; }
+        if (c[0] === "gate") { S.gate = ""; }
+        S.page = 0; render();
+      });
+      chip.appendChild(x);
+      box.appendChild(chip);
+    });
+  }
+
+  function summary() {
+    var box = $("xp-sum");
+    if (!box) { return; }
+    box.textContent = "";
+    var scored = filtered.filter(function (c) { return c.tot !== null; });
+    var n = scored.length;
+    var mean = n ? scored.reduce(function (s, c) { return s + c.tot; }, 0) / n : null;
+    var gates = scored.filter(function (c) { return c.g && c.g.length; }).length;
+    var high = scored.filter(function (c) { return c.tot >= 80; }).length;
+    [[String(filtered.length), "שיחות בסינון"], [fmt(mean), "מדד ממוצע (כלל הדוח: " + fmt(data.gm) + ")"],
+     [pct(gates, n), "כשל שער"], [pct(high, n), "ברמה גבוהה"]].forEach(function (kv) {
+      var cell = el("div");
+      cell.appendChild(el("div", {class: "v n"}, kv[0]));
+      cell.appendChild(el("div", {class: "l"}, kv[1]));
+      box.appendChild(cell);
+    });
+    var dims = el("div", {class: "xp-dims", "aria-label": "ממוצע לפי ממד בסינון, מול כלל הדוח"});
+    DIMS.forEach(function (d, i) {
+      var vals = scored.map(function (c) { return c.sc ? c.sc[i] : null; }).filter(function (v) { return v !== null; });
+      var m = vals.length ? vals.reduce(function (s, v) { return s + v; }, 0) / vals.length : null;
+      var row = el("div", {class: "row", title: d.name + ": " + fmt(m, 2) + " (כלל הדוח " + fmt(data.gd[i], 2) + ")"});
+      row.appendChild(el("span", null, d.short));
+      var track = el("div", {class: "track"});
+      var fill = el("div", {class: "fill"});
+      fill.style.inlineSize = m === null ? "0" : (100 * (m - 1) / 4) + "%";
+      var mark = el("div", {class: "mark"});
+      mark.style.insetInlineStart = data.gd[i] === null ? "0" : (100 * (data.gd[i] - 1) / 4) + "%";
+      track.appendChild(fill); track.appendChild(mark);
+      row.appendChild(track);
+      row.appendChild(el("span", {class: "n"}, fmt(m, 1)));
+      dims.appendChild(row);
+    });
+    box.appendChild(dims);
+  }
+
+  function profile() {
+    var box = $("xp-profile");
+    if (!box) { return; }
+    box.textContent = "";
+    var b = S.banker ? BANKERS[S.banker] : null;
+    if (!b) { return; }
+    var card = el("div", {class: "profile"});
+    var h = el("h4");
+    h.appendChild(doc.createTextNode("פרופיל בנקאי "));
+    h.appendChild(el("span", {class: "mono"}, S.banker));
+    card.appendChild(h);
+    var flagText = {bad: "נמוך באופן מובהק משאר הבנקאים", ok: "גבוה באופן מובהק משאר הבנקאים",
+                    none: "אין הבדל מובהק משאר הבנקאים", few: "מעט שיחות — לא מדורג"}[b.flag] || "";
+    var p = el("p", {class: "small"});
+    p.appendChild(doc.createTextNode(b.n + " שיחות מנוקדות · מדד ממוצע "));
+    p.appendChild(el("b", {class: "n"}, fmt(b.mean)));
+    if (b.lo !== null && b.hi !== null) { p.appendChild(el("span", {class: "n muted"}, " (" + fmt(b.lo) + "–" + fmt(b.hi) + ")")); }
+    p.appendChild(doc.createTextNode(" · " + flagText));
+    card.appendChild(p);
+    if (b.weak) {
+      var w = DIMS[DIM_INDEX[b.weak]];
+      var line = el("p", {class: "small"});
+      line.appendChild(doc.createTextNode("הממד החלש: "));
+      line.appendChild(el("b", null, w ? w.name : b.weak));
+      if (b.coach) { line.appendChild(doc.createTextNode(" — המלצה: " + b.coach)); }
+      card.appendChild(line);
+    }
+    if (b.link) {
+      var a = el("a", {href: b.link}, "לדוח הבנקאי המלא");
+      card.appendChild(a);
+    }
+    box.appendChild(card);
+  }
+
+  function statusBadge(c) {
+    if (c.s === "success") {
+      if (c.g && c.g.length) {
+        return el("span", {class: "badge b-bad", title: c.g.map(function (g) {
+          var d = DIMS[DIM_INDEX[g]]; return d ? d.name : g; }).join(", ")}, "כשל שער");
+      }
+      return el("span", {class: "muted", "aria-label": "ללא כשל שער"}, "—");
+    }
+    return el("span", {class: "badge " + (c.s === "failed" ? "b-bad" : "b-warn"), title: c.r || ""}, STATUS_HE[c.s] || c.s);
+  }
+
+  function drawer(c) {
+    var tr = el("tr", {class: "drawer"});
+    var td = el("td", {colspan: "8"});
+    var t = TEXT[c.id];
+    var meta = el("div", {class: "sum small"});
+    meta.appendChild(el("b", null, "שיחה "));
+    meta.appendChild(el("span", {class: "mono"}, c.id));
+    meta.appendChild(doc.createTextNode(" · " + STATUS_HE[c.s] + (c.r ? " (" + c.r + ")" : "") +
+      (c.ly === "mono" ? " · הקלטה חד־ערוצית" : "")));
+    td.appendChild(meta);
+    if (t) {
+      if (t.sum) { td.appendChild(el("p", {class: "sum"}, t.sum)); }
+      if ((t.str && t.str.length) || t.dev) {
+        var p = el("p", {class: "small"});
+        if (t.str && t.str.length) { p.appendChild(el("b", null, "חוזקות: ")); p.appendChild(doc.createTextNode(t.str.join(" · ") + " ")); }
+        if (t.dev) { p.appendChild(el("b", null, "לשיפור: ")); p.appendChild(doc.createTextNode(t.dev)); }
+        td.appendChild(p);
+      }
+    } else if (c.s === "success") {
+      td.appendChild(el("p", {class: "small muted"}, data.withText
+        ? "טקסט משיחה זו אינו מוצג: לא ניתן היה לאמת שהסתרת הפרטים פעלה בה."
+        : "גרסה להפצה רחבה: נימוקים וציטוטים אינם מוצגים."));
+    }
+    if (c.sc) {
+      var grid = el("div", {class: "dgrid"});
+      DIMS.forEach(function (d, i) {
+        var box = el("div", {class: "dcard"});
+        var top = el("div", {class: "top"});
+        top.appendChild(el("span", {class: lvl(c.sc[i])}, String(c.sc[i])));
+        top.appendChild(el("b", null, d.name));
+        if (d.gate && c.g && c.g.indexOf(d.id) >= 0) { top.appendChild(el("span", {class: "badge b-bad"}, "כשל שער")); }
+        box.appendChild(top);
+        var dt = t && t.dims ? t.dims[i] : null;
+        if (dt) {
+          if (dt[0]) { box.appendChild(el("p", null, dt[0])); }
+          if (dt[1]) {
+            var q = el("div", {class: "quote"});
+            q.appendChild(doc.createTextNode("„" + dt[1] + "”"));
+            q.appendChild(el("span", {class: "ts"}, (SPEAKER_HE[dt[3]] || "") + " · " + (dt[2] || "")));
+            box.appendChild(q);
+          }
+        }
+        grid.appendChild(box);
+      });
+      td.appendChild(grid);
+    }
+    var links = el("div", {class: "small", style: "margin-top:10px;display:flex;gap:16px;flex-wrap:wrap"});
+    if (c.rep) { links.appendChild(el("a", {href: withToken(c.rep)}, "דוח השיחה המלא")); }
+    var b = BANKERS[c.b];
+    if (b && b.link) { links.appendChild(el("a", {href: withToken(b.link)}, "דוח הבנקאי")); }
+    var only = el("a", {href: "#explorer"}, "כל השיחות של הבנקאי");
+    only.addEventListener("click", function (e) { e.preventDefault(); applyFilter({banker: c.b}); });
+    links.appendChild(only);
+    td.appendChild(links);
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function withToken(href) {
+    var token = null;
+    try { token = new URLSearchParams(location.search).get("t"); } catch (e) { token = null; }
+    return token ? href + "?t=" + encodeURIComponent(token) : href;
+  }
+
+  function rows() {
+    var body = $("xp-body");
+    if (!body) { return; }
+    body.textContent = "";
+    var start = S.page * S.size;
+    var page = filtered.slice(start, start + S.size);
+    if (!page.length) {
+      var tr0 = el("tr");
+      tr0.appendChild(el("td", {colspan: "8", class: "muted"}, "אין שיחות שמתאימות לסינון."));
+      body.appendChild(tr0);
+    }
+    page.forEach(function (c) {
+      var tr = el("tr", {class: "row", tabindex: "0", "aria-expanded": S.open === c.id ? "true" : "false"});
+      tr.appendChild(el("td", {class: "mono"}, c.id));
+      tr.appendChild(el("td", {class: "n"}, dateHe(c.d)));
+      tr.appendChild(el("td", {class: "mono"}, c.b));
+      tr.appendChild(el("td", null, c.t || "—"));
+      tr.appendChild(el("td", {class: "num n"}, mmss(c.sec)));
+      var tot = el("td", {class: "num"});
+      if (c.tot !== null) { tot.appendChild(el("b", {class: "n"}, fmt(c.tot))); } else { tot.appendChild(el("span", {class: "muted"}, "—")); }
+      tr.appendChild(tot);
+      var st = el("td", {class: "st"});
+      st.appendChild(statusBadge(c));
+      tr.appendChild(st);
+      var sc = el("td", {class: "scores"});
+      if (c.sc) {
+        c.sc.forEach(function (v, i) { sc.appendChild(el("span", {class: lvl(v), title: DIMS[i].name + ": " + v}, String(v))); });
+      } else { sc.appendChild(el("span", {class: "muted small"}, c.r || "")); }
+      tr.appendChild(sc);
+      function toggle() { S.open = S.open === c.id ? null : c.id; rows(); }
+      tr.addEventListener("click", toggle);
+      tr.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+      body.appendChild(tr);
+      if (S.open === c.id) { body.appendChild(drawer(c)); }
+    });
+    pager();
+  }
+
+  function pager() {
+    var box = $("xp-pager");
+    if (!box) { return; }
+    box.textContent = "";
+    var pages = Math.max(1, Math.ceil(filtered.length / S.size));
+    if (S.page >= pages) { S.page = pages - 1; }
+    var prev = el("button", {type: "button", class: "btn", disabled: S.page === 0 ? "disabled" : null}, "הקודם");
+    prev.addEventListener("click", function () { if (S.page > 0) { S.page -= 1; rows(); scrollToTable(); } });
+    var next = el("button", {type: "button", class: "btn", disabled: S.page >= pages - 1 ? "disabled" : null}, "הבא");
+    next.addEventListener("click", function () { if (S.page < pages - 1) { S.page += 1; rows(); scrollToTable(); } });
+    box.appendChild(prev);
+    box.appendChild(el("span", {class: "small n"}, "עמוד " + (S.page + 1) + " מתוך " + pages));
+    box.appendChild(next);
+    box.appendChild(el("span", {class: "grow"}));
+    var from = filtered.length ? S.page * S.size + 1 : 0;
+    box.appendChild(el("span", {class: "small muted n"}, from + "–" + Math.min(filtered.length, (S.page + 1) * S.size) + " מתוך " + filtered.length));
+  }
+
+  function scrollToTable() {
+    var t = $("xp-table");
+    if (t && t.getBoundingClientRect().top < 0) { t.scrollIntoView({block: "start"}); }
+  }
+
+  function sortHeaders() {
+    Array.prototype.forEach.call(doc.querySelectorAll("#xp-table th[aria-sort]"), function (th) {
+      var b = th.querySelector("button");
+      var k = b ? b.getAttribute("data-sort") : null;
+      th.setAttribute("aria-sort", k === S.sort ? (S.dir > 0 ? "ascending" : "descending") : "none");
+    });
+  }
+
+  function render() {
+    compute();
+    syncControls();
+    activeChips();
+    summary();
+    profile();
+    sortHeaders();
+    var count = $("xp-count");
+    if (count) { count.textContent = filtered.length + " שיחות"; }
+    rows();
+  }
+
+  function applyFilter(f) {
+    var size = S.size;
+    resetState();
+    S.size = size;
+    if (f.status !== undefined) { S.status = f.status; }
+    if (f.q) { S.q = f.q; S.open = f.q; }
+    if (f.banker) { S.banker = f.banker; }
+    if (f.bankers) { S.bankers = f.bankers.slice(); }
+    if (f.type) { S.type = f.type; }
+    if (f.gate) { S.gate = f.gate; }
+    if (f.dim) {
+      S.dim = f.dim;
+      if (f.max !== undefined) { S.dimop = "max:" + f.max; S.sort = "tot"; S.dir = 1; }
+      else if (f.min !== undefined) { S.dimop = "min:" + f.min; }
+      else if (f.eq !== undefined) { S.dimop = "eq:" + f.eq; }
+    }
+    if (f.dur) { S.dur = f.dur; }
+    if (f.layout) { S.layout = f.layout; }
+    if (f.feature) { S.feature = f.feature; S.fmin = f.min === undefined ? null : f.min; }
+    if (f.gate || f.status === "needs_human_review" || f.status === "failed") { S.sort = "tot"; S.dir = 1; }
+    render();
+    var x = $("explorer");
+    if (x) { x.scrollIntoView({block: "start"}); }
+    var q = $("xp-count");
+    if (q) { q.setAttribute("tabindex", "-1"); q.focus({preventScroll: true}); }
+  }
+
+  function bind() {
+    Object.keys(controls).forEach(function (k) {
+      var c = $(controls[k]);
+      if (!c) { return; }
+      var ev = c.tagName === "INPUT" && c.type === "search" ? "input" : "change";
+      c.addEventListener(ev, function () {
+        var v = c.value;
+        if (k === "size") { S.size = Number(v) || 50; } else { S[k] = v; }
+        if (k === "dim" && !v) { S.dimop = ""; }
+        if (k === "dimop" && v && !S.dim) { S.dim = DIMS.length ? DIMS[0].id : ""; }
+        S.page = 0;
+        render();
+      });
+    });
+    Array.prototype.forEach.call(doc.querySelectorAll("#xp-table th button[data-sort]"), function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-sort");
+        if (S.sort === k) { S.dir = -S.dir; } else { S.sort = k; S.dir = (k === "tot" || k === "dur") ? -1 : 1; }
+        S.page = 0; render();
+      });
+    });
+    var reset = $("xp-reset");
+    if (reset) { reset.addEventListener("click", function () { var size = S.size; resetState(); S.size = size; render(); }); }
+    var csv = $("xp-csv");
+    if (csv) { csv.addEventListener("click", exportCsv); }
+    doc.addEventListener("click", function (e) {
+      var t = e.target.closest ? e.target.closest("[data-filter]") : null;
+      if (!t) { return; }
+      var f;
+      try { f = JSON.parse(t.getAttribute("data-filter")); } catch (err) { return; }
+      e.preventDefault();
+      applyFilter(f);
+    });
+    doc.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") { return; }
+      var t = e.target;
+      if (t && t.classList && t.classList.contains("ch-link") && t.getAttribute("data-filter")) {
+        e.preventDefault();
+        try { applyFilter(JSON.parse(t.getAttribute("data-filter"))); } catch (err) { /* ignore */ }
+      }
+    });
+  }
+
+  function csvCell(v) {
+    if (v === null || v === undefined) { return ""; }
+    var s = String(v);
+    if (/^[=+\-@\t\r]/.test(s)) { s = "'" + s; }
+    if (/[",\n\r]/.test(s)) { s = "\"" + s.replace(/"/g, "\"\"") + "\""; }
+    return s;
+  }
+
+  function exportCsv() {
+    var head = ["call_id", "call_date", "banker_id", "call_type", "duration_sec", "status", "index",
+                "gate_failed"].concat(DIMS.map(function (d) { return d.id; }));
+    var lines = [head.join(",")];
+    filtered.forEach(function (c) {
+      var row = [c.id, c.d, c.b, c.t, c.sec, c.s, c.tot, c.g && c.g.length ? c.g.join("|") : ""];
+      DIMS.forEach(function (d, i) { row.push(c.sc ? c.sc[i] : ""); });
+      lines.push(row.map(csvCell).join(","));
+    });
+    var blob = new Blob(["﻿" + lines.join("\r\n")], {type: "text/csv;charset=utf-8"});
+    var a = el("a", {download: "calls_filtered.csv"});
+    a.href = URL.createObjectURL(blob);
+    doc.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  if ($("explorer")) {
+    fillOptions();
+    bind();
+    render();
+    doc.documentElement.setAttribute("data-explorer", "ready");
+  }
+})();

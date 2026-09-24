@@ -6,6 +6,16 @@
   <div class="muted">נוצר: {{ generated_at }} · שיחות: {{ n_calls }} · בנקאים: {{ bankers | length }}</div>
 </div>
 
+{% if executive_reports %}
+<div class="card">
+  <h2>דוח מנהלים</h2>
+  <p>סיכום, ניתוח מעמיק ופירוט כל השיחות בשלוש רמות, עם גרפים וממצאים.</p>
+  <ul>
+    {% for name in executive_reports %}<li><a href="{{ name }}">{{ name }}</a></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>דוחות בנקאים</h2>
   <table>

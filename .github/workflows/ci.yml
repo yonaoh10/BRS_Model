@@ -48,6 +48,18 @@ jobs:
       - name: Evaluation gate (no regression vs baseline)
         if: always()
         run: python -m callqa eval --mock --baseline eval/baseline.json
+      # The management report is made for batches of ~1,000 calls; the six
+      # demo calls do not exercise it. A realistic synthetic batch does, and a
+      # real browser proves its script runs and draws the explorer.
+      - name: Management report over 1,000 synthetic calls
+        if: always()
+        run: |
+          set -eux
+          python scripts/generate_batch_demo.py --calls 1000 --workspace "$RUNNER_TEMP/batch"
+          report="$RUNNER_TEMP/batch/output/reports/executive.html"
+          chrome=$(command -v google-chrome || command -v chromium || command -v chromium-browser)
+          "$chrome" --headless=new --disable-gpu --no-sandbox --dump-dom "file://$report" > "$RUNNER_TEMP/dom.html"
+          python .github/check_executive_report.py "$report" --calls 1000 --dom "$RUNNER_TEMP/dom.html"
       - name: Deployability of a bare archive
         if: always()
         # What a reviewer downloads from GitHub is `git archive`, not the
@@ -66,6 +78,7 @@ jobs:
           .venv/bin/python -m pytest -q
           .venv/bin/python scripts/first_run.py --no-dashboard
           test -s data/demo/output/reports/index.html
+          test -s data/demo/output/reports/executive.html
           test ! -e data/input      # the demo never touches the real folders
           .venv/bin/python scripts/generate_sample_data.py
           .venv/bin/python -m callqa run --mock
@@ -99,6 +112,7 @@ jobs:
           python -m callqa run --mock
           python -m callqa report --mock
           test -s data/output/reports/index.html
+          test -s data/output/reports/executive.html
 
   # The bank's desktops are Microsoft VDI: Windows, no admin rights, no WSL
   # guaranteed. Everything the README tells a Windows user to type is typed
@@ -133,11 +147,32 @@ jobs:
           $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
           python scripts/generate_sample_data.py
           python -m callqa run --mock
-          python -m callqa report --mock
           python -m callqa calibrate --mock
+          python -m callqa report --mock
       - name: Evaluation gate (no regression vs baseline)
         if: always()
         run: python -m callqa eval --mock --baseline eval/baseline.json
+      # The management report on the bank's own browser: 1,000 realistic
+      # synthetic calls, opened from disk by Edge (headless), whose DOM after
+      # the page script ran is checked - the explorer drew its first page.
+      - name: Management report over 1,000 synthetic calls, opened in Edge
+        if: always()
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          $ws = Join-Path $env:RUNNER_TEMP "batch"
+          python scripts/generate_batch_demo.py --calls 1000 --workspace $ws
+          $report = Join-Path $ws "output\reports\executive.html"
+          $edge = Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path $edge)) { $edge = Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe" }
+          $uri = ([System.Uri]$report).AbsoluteUri
+          $dom = Join-Path $env:RUNNER_TEMP "dom.html"
+          # Edge is a GUI program: Start-Process -Wait is what reliably waits for
+          # it and captures what it prints.
+          $profile = Join-Path $env:RUNNER_TEMP "edge-profile"
+          Start-Process -FilePath $edge -Wait -NoNewWindow -RedirectStandardOutput $dom `
+            -ArgumentList @("--headless=new", "--disable-gpu", "--no-first-run",
+                            "--user-data-dir=$profile", "--dump-dom", $uri)
+          python .github/check_executive_report.py $report --calls 1000 --dom $dom
       - name: The README's Windows steps, from a GitHub ZIP, in a path with a space and Hebrew
         if: always()
         run: |
@@ -154,12 +189,15 @@ jobs:
           .\.venv\Scripts\python -m pytest -q
           .\.venv\Scripts\python scripts\first_run.py --no-dashboard
           if (-not (Test-Path data\demo\output\reports\index.html)) { throw "no demo index.html" }
+          if (-not (Test-Path data\demo\output\reports\executive.html)) { throw "no demo management report" }
           if (Test-Path data\input) { throw "the demo wrote into data\input" }
           .\.venv\Scripts\python scripts\generate_sample_data.py
           .\.venv\Scripts\python -m callqa run --mock
           .\.venv\Scripts\python -m callqa report --mock
           .\.venv\Scripts\python -m callqa preflight --mock
           if (-not (Test-Path data\output\reports\index.html)) { throw "no index.html" }
+          .\.venv\Scripts\python -m callqa executive-report --mock --from 2026-08-01 --to 2026-08-31 --no-quotes
+          if (-not (Test-Path data\output\reports\executive-2026-08-01_2026-08-31.html)) { throw "no scoped management report" }
           # A Scheduled Task writes stdout to a file, in the ANSI code page.
           .\.venv\Scripts\python -m callqa run --mock --force *> run.log
           if ($LASTEXITCODE -ne 0) { Get-Content run.log; throw "run with redirected output failed" }

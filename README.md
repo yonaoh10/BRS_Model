@@ -230,19 +230,53 @@ C0001,B17,C0001.wav,L,דנה כהן
 
 - `preflight` בודק שהמודלים, השרת, הדיסק והקלט מוכנים. כדאי להריץ אותו לפני כל הרצה. אם אחת השורות שלו מסומנת `FAIL`, מתקנים אותה לפני שממשיכים.
 - `run` מעבד את כל השיחות שב־`metadata.csv`.
-- `report` מפיק דוח לכל בנקאי.
+- `report` מפיק דוח לכל בנקאי ואת **דוח המנהלים** (ראו בהמשך).
 
 **הרצה אוטומטית:**
 - `.venv\Scripts\python -m callqa watch` — מאזין לתיקייה `data/input/calls/` ומעבד כל הקלטה חדשה שמגיעה.
 - `.venv\Scripts\python -m callqa process --audio <קובץ>` — מעבד שיחה אחת. קוד היציאה: `0` הצלחה · `1` נדרשת בדיקה אנושית · `2` כישלון. ב־cmd רואים אותו עם `echo %ERRORLEVEL%`.
-- **תזמון ב־Windows:** Task Scheduler ← Create Basic Task ← Start a program. לא דורש הרשאות מנהל. יוצרים שתי משימות:
+- **תזמון ב־Windows:** Task Scheduler ← Create Basic Task ← Start a program. לא דורש הרשאות מנהל. יוצרים שלוש משימות:
 
   | משימה | Program | Arguments | Start in |
   |---|---|---|---|
   | עיבוד שיחות | הנתיב המלא של `.venv\Scripts\python.exe` | `-m callqa run --log-file logs\run.log` | תיקיית הפרויקט |
+  | עדכון הדוחות ודוח המנהלים (פעם ביום, אחרי העיבוד) | אותו נתיב | `-m callqa report --log-file logs\report.log` | תיקיית הפרויקט |
   | מחיקת נתונים גולמיים (פעם ביום) | אותו נתיב | `-m callqa retention --apply --log-file logs\retention.log` | תיקיית הפרויקט |
 
   ⚠️ **Start in חובה.** בלעדיו התוכנה מסרבת לרוץ. משימה רצה רק כשהמחשב פועל. ב־VDI שמתאפס בכל התנתקות, צריך לבקש מה־IT מכונה קבועה.
+
+---
+
+## דוח מנהלים
+
+דוח אחד, מקצועי ומוכן להנהלה, על כל השיחות שעובדו (מתאים ל־1,000 שיחות ויותר). הוא נוצר אוטומטית בכל הרצה של `report`, ונשמר בקובץ `data/output/reports/executive.html`. פותחים אותו בלחיצה כפולה (Edge). הוא עובד בלי אינטרנט ואפשר להעביר אותו הלאה כקובץ אחד.
+
+**שלוש רמות, מהכללי לפרטני:**
+1. **סיכום מנהלים** — חוות דעת מקצועית בכמה משפטים, 6 מדדי מפתח עם מגמה, 5 הממצאים המרכזיים ו־3 פעולות מומלצות עם ההשפעה הצפויה של כל אחת במספרים.
+2. **ניתוח מעמיק** — ממדי ההערכה ו„היכן אובדות הנקודות”, התפלגות, מגמות לאורך זמן, פילוח לפי סוג ומשך שיחה, השוואת בנקאים ומפת חום, גורמים התנהגותיים (יחס דיבור, קטיעות, שאלות ועוד), סיכוני ציות, ואיכות הנתונים.
+3. **פירוט ושיחות** — כל שיחה: סינון, מיון וחיפוש; בלחיצה — הציון, הנימוק והציטוט בכל ממד, וקישור לדוח השיחה המלא. בנוסף ספריית מקרים (דוגמאות מצוינות וחלשות לכל ממד) ורשימת השיחות הדורשות תשומת לב.
+
+כל ממצא ברמה 1 מקשר לניתוח שלו ברמה 2 ולשיחות עצמן ברמה 3. כל מספר מגיע עם רווח סמך, וקבוצה מסומנת כחריגה רק כשהפער מובהק סטטיסטית. ההסבר המלא נמצא ב־`docs/executive_report_he.md`.
+
+**דוח לתקופה, לסוג שיחה או לבנקאי:**
+
+```
+.venv\Scripts\python -m callqa executive-report --from 01/08/2026 --to 31/08/2026
+.venv\Scripts\python -m callqa executive-report --call-type loans --no-quotes
+```
+
+- `--from` / `--to` — תאריכי השיחות (בפורמט `31/08/2026` או `2026-08-31`). אפשר גם `--call-type`, `--banker` ו־`--title`.
+- `--no-quotes` — גרסה בלי שום ציטוט או נימוק מתוך השיחות, להפצה רחבה.
+- הדוח נשמר בשם משלו בתיקייה `data/output/reports/`, לדוגמה `data/output/reports/executive-2026-08-01_2026-08-31.html`, לצד קובץ CSV לאקסל.
+- **הדפסה / PDF:** הכפתור בראש הדוח (או Ctrl+P). כל רמה מתחילה בעמוד חדש.
+
+**לראות איך הוא נראה על 1,000 שיחות, לפני שיש נתונים אמיתיים:**
+
+```
+.venv\Scripts\python scripts\generate_batch_demo.py --calls 1000 --open
+```
+
+הסקריפט יוצר 1,000 שיחות סינתטיות בתיקייה נפרדת (`data/demo-batch`), מפיק מהן דוח מנהלים ופותח אותו. הדוח מסומן בבירור כהדגמה, ואינו נוגע בשיחות האמיתיות.
 
 ---
 
@@ -251,6 +285,7 @@ C0001,B17,C0001.wav,L,דנה כהן
 | מיקום | מה יש שם |
 |---|---|
 | `data/output/reports/index.html` | הדוחות. **מתחילים מכאן.** |
+| `data/output/reports/executive.html` | דוח המנהלים. לצידו `data/output/reports/executive_calls.csv` — כל השיחות והציונים, לאקסל. |
 | `data/output/transcripts/` | ⚠️ תמלול **גולמי** עם פרטים מזהים. `.venv\Scripts\python -m callqa retention --apply` מוחק אותו אחרי מספר הימים שמוגדר ב־`retention.raw_days`. |
 | `data/output/redacted/` | תמלול אחרי הסתרת הפרטים המזהים |
 | `data/output/redacted_audio/` | הקלטה שבה הפרטים המזהים מושתקים |
@@ -321,6 +356,7 @@ TRANSFORMERS_OFFLINE=1
 ## מסמכים נוספים
 
 - `docs/DEPLOYMENT.md` — פירוט מלא: אבטחה, רישוי, מה נשמר ולכמה זמן, ומגבלות ידועות.
+- `docs/executive_report_he.md` — דוח המנהלים: מה כל חלק מראה, איך כל מספר מחושב ואיך לקרוא אותו.
 - `docs/MLOPS.md` — תפעול לאורך זמן: הערכה, ניטור שינויים, שחזור תוצאות.
 - `CHANGELOG.md` — מה השתנה בכל גרסה.
 
@@ -554,19 +590,53 @@ C0001,B17,C0001.wav,L,דנה כהן
 
 - `preflight` checks that models, server, disk and input are ready. Run it before every run. If any of its lines is marked `FAIL`, fix it before you continue.
 - `run` processes every call in `metadata.csv`.
-- `report` produces a report for each banker.
+- `report` produces a report for each banker and the **management report** (see below).
 
 **Automated running:**
 - `.venv\Scripts\python -m callqa watch` — watches `data/input/calls/` and processes every new recording that arrives.
 - `.venv\Scripts\python -m callqa process --audio <file>` — processes one call. Exit code: `0` success · `1` needs human review · `2` failed. In cmd, see it with `echo %ERRORLEVEL%`.
-- **Scheduling on Windows:** Task Scheduler → Create Basic Task → Start a program. No admin rights needed. Create two tasks:
+- **Scheduling on Windows:** Task Scheduler → Create Basic Task → Start a program. No admin rights needed. Create three tasks:
 
   | Task | Program | Arguments | Start in |
   |---|---|---|---|
   | Process calls | full path of `.venv\Scripts\python.exe` | `-m callqa run --log-file logs\run.log` | the project folder |
+  | Refresh the reports and the management report (daily, after processing) | the same path | `-m callqa report --log-file logs\report.log` | the project folder |
   | Delete raw data (daily) | the same path | `-m callqa retention --apply --log-file logs\retention.log` | the project folder |
 
   ⚠️ **Start in is required.** Without it the program refuses to run. A task runs only while the machine is on. On a VDI that is reset at every sign-out, ask IT for a persistent machine.
+
+---
+
+## Management report
+
+One professional, management-ready report over every processed call (made for 1,000 calls and more). It is produced automatically by every `report` run and saved as `data/output/reports/executive.html`. Open it with a double-click (Edge). It works with no internet connection and can be passed on as a single file.
+
+**Three levels, from the overall picture to the detail:**
+1. **Executive summary** — a professional opinion in a few sentences, 6 key indicators with their trend, the 5 main findings, and 3 recommended actions, each with its expected impact in numbers.
+2. **In-depth analysis** — the rubric dimensions and "where the points are lost", the score distribution, trends over time, breakdowns by call type and length, banker comparison and heat map, behavioural drivers (talk share, interruptions, questions and more), compliance risk, and data quality.
+3. **Detail and calls** — every call: filter, sort and search; click a call for its score, reasoning and quote on every dimension, and a link to the full call report. Plus a case library (excellent and weak examples per dimension) and the list of calls that need attention.
+
+Every level-1 finding links to its analysis in level 2 and to the calls themselves in level 3. Every figure carries a confidence interval, and a group is flagged only when its gap is statistically significant. The full explanation is in `docs/executive_report_he.md`.
+
+**A report for a period, a call type or a banker:**
+
+```
+.venv\Scripts\python -m callqa executive-report --from 01/08/2026 --to 31/08/2026
+.venv\Scripts\python -m callqa executive-report --call-type loans --no-quotes
+```
+
+- `--from` / `--to` — call dates (`31/08/2026` or `2026-08-31`). `--call-type`, `--banker` and `--title` also work.
+- `--no-quotes` — a version with no quote or reasoning from the calls at all, for wide distribution.
+- The report gets its own name in `data/output/reports/`, for example `data/output/reports/executive-2026-08-01_2026-08-31.html`, next to a CSV file for Excel.
+- **Print / PDF:** the button at the top of the report (or Ctrl+P). Every level starts on a new page.
+
+**To see it on 1,000 calls before there is real data:**
+
+```
+.venv\Scripts\python scripts\generate_batch_demo.py --calls 1000 --open
+```
+
+The script creates 1,000 synthetic calls in a separate folder (`data/demo-batch`), produces a management report from them and opens it. The report is clearly marked as a demonstration and does not touch the real calls.
 
 ---
 
@@ -575,6 +645,7 @@ C0001,B17,C0001.wav,L,דנה כהן
 | Location | What is there |
 |---|---|
 | `data/output/reports/index.html` | The reports. **Start here.** |
+| `data/output/reports/executive.html` | The management report. Next to it, `data/output/reports/executive_calls.csv` — every call and its scores, for Excel. |
 | `data/output/transcripts/` | ⚠️ **Raw** transcripts containing identifiers. `.venv\Scripts\python -m callqa retention --apply` deletes them once they are older than `retention.raw_days`. |
 | `data/output/redacted/` | Transcripts after the identifiers are hidden |
 | `data/output/redacted_audio/` | Recordings with the identifiers silenced |
@@ -645,5 +716,6 @@ and run `.venv\Scripts\python -m callqa preflight`.
 ## More documents
 
 - `docs/DEPLOYMENT.md` — full detail: security, licensing, what is stored and for how long, and known limits.
+- `docs/executive_report_he.md` — the management report (Hebrew): what each part shows, how each number is computed and how to read it.
 - `docs/MLOPS.md` — running it over time: evaluation, drift monitoring, reproducing results.
 - `CHANGELOG.md` — what changed in each version.

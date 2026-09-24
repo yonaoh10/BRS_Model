@@ -130,6 +130,10 @@ jobs:
           # Aggregate reports need at least one scored call; a held one has none.
           if (Get-ChildItem data\output\scores -Filter *.json -ErrorAction SilentlyContinue) { .\.venv\Scripts\python -m callqa report }
           .\.venv\Scripts\python .github\check_real_run.py run.log WIN001
+          # The management report renders from a real run too - including one
+          # whose only call was held for review (it then explains, not fails).
+          .\.venv\Scripts\python -m callqa executive-report
+          if (-not (Test-Path data\output\reports\executive.html)) { throw "no management report" }
 
       - name: The judge server's own log
         if: always()

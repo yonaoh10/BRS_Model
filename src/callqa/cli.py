@@ -1,4 +1,5 @@
-"""CLI entrypoints: process / watch / run / report / calibrate / validate-inputs.
+"""CLI entrypoints: process / watch / run / report / executive-report / calibrate /
+validate-inputs.
 
 The drivers here are thin: all per-call logic lives in pipeline.process_call.
 """
@@ -475,6 +476,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     from callqa.reporting.banker_report import generate_banker_reports
+    from callqa.reporting.common import ReportError
     from callqa.rubric import load_rubric
 
     config = _load_config(args)
@@ -483,12 +485,71 @@ def cmd_report(args: argparse.Namespace) -> int:
         written = generate_banker_reports(
             config.paths.output_dir, rubric, config.reporting.group_comparison
         )
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, ReportError) as exc:
         logger.error("%s", exc)
         return EXIT_FAILED
     for path in written:
         logger.info("report written: %s", path)
+    # The management report over the whole batch comes with every `report`, so
+    # a scheduled run keeps it current without anyone learning a new command.
+    status = _write_executive_report(config, rubric)
+    if status == 0:
+        # index.html was rendered before the management report existed.
+        from callqa.reporting.banker_report import refresh_index
+
+        refresh_index(config.paths.output_dir, rubric, config.reporting.group_comparison)
+    return status
+
+
+def _parse_day(value: str | None, flag: str):  # noqa: ANN202 - date | None
+    if value is None:
+        return None
+    from callqa.reporting.executive import parse_call_date
+
+    parsed = parse_call_date(value)
+    if parsed is None:
+        raise ValueError(f"{flag}: expected a date such as 2026-08-31 or 31/08/2026, got {value!r}")
+    return parsed
+
+
+def _write_executive_report(config: Config, rubric, filters=None, *,  # noqa: ANN001
+                            with_text: bool = True, name: str | None = None,
+                            title: str | None = None) -> int:
+    from callqa.reporting.executive import build_executive_report
+
+    try:
+        report = build_executive_report(config.paths.output_dir, rubric, filters,
+                                        with_text=with_text, name=name, title=title)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("management report: %s", exc)
+        return EXIT_FAILED
+    a = report.analysis
+    logger.info("management report written: %s (%d call(s), %d scored, %d held, %d failed)",
+                report.html, a.n_scope, a.n_scored, a.n_held, a.n_failed)
+    logger.info("numbers for Excel: %s", report.csv)
     return 0
+
+
+def cmd_executive_report(args: argparse.Namespace) -> int:
+    from callqa.reporting.executive import BatchFilters
+    from callqa.rubric import load_rubric
+
+    config = _load_config(args)
+    make_private_root(config.paths.output_dir)
+    try:
+        filters = BatchFilters(
+            date_from=_parse_day(args.date_from, "--from"),
+            date_to=_parse_day(args.date_to, "--to"),
+            call_type=args.call_type, banker_id=args.banker, run_id=args.run,
+        )
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return EXIT_FAILED
+    if filters.date_from and filters.date_to and filters.date_from > filters.date_to:
+        logger.error("--from is after --to")
+        return EXIT_FAILED
+    return _write_executive_report(config, load_rubric(), filters, with_text=not args.no_quotes,
+                                   name=args.name, title=args.title)
 
 
 def cmd_calibrate(args: argparse.Namespace) -> int:
@@ -797,9 +858,26 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_args(p)
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("report", help="generate per-banker reports + index")
+    p = sub.add_parser("report", help="generate per-banker reports, the index and the "
+                                          "management report")
     _add_common_args(p)
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("executive-report",
+                       help="management report over a batch of calls (3 levels, charts, drill-down)")
+    p.add_argument("--from", dest="date_from", default=None,
+                   help="first call date to include (2026-08-01 or 01/08/2026)")
+    p.add_argument("--to", dest="date_to", default=None, help="last call date to include")
+    p.add_argument("--call-type", default=None, help="only this call type (as in metadata.csv)")
+    p.add_argument("--banker", default=None, help="only this banker id")
+    p.add_argument("--run", default=None, help="only the calls of this run (runs/<run_id>.json)")
+    p.add_argument("--no-quotes", action="store_true",
+                   help="omit every quote and judge explanation (for wide distribution)")
+    p.add_argument("--name", default=None,
+                   help="output file name: reports/executive-<name>.html")
+    p.add_argument("--title", default=None, help="title printed on the report")
+    _add_common_args(p)
+    p.set_defaults(func=cmd_executive_report)
 
     p = sub.add_parser("calibrate", help="calibrate judge vs human ratings (QWK)")
     _add_common_args(p)

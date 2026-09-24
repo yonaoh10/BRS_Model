@@ -23,9 +23,9 @@ sample:
 
 mock-e2e: sample
 	$(PYTHON) -m callqa run --mock
-	$(PYTHON) -m callqa report --mock
 	$(PYTHON) -m callqa calibrate --mock
-	@echo "Open data/output/reports/index.html"
+	$(PYTHON) -m callqa report --mock
+	@echo "Open data/output/reports/index.html (management report: data/output/reports/executive.html)"
 
 eval:
 	$(PYTHON) -m callqa eval --mock --baseline eval/baseline.json

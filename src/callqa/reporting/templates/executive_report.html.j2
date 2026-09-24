@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="callqa {{ version }}">
+<title>{{ title }}</title>
+<style>
+{% include "executive_report.css.j2" %}
+</style>
+</head>
+<body>
+<a class="skip" href="#level1">דלג לתוכן הדוח</a>
+
+<header class="topbar">
+  <div class="in">
+    <div class="brand"><span class="mark" aria-hidden="true">QA</span><span>דוח מנהלים</span></div>
+    <nav class="levels" aria-label="רמות הדוח">
+      <a href="#level1" data-level="level1"><span class="lv">1</span>סיכום מנהלים</a>
+      <a href="#level2" data-level="level2"><span class="lv">2</span>ניתוח מעמיק</a>
+      <a href="#level3" data-level="level3"><span class="lv">3</span>פירוט ושיחות</a>
+      <a href="#method" data-level="method"><span class="lv">i</span>מתודולוגיה</a>
+    </nav>
+    <div class="tools">
+      <button type="button" class="btn" id="btn-print" title="הדפסה או שמירה כ־PDF">הדפסה / PDF</button>
+      <button type="button" class="btn icon" id="btn-theme" aria-label="החלפת ערכת צבעים" title="ערכת צבעים">◐</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="main">
+  <noscript><div class="noscript">חלק מהאפשרויות (סינון השיחות ברמה 3) דורשות JavaScript. כל הנתונים, הגרפים והממצאים מוצגים גם בלעדיו.</div></noscript>
+
+  {% if demo %}
+  <div class="demo" role="note">
+    <b>{{ demo_title }}</b> — {{ demo_text }} <b>אין להשתמש בדוח זה להערכת עובדים.</b>
+  </div>
+  {% endif %}
+
+  <section class="cover" aria-labelledby="doc-title">
+    <div class="eyebrow">ניתוח איכות שיחות · דוח לאצוות שיחות</div>
+    <h1 id="doc-title">{{ title }}</h1>
+    <div class="meta">
+      <span>תקופה: <b>{{ period_label | rich }}</b></span>
+      <span>שיחות בדוח: <b class="n">{{ "{:,}".format(a.n_scope) }}</b></span>
+      <span>נוקדו: <b class="n">{{ "{:,}".format(a.n_scored) }}</b></span>
+      <span>בנקאים: <b class="n">{{ a.bankers | length }}</b></span>
+      <span>הופק: <b class="n">{{ generated_at }}</b></span>
+    </div>
+    {% if scope_chips %}
+    <div class="chips" aria-label="היקף הדוח">
+      {% for c in scope_chips %}<span class="chip">{{ c }}</span>{% endfor %}
+    </div>
+    {% endif %}
+    {% if not with_text %}
+    <div class="chips"><span class="chip">גרסה להפצה רחבה: ללא ציטוטים ונימוקים מתוך השיחות</span></div>
+    {% endif %}
+  </section>
+
+  {# ========================================================= LEVEL 1 #}
+  <section class="level" id="level1" aria-labelledby="h-level1">
+    <div class="level-head">
+      <span class="num-badge">1</span>
+      <div><h2 id="h-level1">סיכום מנהלים</h2><p>תמונת המצב בעמוד אחד: הערכה כוללת, מדדי מפתח, הממצאים המרכזיים והפעולות המומלצות.</p></div>
+    </div>
+
+    <div class="card verdict {{ verdict_class }}">
+      <div>
+        <div class="label">חוות דעת מקצועית</div>
+        <h3>{{ opinion.assessment }}</h3>
+        <div class="bl">
+          {% for line in opinion.bottom_line %}<p>{{ line | rich }}</p>{% endfor %}
+        </div>
+      </div>
+      <div class="gauge" aria-label="מדד האיכות הממוצע">
+        <div class="big n">{{ fmt(a.total.mean) }}</div>
+        <div class="of">מתוך 100 · {{ band_label }}</div>
+        {% if index_delta %}<div class="delta {{ index_delta.cls }}">{{ index_delta.text | rich }}</div>{% endif %}
+      </div>
+    </div>
+
+    <div class="kpis" role="list">
+      {% for k in kpis %}
+      <div class="card kpi {{ k.cls }}" role="listitem">
+        <div class="k-label">{{ k.label }}</div>
+        <div class="k-value"><span class="n">{{ k.value }}</span>{% if k.unit %}<small>{{ k.unit }}</small>{% endif %}</div>
+        <div class="k-sub">{{ k.sub | rich }}</div>
+        {% if k.spark %}<div class="k-spark">{{ k.spark }}</div>{% endif %}
+        <div class="k-foot">
+          {% if k.badge %}<span class="badge b-{{ k.badge_cls }}">{{ k.badge }}</span>{% endif %}
+          {% if k.href %}<a class="small" href="{{ k.href }}">לפירוט</a>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="section" id="sec-findings">
+      <h3>הממצאים המרכזיים</h3>
+      <p class="lead">מדורגים לפי חומרה והיקף. כל ממצא מבוסס על נתון מחושב, וממנו אפשר לעבור לניתוח (רמה 2) ולשיחות עצמן (רמה 3).</p>
+      <div class="findings">
+        {% for f in opinion.top_findings %}
+        <article class="card finding">
+          <div class="sev"><span class="badge b-{{ f.severity }}">{{ severity_he[f.severity] }}</span></div>
+          <div>
+            <h4>{{ f.title | rich }}</h4>
+            <p class="txt">{{ f.text | rich }}</p>
+            <p class="mean">{{ f.meaning | rich }}</p>
+            <div class="links">
+              <a href="#{{ f.section }}">לניתוח המלא</a>
+              {% if f.filter %}<a href="#explorer" data-filter="{{ f.filter | fjson }}">{{ f.link_label }}</a>{% endif %}
+            </div>
+          </div>
+        </article>
+        {% else %}
+        <p class="muted">אין ממצאים להצגה.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if opinion.actions %}
+    <div class="section" id="sec-actions">
+      <h3>פעולות מומלצות</h3>
+      <p class="lead">שלוש הפעולות בעלות ההשפעה הגדולה ביותר, לפי הנתונים. ההשפעה מחושבת על השיחות בדוח זה.</p>
+      <div class="actions">
+        {% for x in opinion.actions %}
+        <article class="card action">
+          <div class="rank">פעולה {{ loop.index }}</div>
+          <h4>{{ x.title | rich }}</h4>
+          <p class="small">{{ x.text | rich }}</p>
+          <div class="impact">{{ x.impact | rich }}</div>
+          {% if x.coaching %}<blockquote>{{ x.coaching }}</blockquote>{% endif %}
+          <div class="owner">אחריות: {{ x.owner }}</div>
+          <div class="links">
+            <a href="#{{ x.section }}">לניתוח</a>
+            {% if x.filter %}<a href="#explorer" data-filter="{{ x.filter | fjson }}">לשיחות הרלוונטיות</a>{% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if a.n_scored %}
+    <div class="section" id="sec-glance">
+      <h3>הממדים במבט אחד</h3>
+      <p class="lead">ציון ממוצע בכל ממד (1–5). הקו האנכי מסמן את רמת הסף <span class="n">3</span>. ממדי שער — ציון <span class="n">2</span> ומטה בהם מגביל את המדד ל־<span class="n">59</span>.</p>
+      <div class="card"><div class="bd">
+        <div class="dimbars">
+          {% for d in a.dims %}
+          <div class="dimbar">
+            <div class="nm" title="{{ d.name }}">{{ d.name }}{% if d.gate %}<span class="gate">שער</span>{% endif %}</div>
+            <div class="track" role="img" aria-label="{{ d.name }}: {{ fmt(d.mean.mean) }} מתוך 5">
+              <div class="fill" style="inline-size:{{ pct_width(d.mean.mean) }}%"></div>
+              <div class="mark" style="inset-inline-start:50%"></div>
+            </div>
+            <div class="v n">{{ fmt(d.mean.mean, 2) }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div></div>
+    </div>
+    {% endif %}
+  </section>
+
+  {# ========================================================= LEVEL 2 #}
+  <section class="level" id="level2" aria-labelledby="h-level2">
+    <div class="level-head">
+      <span class="num-badge">2</span>
+      <div><h2 id="h-level2">ניתוח מעמיק</h2><p>מאחורי כל ממצא: ממדים, התפלגות, מגמות, פילוחים, בנקאים, גורמים התנהגותיים, סיכוני ציות ואיכות הנתונים.</p></div>
+    </div>
+    <nav class="subnav no-print" aria-label="פרקי הניתוח">
+      <a href="#sec-dims">ממדים</a><a href="#sec-dist">התפלגות</a><a href="#sec-trend">מגמות</a>
+      <a href="#sec-segments">פילוחים</a><a href="#sec-bankers">בנקאים</a><a href="#sec-drivers">גורמים התנהגותיים</a>
+      <a href="#sec-risk">סיכוני ציות</a><a href="#sec-coverage">כיסוי ואיכות</a>
+    </nav>
+
+    {% macro callouts(section) %}
+      {% for f in opinion.by_section.get(section, []) %}
+      <div class="callout {{ f.severity }}">
+        <span class="badge b-{{ f.severity }}">{{ severity_he[f.severity] }}</span>
+        <b>{{ f.title | rich }}</b> — {{ f.text | rich }}
+        {% if f.filter %}<div class="links"><a href="#explorer" data-filter="{{ f.filter | fjson }}">{{ f.link_label }}</a></div>{% endif %}
+      </div>
+      {% endfor %}
+    {% endmacro %}
+
+    <div class="section" id="sec-dims">
+      <h3>ממדי ההערכה ומקורות אובדן הנקודות</h3>
+      <p class="lead">מימין: התפלגות הציונים (1–5) בכל ממד — לחיצה על שורה מציגה את השיחות שקיבלו בו <span class="n">1–2</span>. משמאל: מה „עולה” למדד — כמה נקודות מתוך <span class="n">100</span> אבדו בממוצע בכל ממד, ובנפרד — בגלל כשלי שער. הסכום שווה בדיוק לפער בין המדד ל־<span class="n">100</span>.</p>
+      {{ callouts("sec-dims") }}
+      {% if a.n_scored %}
+      <div class="card"><div class="hd"><h4>התפלגות הציונים לפי ממד</h4><span class="sub">אחוז השיחות בכל רמה; לחיצה על שורה — השיחות שקיבלו בממד <span class="n">1–2</span></span></div>
+        <div class="bd chart-box">{{ charts.stacked }}</div></div>
+      <div class="card" style="margin-top:var(--s4)"><div class="hd"><h4>היכן אובדות הנקודות</h4><span class="sub">נקודות מדד שאבדו לשיחה בממוצע, לפי מקור, והשיעור המצטבר</span></div>
+        <div class="bd chart-box">{{ charts.pareto }}</div></div>
+      <div class="card" style="margin-top:var(--s4)"><div class="bd tbl-wrap">
+        <table>
+          <caption class="sr">פירוט הממדים</caption>
+          <thead><tr><th>ממד</th><th class="num">משקל</th><th class="num">ממוצע (1–5)</th><th class="num">רווח סמך 95%</th>
+            <th class="num">ציון 1–2</th><th class="num">ציון 4–5</th><th class="num">נקודות שאבדו</th><th class="num">פוטנציאל שיפור*</th><th></th></tr></thead>
+          <tbody>
+          {% for d in a.dims %}
+          <tr>
+            <td>{{ d.name }}{% if d.gate %} <span class="badge b-warn">שער</span>{% endif %}</td>
+            <td class="num n">{{ pct0(d.weight) }}</td>
+            <td class="num n"><b>{{ fmt(d.mean.mean, 2) }}</b></td>
+            <td class="num n">{{ ci(d.mean, 2) }}</td>
+            <td class="num n">{{ pct0(d.low_rate) }}</td>
+            <td class="num n">{{ pct0(d.high_rate) }}</td>
+            <td class="num n">{{ fmt(d.lost_mean) }}</td>
+            <td class="num n">{{ plus(d.gain_if_floor3) }}</td>
+            <td><a href="#explorer" data-filter="{{ {'dim': d.id, 'max': 2} | fjson }}" class="small">שיחות חלשות</a></td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p class="muted small" style="margin-top:8px">* פוטנציאל שיפור: בכמה נקודות יעלה המדד הממוצע אם כל ציון נמוך מ־<span class="n">3</span> בממד יעלה ל־<span class="n">3</span> (רמת הסף).</p>
+      </div></div>
+      {% endif %}
+    </div>
+
+    <div class="section" id="sec-dist">
+      <h3>התפלגות המדד</h3>
+      <p class="lead">כמה שיחות בכל טווח ציון. הרקע מסמן את רמות הביצוע: חלש (עד <span class="n">40</span>), גבולי (<span class="n">40–59</span>), בינוני (<span class="n">60–79</span>), גבוה (<span class="n">80</span> ומעלה).</p>
+      {% if a.n_scored %}
+      <div class="grid g-wide">
+        <div class="card"><div class="bd chart-box">{{ charts.histogram }}</div></div>
+        <div class="card"><div class="hd"><h4>רמות ביצוע</h4></div><div class="bd">
+          <table>
+            <thead><tr><th>רמה</th><th class="num">שיחות</th><th class="num">שיעור</th></tr></thead>
+            <tbody>
+            {% for b in bands %}
+            <tr><td><span class="lvl band-{{ b.band }}" style="min-width:12px;height:12px;margin-inline-end:6px"></span>{{ b.label }}</td>
+              <td class="num n">{{ "{:,}".format(b.n) }}</td><td class="num n">{{ pct1(b.share) }}</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+          <p class="small muted" style="margin-top:10px">חציון <span class="n">{{ fmt(a.median) }}</span> · רבעון תחתון <span class="n">{{ fmt(a.q1) }}</span> · רבעון עליון <span class="n">{{ fmt(a.q3) }}</span>.
+            ממוצע <span class="n">{{ fmt(a.total.mean) }}</span>, רווח סמך 95% <span class="n">{{ ci(a.total) }}</span>.</p>
+        </div></div>
+      </div>
+      {% else %}<p class="ch-empty">אין שיחות מנוקדות.</p>{% endif %}
+    </div>
+
+    <div class="section" id="sec-trend">
+      <h3>מגמות לאורך זמן</h3>
+      <p class="lead">המדד הממוצע בכל {{ granularity_he }} (קו), עם רווח סמך 95% (רצועה) ומספר השיחות (עמודות ברקע){% if has_gate_line %}; הקו המקווקו — שיעור כשלי השער{% endif %}.</p>
+      {{ callouts("sec-trend") }}
+      {% if a.periods | length >= 2 %}
+      <div class="card"><div class="bd chart-box">{{ charts.trend }}
+        {% if trend_text %}<p class="small" style="margin-top:10px">{{ trend_text | rich }}</p>{% endif %}
+      </div></div>
+      {% else %}<p class="ch-empty">אין די תקופות (לפחות שתיים) להצגת מגמה.</p>{% endif %}
+    </div>
+
+    <div class="section" id="sec-segments">
+      <h3>פילוחים</h3>
+      <p class="lead">ממוצע המדד בכל קבוצה עם רווח סמך. קבוצה מסומנת רק כשהפער שלה משאר השיחות מובהק (רמת ביטחון <span class="n">99%</span>) וגדול מ־<span class="n">3</span> נקודות. לחיצה על שורה מסננת את השיחות ברמה 3.</p>
+      {{ callouts("sec-segments") }}
+      <div class="grid g2">
+        <div class="card"><div class="hd"><h4>לפי סוג שיחה</h4></div><div class="bd chart-box">{{ charts.seg_type or empty }}</div></div>
+        <div class="card"><div class="hd"><h4>לפי משך השיחה</h4></div><div class="bd chart-box">{{ charts.seg_duration or empty }}</div></div>
+      </div>
+      {% if charts.seg_layout %}
+      <div class="card" style="margin-top:var(--s4)"><div class="hd"><h4>לפי אופן ההקלטה</h4><span class="sub">בהקלטה חד־ערוצית הבנקאי והלקוח מזוהים אוטומטית</span></div><div class="bd chart-box">{{ charts.seg_layout }}</div></div>
+      {% endif %}
+    </div>
+
+    <div class="section" id="sec-bankers">
+      <h3>בנקאים</h3>
+      <p class="lead">ממוצע כל בנקאי עם רווח סמך <span class="n">95%</span>; הקו המקווקו — חציון הקבוצה. אדום: נמוך באופן מובהק משאר הבנקאים; ירוק: גבוה באופן מובהק; אפור: פחות מ־<span class="n">8</span> שיחות — מוצג אך לא מדורג.</p>
+      {{ callouts("sec-bankers") }}
+      {% if a.bankers %}
+      <div class="card"><div class="bd chart-box">{{ charts.bankers }}</div></div>
+      <div class="card" style="margin-top:var(--s4)">
+        <div class="hd"><h4>מפת חום: בנקאי × ממד</h4><span class="sub">ממוצע הציון (1–5) בכל ממד. לחיצה על תא מציגה את שיחות הבנקאי בממד.</span></div>
+        <div class="bd tbl-wrap">
+          <table class="heat">
+            <thead><tr><th>בנקאי</th><th class="num">שיחות</th><th class="num">מדד</th>
+              {% for d in a.dims %}<th class="dim" title="{{ d.name }}">{{ d.name }}</th>{% endfor %}
+              <th>מצב</th><th></th></tr></thead>
+            <tbody>
+            {% for row in heat %}
+            <tr>
+              <td class="mono">{{ row.banker }}</td>
+              <td class="num n">{{ row.n }}</td>
+              <td class="num n"><b>{{ fmt(row.mean) }}</b></td>
+              {% for c in row.cells %}
+              <td class="cell">{% if c.v is not none %}<button type="button" class="{{ c.cls }}" data-filter="{{ c.filter | fjson }}" aria-label="{{ row.banker }} · {{ c.name }}: {{ c.text }}">{{ c.text }}</button>{% endif %}</td>
+              {% endfor %}
+              <td><span class="badge b-{{ row.flag_cls }}">{{ row.flag_text }}</span></td>
+              <td class="small">{% if row.link %}<a href="{{ row.link }}">דוח בנקאי</a>{% endif %}</td>
+            </tr>
+            {% endfor %}
+            <tr class="ref"><td>כלל הבנקאים</td><td class="num n">{{ a.n_scored }}</td><td class="num n">{{ fmt(a.total.mean) }}</td>
+              {% for d in a.dims %}<td class="num n" style="text-align:center">{{ fmt(d.mean.mean, 1) }}</td>{% endfor %}<td></td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}<p class="ch-empty">אין בנקאים עם שיחות מנוקדות.</p>{% endif %}
+    </div>
+
+    <div class="section" id="sec-drivers">
+      <h3>גורמים התנהגותיים</h3>
+      <p class="lead">מדדים אובייקטיביים שנמדדו בכל שיחה (ללא שיפוט), והקשר שלהם למדד: ההפרש בין השיחות ברבעון העליון של המדד ההתנהגותי לבין הרבעון התחתון. מוצגים כמובהקים רק קשרים עם <span class="n">30</span> שיחות לפחות, מתאם <span class="n">|ρ| ≥ 0.15</span> והפרש של <span class="n">3</span> נקודות ומעלה. קשר סטטיסטי אינו בהכרח סיבתי.</p>
+      {{ callouts("sec-drivers") }}
+      {% if a.drivers %}
+      {% if charts.drivers %}
+      <div class="card"><div class="bd chart-box">{{ charts.drivers }}</div></div>
+      {% else %}
+      <p class="callout">לא נמצא בתקופה זו קשר מובהק בין המדדים ההתנהגותיים לבין המדד. הטבלה מציגה את כל הנתונים.</p>
+      {% endif %}
+      <div class="card" style="margin-top:var(--s4)"><div class="bd tbl-wrap">
+        <table>
+          <thead><tr><th>מדד התנהגותי</th><th class="num">שיחות</th><th class="num">מתאם ρ</th><th class="num">רבעון תחתון: עד</th><th class="num">מדד ממוצע בו</th><th class="num">רבעון עליון: מ־</th><th class="num">מדד ממוצע בו</th><th>קשר מובהק</th></tr></thead>
+          <tbody>
+          {% for d in a.drivers %}
+          <tr>
+            <td>{{ d.label }}</td><td class="num n">{{ d.n }}</td><td class="num n">{{ rho(d.corr.rho) }}</td>
+            <td class="num n">{{ fmt(d.q1) }} {{ d.unit }}</td><td class="num n">{{ fmt(d.low_mean) }}</td>
+            <td class="num n">{{ fmt(d.q3) }} {{ d.unit }}</td><td class="num n">{{ fmt(d.high_mean) }}</td>
+            <td>{% if d.reportable %}<span class="badge b-medium">כן</span>{% else %}<span class="muted small">לא</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div></div>
+      {% endif %}
+    </div>
+
+    <div class="section" id="sec-risk">
+      <h3>סיכוני ציות — כשלי שער</h3>
+      <p class="lead">ממדי השער הם זיהוי ואימות הלקוח וציות וגילוי נאות. ציון <span class="n">2</span> ומטה באחד מהם מגביל את מדד השיחה ל־<span class="n">59</span> לכל היותר, כי מדובר בחשיפה רגולטורית ולא רק בשאלת איכות.</p>
+      {{ callouts("sec-risk") }}
+      {% if a.gates %}
+      <div class="grid g2">
+        {% for g in a.gates %}
+        <div class="card">
+          <div class="hd"><h4>{{ g.name }}</h4><span class="sub"><span class="n">{{ g.fails }}</span> כשלים · <span class="n">{{ pct1(g.rate.p) }}</span> מהשיחות</span>
+            {% if g.fails %}<a class="right small" href="#explorer" data-filter="{{ {'gate': g.id} | fjson }}">הצג את השיחות</a>{% endif %}</div>
+          <div class="bd">
+            {% if g.fails %}
+            {% if g.concentration is not none %}<p class="small">{{ pct0(g.concentration) }} מהכשלים אצל <span class="n">20%</span> מהבנקאים.</p>{% endif %}
+            <table>
+              <thead><tr><th>בנקאים עם הכי הרבה כשלים</th><th class="num">כשלים</th><th class="num">מתוך שיחות</th></tr></thead>
+              <tbody>{% for b, k, n in g.top_bankers %}<tr><td class="mono"><a href="#explorer" data-filter="{{ {'banker': b, 'gate': g.id} | fjson }}">{{ b }}</a></td><td class="num n">{{ k }}</td><td class="num n">{{ n }}</td></tr>{% endfor %}</tbody>
+            </table>
+            <table style="margin-top:10px">
+              <thead><tr><th>סוג שיחה</th><th class="num">כשלים</th><th class="num">שיעור</th></tr></thead>
+              <tbody>{% for t, k, n in g.by_type[:6] %}<tr><td>{{ t }}</td><td class="num n">{{ k }}</td><td class="num n">{{ pct1(k / n if n else none) }}</td></tr>{% endfor %}</tbody>
+            </table>
+            {% else %}<p class="muted">אין כשלים בממד זה.</p>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="section" id="sec-coverage">
+      <h3>כיסוי, איכות הנתונים ומקור</h3>
+      <p class="lead">על אילו שיחות הדוח מבוסס, מה לא נכלל ולמה — ומה נדרש לפני שימוש בציון של שיחה בודדת.</p>
+      {{ callouts("sec-coverage") }}
+      <div class="grid g3">
+        <div class="card"><div class="hd"><h4>מצב השיחות</h4></div><div class="bd">
+          <table><tbody>
+            <tr><td>נוקדו ונכללו במדד</td><td class="num n">{{ cov.status.success }}</td></tr>
+            <tr><td>ממתינות לבדיקה אנושית</td><td class="num n">{{ cov.status.needs_human_review }}</td></tr>
+            <tr><td>לא עובדו (כשל טכני)</td><td class="num n">{{ cov.status.failed }}</td></tr>
+            {% if cov.excluded_other_rubric %}<tr><td>לא נכללו: גרסת מחוון או הנחיות אחרת</td><td class="num n">{{ cov.excluded_other_rubric }}</td></tr>{% endif %}
+          </tbody></table>
+          {% if cov.held_reasons %}<h4 class="small" style="margin:12px 0 4px">סיבות להמתנה לבדיקה</h4>
+          <table><tbody>{% for r, k in cov.held_reasons %}<tr><td>{{ r }}</td><td class="num n">{{ k }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+          {% if cov.failed_reasons %}<h4 class="small" style="margin:12px 0 4px">סיבות לכשל</h4>
+          <table><tbody>{% for r, k in cov.failed_reasons %}<tr><td>{{ r }}</td><td class="num n">{{ k }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+        </div></div>
+        <div class="card"><div class="hd"><h4>פרטיות</h4></div><div class="bd">
+          <p class="small">כל הטקסט בדוח מגיע מתמלילים שעברו הסתרת פרטים מזהים. בתקופה זו הוסתרו <b class="n">{{ "{:,}".format(cov.entities_total) }}</b> פרטים:</p>
+          <table><tbody>{% for label, k in entities %}<tr><td>{{ label }}</td><td class="num n">{{ "{:,}".format(k) }}</td></tr>{% endfor %}</tbody></table>
+          {% if cov.redaction_disabled %}<p class="small" style="color:var(--bad-ink);margin-top:8px">בשיחות שבהן ההסתרה כובתה (<span class="n">{{ cov.redaction_disabled }}</span>) מוצגים מספרים בלבד.</p>{% endif %}
+          {% if cov.text_withheld %}<p class="small muted" style="margin-top:8px">ב־<span class="n">{{ cov.text_withheld }}</span> שיחות מנוקדות לא ניתן היה לאמת את ההסתרה, ולכן לא מוצג מהן טקסט.</p>{% endif %}
+        </div></div>
+        <div class="card"><div class="hd"><h4>אמינות הציונים</h4></div><div class="bd">
+          {% if cov.calibration %}
+          <p class="small">כיול מול מעריכים אנושיים: הסכמה (QWK) <b class="n">{{ fmt(cov.calibration.overall_qwk, 2) }}</b> על <span class="n">{{ cov.calibration.n_calls }}</span> שיחות —
+            {% if cov.calibration.overall_pass %}<span class="badge b-ok">עבר</span>{% else %}<span class="badge b-warn">לא עבר</span>{% endif %}
+            (סף <span class="n">{{ fmt(cov.calibration.qwk_pass_threshold, 2) }}</span>, מינימום <span class="n">{{ cov.calibration.min_calls_for_pass }}</span> שיחות).</p>
+          {% else %}
+          <p class="small">טרם בוצע כיול מול מעריכים אנושיים (<span class="mono">callqa calibrate</span>). עד אז מדדים קבוצתיים אמינים יותר מציון של שיחה בודדת.</p>
+          {% endif %}
+          <p class="small">מקור התאריך: <span class="n">{{ cov.date_sources.get('call', 0) }}</span> שיחות לפי תאריך השיחה{% if cov.date_sources.get('processed') %}, <span class="n">{{ cov.date_sources.get('processed') }}</span> לפי תאריך העיבוד (תאריך השיחה חסר){% endif %}.</p>
+          {% if cov.mono %}<p class="small">הקלטות חד־ערוציות (זיהוי דוברים אוטומטי): <span class="n">{{ cov.mono }}</span>.</p>{% endif %}
+          <p class="small muted">מודל שיפוט: <span class="mono">{{ models }}</span> · גרסת הנחיות: <span class="mono">{{ prompt_versions }}</span> · מחוון: <span class="mono">{{ rubric_hashes }}</span></p>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  {# ========================================================= LEVEL 3 #}
+  <section class="level" id="level3" aria-labelledby="h-level3">
+    <div class="level-head">
+      <span class="num-badge">3</span>
+      <div><h2 id="h-level3">פירוט ושיחות</h2><p>כל שיחה בדוח: סינון, מיון וחיפוש, ובלחיצה על שורה — הציון בכל ממד, הנימוק והציטוט מהשיחה.</p></div>
+    </div>
+
+    <div class="card explorer" id="explorer">
+      <div class="hd"><h4>סייר השיחות</h4><span class="sub" id="xp-count" aria-live="polite"></span>
+        <div class="right" style="display:flex;gap:6px">
+          <button type="button" class="btn" id="xp-csv">ייצוא לאקסל (CSV)</button>
+          <button type="button" class="btn" id="xp-reset">נקה סינון</button>
+        </div></div>
+      <div class="xp-bar" role="search">
+        <div class="field"><label for="xp-q">חיפוש מזהה שיחה</label><input id="xp-q" type="search" autocomplete="off" dir="ltr"></div>
+        <div class="field"><label for="xp-banker">בנקאי</label><select id="xp-banker"><option value="">כל הבנקאים</option></select></div>
+        <div class="field"><label for="xp-type">סוג שיחה</label><select id="xp-type"><option value="">כל הסוגים</option></select></div>
+        <div class="field"><label for="xp-band">רמת ביצוע</label><select id="xp-band"><option value="">כל הרמות</option>
+          <option value="4">גבוה (80+)</option><option value="3">בינוני (60–79)</option><option value="2">גבולי (40–59)</option><option value="1">חלש (עד 40)</option></select></div>
+        <div class="field"><label for="xp-gate">שערי חובה</label><select id="xp-gate"><option value="">הכול</option><option value="any">נכשלו בשער</option><option value="none">ללא כשל שער</option></select></div>
+        <div class="field"><label for="xp-status">מצב</label><select id="xp-status"><option value="scored">נוקדו</option><option value="">כל השיחות</option>
+          <option value="needs_human_review">ממתינות לבדיקה</option><option value="failed">לא עובדו</option></select></div>
+        <div class="field"><label for="xp-dim">ממד</label><select id="xp-dim"><option value="">—</option></select></div>
+        <div class="field"><label for="xp-dimop">ציון בממד</label><select id="xp-dimop"><option value="">כל ציון</option>
+          <option value="max:2">1–2 (חלש)</option><option value="eq:3">3</option><option value="min:4">4–5 (טוב)</option></select></div>
+        <div class="field"><label for="xp-from">מתאריך</label><input id="xp-from" type="date"></div>
+        <div class="field"><label for="xp-to">עד תאריך</label><input id="xp-to" type="date"></div>
+        <div class="field"><label for="xp-dur">משך</label><select id="xp-dur"><option value="">כל משך</option>
+          {% for key, label, lo, hi in duration_buckets %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="xp-size">שורות בעמוד</label><select id="xp-size"><option>25</option><option selected>50</option><option>100</option></select></div>
+      </div>
+      <div class="xp-active" id="xp-active"></div>
+      <div class="xp-sum" id="xp-sum" aria-live="polite"></div>
+      <div id="xp-profile"></div>
+      <div class="tbl-wrap">
+        <table class="xp-table" id="xp-table">
+          <caption class="sr">רשימת השיחות לפי הסינון</caption>
+          <thead><tr>
+            <th aria-sort="none"><button type="button" data-sort="id">שיחה</button></th>
+            <th aria-sort="none"><button type="button" data-sort="d">תאריך</button></th>
+            <th aria-sort="none"><button type="button" data-sort="b">בנקאי</button></th>
+            <th aria-sort="none"><button type="button" data-sort="t">סוג</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="dur">משך</button></th>
+            <th class="num" aria-sort="descending"><button type="button" data-sort="tot">מדד</button></th>
+            <th>שער</th>
+            <th>ציונים בממדים <span class="muted" id="xp-dimkey"></span></th>
+          </tr></thead>
+          <tbody id="xp-body"></tbody>
+        </table>
+      </div>
+      <div class="pager" id="xp-pager"></div>
+    </div>
+
+    <div class="section" id="sec-cases">
+      <h3>ספריית מקרים</h3>
+      <p class="lead">לכל ממד — הרגעים הברורים ביותר מתוך השיחות: דוגמאות לביצוע מצוין (ציון <span class="n">5</span>) ולביצוע חלש (<span class="n">1–2</span>), עם הציטוט והנימוק. מתאים להדרכות ולמשוב.</p>
+      {% if not with_text %}
+      <p class="muted">בגרסה להפצה רחבה לא מוצגים ציטוטים.</p>
+      {% elif cases_any %}
+      <div class="tabs no-print" role="tablist" aria-label="ממד">
+        {% for d in a.dims %}<button type="button" role="tab" id="tab-{{ d.id }}" aria-controls="case-{{ d.id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" data-case="{{ d.id }}">{{ d.name }}</button>{% endfor %}
+      </div>
+      {% for d in a.dims %}
+      <div class="case-panel" id="case-{{ d.id }}" role="tabpanel" aria-labelledby="tab-{{ d.id }}" {% if not loop.first %}hidden{% endif %}>
+        <h4 class="print-only" style="margin:10px 0 4px">{{ d.name }}</h4>
+        <div class="cases">
+          {% for title, items, cls in [("ביצוע מצוין", cases_best[d.id], "ok"), ("ביצוע חלש", cases_worst[d.id], "bad")] %}
+          <div class="card"><div class="hd"><h4>{{ title }}</h4></div><div class="bd">
+            {% for e in items %}
+            <div class="case">
+              <div class="top"><span class="lvl lvl-{{ e.score }}">{{ e.score }}</span>
+                <span class="mono">{{ e.call_id }}</span><span class="muted">בנקאי</span><span class="mono">{{ e.banker_id }}</span>
+                <span class="muted">מדד <span class="n">{{ fmt(e.total) }}</span></span>
+                {% if e.call_report %}<a href="{{ e.call_report }}">דוח השיחה</a>{% endif %}
+                <a href="#explorer" data-filter="{{ {'q': e.call_id, 'status': ''} | fjson }}">בסייר</a></div>
+              <div class="quote">„{{ e.quote }}”<span class="ts">{{ speaker_he.get(e.speaker, '') }} · <span class="n">{{ e.timestamp }}</span></span></div>
+              <p>{{ e.reasoning }}</p>
+            </div>
+            {% else %}<p class="muted small">אין דוגמאות מתאימות.</p>{% endfor %}
+          </div></div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="muted">אין ציטוטים מתאימים להצגה.</p>
+      {% endif %}
+    </div>
+
+    <div class="section" id="sec-attention">
+      <h3>שיחות הדורשות תשומת לב</h3>
+      <p class="lead">כשלי שער ושיחות במדד נמוך מ־<span class="n">40</span>, עד <span class="n">25</span> השיחות החמורות ביותר. הרשימה מודפסת גם כשהסייר אינו זמין.</p>
+      {% if a.attention %}
+      <div class="card"><div class="bd tbl-wrap">
+        <table>
+          <thead><tr><th>שיחה</th><th>תאריך</th><th>בנקאי</th><th>סוג</th><th class="num">מדד</th><th>שער שנכשל</th><th>הממד החלש</th><th></th></tr></thead>
+          <tbody>
+          {% for r in a.attention %}
+          <tr>
+            <td class="mono">{{ r.call_id }}</td><td class="n">{{ date_he(r.call_date) }}</td><td class="mono">{{ r.banker_id }}</td><td>{{ r.call_type }}</td>
+            <td class="num n"><b>{{ fmt(r.card.weighted_total) }}</b></td>
+            <td>{% for g in r.card.failed_gates %}<span class="badge b-bad">{{ a.dim_names.get(g, g) }}</span> {% endfor %}</td>
+            <td>{{ a.dim_names.get(weakest_of(r), '') }}</td>
+            <td class="small">{% if r.call_report %}<a href="{{ r.call_report }}">דוח השיחה</a>{% else %}<a href="#explorer" data-filter="{{ {'q': r.call_id, 'status': ''} | fjson }}">בסייר</a>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div></div>
+      {% else %}<p class="muted">אין שיחות כאלה בתקופה זו.</p>{% endif %}
+    </div>
+  </section>
+
+  {# ========================================================= METHOD #}
+  <section class="level method" id="method" aria-labelledby="h-method">
+    <div class="level-head">
+      <span class="num-badge">i</span>
+      <div><h2 id="h-method">מתודולוגיה והגדרות</h2><p>איך חושב כל מספר בדוח, ומה נכלל בו.</p></div>
+    </div>
+    <div class="card"><div class="bd">
+      <dl>
+        <dt>מדד האיכות</dt><dd>כל שיחה מקבלת ציון <span class="n">1–5</span> בכל אחד מ־<span class="n">{{ a.dims | length }}</span> ממדי המחוון. המדד (<span class="n">0–100</span>) הוא ממוצע משוקלל: ציון <span class="n">1</span> = <span class="n">0</span>, ציון <span class="n">5</span> = <span class="n">100</span>, לפי המשקלות: {{ weights_text }}.</dd>
+        <dt>שערי חובה</dt><dd>{{ gates_text }}: ציון <span class="n">2</span> ומטה באחד מהם מגביל את מדד השיחה ל־<span class="n">59</span> (כשל שער). ההפרש בין המדד לפני ההגבלה לאחריה מוצג כ„קנס שער” בפירוק הנקודות.</dd>
+        <dt>רמות ביצוע</dt><dd>גבוה <span class="n">80</span> ומעלה · בינוני <span class="n">60–79</span> · גבולי <span class="n">40–59</span> · חלש מתחת ל־<span class="n">40</span>.</dd>
+        <dt>אילו שיחות נכללות</dt><dd>רק שיחות שעובדו בהצלחה ושנוקדו באותה גרסת מחוון והנחיות שיפוט, כמו בדוחות הבנקאים. שיחות שממתינות לבדיקה אנושית ושיחות שנכשלו נספרות בנפרד ואינן משפיעות על המדד.</dd>
+        <dt>תאריך</dt><dd>תאריך השיחה מקובץ הנתונים; כשהוא חסר — תאריך העיבוד (מסומן בפרק הכיסוי). המגמות מקובצות לפי {{ granularity_he or 'תקופה' }}; שבוע מתחיל ביום ראשון.</dd>
+        <dt>רווחי סמך</dt><dd>לממוצעים — רווח סמך <span class="n">95%</span> מבוסס התפלגות t; לשיעורים — שיטת Wilson. רווח סמך רחב פירושו שהמספר פחות ודאי (בדרך כלל: מעט שיחות).</dd>
+        <dt>מובהקות</dt><dd>בהשוואה בין קבוצות רבות (בנקאים, סוגי שיחה, משכים) קבוצה מסומנת רק כשההפרש משאר השיחות מובהק ברמת ביטחון <span class="n">99%</span> (Welch), גדול מ־<span class="n">3</span> נקודות, ובקבוצה יש לפחות <span class="n">8</span> שיחות. כך נמנעות „התרעות שווא” כשמשווים עשרות בנקאים.</dd>
+        <dt>מגמה</dt><dd>שיפוע קו מגמה (ריבועים פחותים) של מדד השיחות לאורך הזמן, בנקודות לחודש, עם רווח סמך <span class="n">95%</span>; מחושב מ־<span class="n">30</span> שיחות ומעל <span class="n">14</span> ימים לפחות.</dd>
+        <dt>גורמים התנהגותיים</dt><dd>מתאם ספירמן (ρ) בין מדד אובייקטיבי שנמדד בשיחה (יחס דיבור, קטיעות, שאלות, שקט, משך ועוד) לבין המדד, והפרש הממוצעים בין הרבעון העליון לתחתון של אותו מדד. קטיעות נמדדות רק בהקלטות שבהן כל דובר בערוץ נפרד.</dd>
+        <dt>פוטנציאל שיפור</dt><dd>חישוב „מה אם”: כל ציון נמוך מ־<span class="n">3</span> בממד מוחלף ב־<span class="n">3</span> והמדד מחושב מחדש לכל שיחה (כולל ביטול כשלי שער שנגרמו מאותו ממד).</dd>
+        <dt>פרטיות</dt><dd>הדוח נבנה רק מתוצרים שעברו הסתרת פרטים מזהים. ציטוטים ונימוקים מוצגים רק משיחות שבהן אומת שההסתרה פעלה. שמות בנקאים אינם מוצגים — רק מזהים. אין בקובץ חיבור לרשת, והוא נפתח בדפדפן גם ללא אינטרנט.</dd>
+        <dt>הגבלות</dt><dd>הציונים מופקים על ידי מודל שפה לפי מחוון קבוע ועוברים אימות ציטוטים; הם אינם תחליף לשיקול דעת של מנהל. אין להסתמך על ציון של שיחה בודדת, או של בנקאי עם מעט שיחות, כבסיס יחיד להחלטה על עובד.</dd>
+      </dl>
+    </div></div>
+  </section>
+</main>
+
+<footer class="foot">
+  {{ footer }}
+</footer>
+
+<script type="application/json" id="xr-data">{{ data_json }}</script>
+<script>
+{% include "executive_report.js.j2" %}
+</script>
+</body>
+</html>

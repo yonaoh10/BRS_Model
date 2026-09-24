@@ -354,7 +354,8 @@ mark.ev{background:var(--warn-soft); color:inherit; padding:0 2px; border-radius
 
     <!-- OVERVIEW -->
     <section class="view" id="view-overview">
-      <div class="pagehead"><div><h1>סקירה</h1><p id="ovSub">מצב הבקרה והממצאים המרכזיים.</p></div></div>
+      <div class="pagehead"><div><h1>סקירה</h1><p id="ovSub">מצב הבקרה והממצאים המרכזיים.</p></div>
+        <div class="act"><a class="btn primary sm" id="openExecutive" href="#" target="_blank" rel="noopener" hidden>דוח מנהלים</a></div></div>
       <div id="ovAttn"></div>
       <div class="stats">
         <div class="stat"><div class="lab">דורשות בדיקה</div><div class="fig num" id="kReview">—</div><div class="foot" id="kReviewFoot"></div></div>
@@ -484,6 +485,11 @@ function renderDims(el, dims, scores){
 function renderOverview(){
   const s=STATE.summary||{}, calls=STATE.calls||[];
   document.getElementById('ovSub').textContent=`הממצאים המרכזיים מ-${s.nCalls} השיחות שנותחו.`;
+  // The management report over the whole batch, when `callqa report` wrote one.
+  const ex=((STATE.reports||{}).executive||[]), exLink=document.getElementById('openExecutive');
+  const exName=ex.includes('executive.html')?'executive.html':ex[0];
+  if(TOKEN&&exName){ exLink.href='/reports/'+encodeURIComponent(exName)+'?t='+encodeURIComponent(TOKEN); exLink.hidden=false; }
+  else exLink.hidden=true;
   const att=document.getElementById('ovAttn');
   att.innerHTML = s.needsReview>0 ? `<div class="attn"><span class="g" aria-hidden="true">▲</span>
     <span class="t"><b>${s.needsReview} שיחות דורשות בדיקה אנושית</b> — חרגו בממד שער או סומנו לבדיקה. כדאי לפתוח אותן קודם.</span>

@@ -5,6 +5,69 @@ All notable changes to callqa are recorded here. The format follows
 semantic versioning: the CLI commands, exit codes, and on-disk artifact schemas
 are the public contract.
 
+## [1.3.0] — 2026-09-24
+
+The management report. One self-contained HTML file over a whole batch of
+calls - made for a month of ~1,000 - written for management and readable at
+three depths, with every figure traceable to the calls behind it.
+
+### Added
+- `callqa executive-report` and, automatically, every `callqa report`:
+  `data/output/reports/executive.html`, plus a numbers-only CSV for Excel and
+  JSON for BI tools beside it.
+  - **Level 1, executive summary:** an overall verdict and a bottom line
+    written from the numbers by fixed rules (no language model; the same batch
+    always yields the same opinion), six key indicators with trend lines, the
+    five main findings ranked by severity and size (always including the
+    strongest good news), and three recommended actions, each with its impact
+    in index points and gate failures removed, the bankers to focus on and the
+    owner.
+  - **Level 2, analysis:** score distribution per dimension and an exact
+    decomposition of "where the points go" (per dimension plus the gate
+    penalty, summing to 100 minus the index); the index distribution; trends
+    by day, week or month with confidence bands and the gate-failure rate;
+    breakdowns by call type, call length and recording layout; bankers as a
+    dot plot with confidence intervals and a banker-by-dimension heat map;
+    behavioural drivers (talk share, interruptions, questions, dead air,
+    monologues, length) against the index; compliance risk per gate; and
+    coverage, privacy and calibration status.
+  - **Level 3, detail:** an explorer over every call - filters, sort, search,
+    pagination, a drill-down with each dimension's score, reasoning and
+    quote, links to the call and banker reports, a banker profile, and a CSV
+    export of exactly what is filtered; a case library of excellent and weak
+    moments per dimension; and a printable list of the calls needing attention.
+  - Every finding links to its analysis and to its calls. Differences are
+    called differences only when significant at 99% (Welch), at least 3 points
+    and backed by at least 8 calls; small groups are shown, not ranked.
+  - Scope with `--from/--to` (ISO or Israeli day-first dates), `--call-type`,
+    `--banker`, `--run`; `--no-quotes` for a version with no call text at all;
+    `--name`, `--title`.
+  - Print/PDF layout (each level on a new page), dark mode, phone widths, no
+    script errors with scripting on, and everything but the explorer readable
+    with it off.
+- `scripts/generate_batch_demo.py`: a realistic synthetic batch (1,000 calls by
+  default, in its own `data/demo-batch` folder) and its management report,
+  clearly labelled as a demonstration - to see the report before real data
+  exists.
+- The dashboard links and serves the management report.
+- `docs/executive_report_he.md`: what each part shows and how each number is
+  computed.
+- CI builds the report over 1,000 synthetic calls on Linux and Windows and
+  opens it in a real browser (Edge on Windows) to check its script ran.
+
+### Privacy
+- The report reads only redacted artifacts. Quotes and reasoning come only
+  from calls whose redacted transcript parses, is theirs and says redaction
+  was on (fail closed); judge prose is re-redacted at render time; error
+  texts, file names, banker names and model paths never appear; embedded data
+  is escaped so no text can end the script element; the explorer places all
+  text with textContent.
+
+### Changed
+- `callqa report` also writes the management report and links it from the
+  index; `first_run.py` and `make mock-e2e` run `calibrate` before `report`,
+  so the report shows the calibration status.
+
 ## [1.2.0] — 2026-09-24
 
 Windows. The bank's desktops are Microsoft VDI - Windows, no administrator
