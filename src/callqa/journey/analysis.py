@@ -38,6 +38,17 @@ OBJECTIVE_HE = {
 }
 
 
+PENDING = "pending"     # a return with content the content stage has not read yet
+
+
+def shown_category(j) -> str:  # noqa: ANN001 - ReturnJudgement
+    """The category a return is shown and counted under: a content return the
+    language model has not judged yet is 'pending', not 'unclassifiable'."""
+    if j.objective_class == "content" and j.decided_by == "none":
+        return PENDING
+    return j.category
+
+
 class Metric(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -241,10 +252,11 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
             prev = c
         for c in tl.returns:
             j = facts.judgements[c.interaction.interaction_id]
+            cat = shown_category(j)
             objective[j.objective_class] += 1
-            strict[j.category] += 1
-            extended[j.inferred_category or j.category] += 1
-            channel_cat[KIND_HE.get(c.kind, c.kind)][j.category] += 1
+            strict[cat] += 1
+            extended[j.inferred_category or cat] += 1
+            channel_cat[KIND_HE.get(c.kind, c.kind)][cat] += 1
             judged_by[j.decided_by] += 1
 
     # topics

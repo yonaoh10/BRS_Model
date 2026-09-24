@@ -6,7 +6,8 @@
             dataset.json            the normalised dataset (no account numbers)
             import_report.json      counts and issues, safe to share
             private/accounts.csv    story number -> account; owner-only folder
-            ...                     later stages: cards/, stories/, analysis.json
+            content.json            what was read from the contents (cards, judgements,
+                                    story verdicts), when the content stage has run
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import re
 from pathlib import Path
 
 from callqa.config import Config
-from callqa.journey.models import JourneyDataset
+from callqa.journey.models import ContentLayer, JourneyDataset
 from callqa.state import atomic_write_model, atomic_write_text
 
 _DATASET_ID = re.compile(r"^ds-\d{8}-[0-9a-f]{8}$")
@@ -60,3 +61,16 @@ def load_dataset(config: Config, dataset_id: str | None = None) -> JourneyDatase
     ds = resolve_dataset_id(config, dataset_id)
     path = dataset_dir(config, ds) / "dataset.json"
     return JourneyDataset.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def save_content(config: Config, dataset_id: str, content: ContentLayer) -> Path:
+    path = dataset_dir(config, dataset_id) / "content.json"
+    atomic_write_model(path, content)
+    return path
+
+
+def load_content(config: Config, dataset_id: str) -> ContentLayer | None:
+    path = dataset_dir(config, dataset_id) / "content.json"
+    if not path.exists():
+        return None
+    return ContentLayer.model_validate_json(path.read_text(encoding="utf-8"))

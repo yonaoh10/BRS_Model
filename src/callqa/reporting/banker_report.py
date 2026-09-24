@@ -120,9 +120,12 @@ def _write_index(output_dir: Path, cards: list[ScoreCard],
                  footer: str) -> Path:
     reports = output_dir / "reports"
     from callqa.reporting.executive.render import REPORT_FILE_RE
+    from callqa.reporting.journey.render import JOURNEY_REPORT_FILE_RE
 
     executive = sorted(p.name for p in reports.glob("executive*.html")
                        if REPORT_FILE_RE.fullmatch(p.name)) if reports.is_dir() else []
+    journey = sorted(p.name for p in reports.glob("journey*.html")
+                     if JOURNEY_REPORT_FILE_RE.fullmatch(p.name)) if reports.is_dir() else []
     index_template = jinja_env().get_template("index.html.j2")
     index_html = index_template.render(
         generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -132,6 +135,7 @@ def _write_index(output_dir: Path, cards: list[ScoreCard],
         cards=sorted(cards, key=lambda c: c.call_id),
         calibration_exists=(reports / "calibration.html").exists(),
         executive_reports=executive,
+        journey_reports=journey,
         footer_meta=footer,
     )
     index_path = reports / "index.html"

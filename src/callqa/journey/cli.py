@@ -112,6 +112,24 @@ def cmd_journey_reveal(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def cmd_journey_report(args: argparse.Namespace) -> int:
+    """The journey report of a dataset: HTML, the stories and the returns as
+    CSV, and the numbers as JSON, under <output_dir>/reports/."""
+    from callqa.reporting.journey import build_journey_report
+
+    config = _config(args)
+    try:
+        report = build_journey_report(config, args.dataset, with_text=not args.no_quotes,
+                                      name=args.name, title=args.title)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"journey report failed: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    a = report.analysis
+    print(f"{len(a.stories):,} stories, {sum(s.contacts for s in a.stories):,} contacts")
+    print(f"report: {report.html}")
+    return EXIT_SUCCESS
+
+
 def _nmf_members(target: Path) -> list[tuple[str, bytes]]:
     """(printable name, bytes) of every .nmf in a file, folder or ZIP."""
     from callqa.journey.importers.common import AudioSource, shown_file
@@ -228,6 +246,15 @@ def register(sub: argparse._SubParsersAction, add_common) -> None:
     p.add_argument("--dry-run", action="store_true", help="count and check only; write nothing")
     add_common(p)
     p.set_defaults(func=cmd_journey_import)
+
+    p = jsub.add_parser("report", help="the journey report (HTML, CSV, JSON)")
+    p.add_argument("--dataset", default=None, help="dataset id (default: the latest import)")
+    p.add_argument("--name", default=None, help="file name: journey-<name>.html")
+    p.add_argument("--title", default=None, help="the report's title")
+    p.add_argument("--no-quotes", action="store_true",
+                   help="leave out every quote and reasoning (for wide distribution)")
+    add_common(p)
+    p.set_defaults(func=cmd_journey_report)
 
     p = jsub.add_parser("reveal", help="which account a story number is (logged)")
     p.add_argument("story_no", type=int)

@@ -16,6 +16,16 @@
 </div>
 {% endif %}
 
+{% if journey_reports %}
+<div class="card">
+  <h2>מסעות לקוח — פניות חוזרות</h2>
+  <p>למה לקוחות חוזרים: סיפורי לקוח לאורך זמן, סיבות החזרה, הבטחות, נטישה ומאמץ הבנקאים.</p>
+  <ul>
+    {% for name in journey_reports %}<li><a href="{{ name }}">{{ name }}</a></li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>דוחות בנקאים</h2>
   <table>

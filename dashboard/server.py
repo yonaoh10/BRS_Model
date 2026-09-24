@@ -61,17 +61,20 @@ from callqa.portable import (  # noqa: E402
     disable_console_quick_edit,
 )
 from callqa.reporting.executive.render import REPORT_FILE_RE  # noqa: E402
+from callqa.reporting.journey.render import JOURNEY_REPORT_FILE_RE  # noqa: E402
 
 logger = logging.getLogger("callqa.dashboard")
 
 PAGE = Path(__file__).parent / "prototype.html"
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 # Everything the report tree contains, as a pattern: index, calibration and
-# the management reports (executive.html, executive-<scope>.html) at the top,
-# one page per call and per banker below.
+# the management reports (executive.html, executive-<scope>.html) and the
+# journey reports (journey.html, journey-<name>.html) at the top, one page per
+# call and per banker below.
 _EXECUTIVE_RE = REPORT_FILE_RE.pattern.removesuffix(r"\.html")
+_JOURNEY_RE = JOURNEY_REPORT_FILE_RE.pattern.removesuffix(r"\.html")
 _REPORT_PATH_RE = re.compile(
-    rf"(index|calibration|{_EXECUTIVE_RE})\.html"
+    rf"(index|calibration|{_EXECUTIVE_RE}|{_JOURNEY_RE})\.html"
     r"|(calls|bankers)/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.html")
 # Bounds on one /api/transcript response - a real call is far under these; the
 # caps stop a corrupt or pathological artifact from serving an unbounded body.
@@ -198,8 +201,11 @@ def collect_state(output_dir: Path, config_path: Path | None = None) -> dict:
     executive = sorted(
         p.name for p in (reports_dir.glob("executive*.html") if reports_dir.is_dir() else [])
         if _REPORT_PATH_RE.fullmatch(p.name))
+    journey = sorted(
+        p.name for p in (reports_dir.glob("journey*.html") if reports_dir.is_dir() else [])
+        if _REPORT_PATH_RE.fullmatch(p.name))
     return {
-        "reports": {"executive": executive},
+        "reports": {"executive": executive, "journey": journey},
         "calls": calls,
         "dims": dims,
         "bankers": bankers,

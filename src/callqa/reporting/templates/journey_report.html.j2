@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="callqa {{ version }}">
+<title>{{ title }}</title>
+<style>
+{% include "executive_report.css.j2" %}
+{% include "journey_report.css.j2" %}
+</style>
+</head>
+<body>
+<a class="skip" href="#level1">דלג לתוכן הדוח</a>
+
+<header class="topbar">
+  <div class="in">
+    <div class="brand"><span class="mark" aria-hidden="true">QA</span><span>מסעות לקוח</span></div>
+    <nav class="levels" aria-label="רמות הדוח">
+      <a href="#level1" data-level="level1"><span class="lv">1</span>סיכום מנהלים</a>
+      <a href="#level2" data-level="level2"><span class="lv">2</span>ניתוח מעמיק</a>
+      <a href="#level3" data-level="level3"><span class="lv">3</span>סיפורי הלקוחות</a>
+      <a href="#method" data-level="method"><span class="lv">i</span>מתודולוגיה</a>
+    </nav>
+    <div class="tools">
+      <button type="button" class="btn" id="btn-print" title="הדפסה או שמירה כ־PDF">הדפסה / PDF</button>
+      <button type="button" class="btn icon" id="btn-theme" aria-label="החלפת ערכת צבעים" title="ערכת צבעים">◐</button>
+    </div>
+  </div>
+</header>
+
+{% macro help(h) %}
+<details class="mdef"><summary aria-label="מה המספר הזה">?</summary>
+  <div class="mdef-body">
+    <p>{{ h.definition }}</p>
+    {% if h.wrong_if %}<p><b>מתי זה לא נכון:</b> {{ h.wrong_if }}</p>{% endif %}
+    <p class="muted">{% if h.base %}בסיס: {{ h.base | rich }} · {% endif %}סוג: {{ h.basis }}</p>
+  </div>
+</details>
+{% endmacro %}
+
+{% macro callouts(section) %}
+  {% for f in opinion.by_section.get(section, []) %}
+  <div class="callout {{ f.severity }}">
+    <b>{{ f.title | rich }}.</b> {{ f.text | rich }}
+    {% if f.filter %}<div class="links"><a href="#explorer" data-filter="{{ f.filter | fjson }}">{{ f.link_label }}</a></div>{% endif %}
+  </div>
+  {% endfor %}
+{% endmacro %}
+
+<main class="wrap" id="main">
+  <noscript><div class="noscript">הסינון בסייר הסיפורים (רמה 3) דורש JavaScript. כל הנתונים, הגרפים, הממצאים וכרטיסי הסיפורים מוצגים גם בלעדיו.</div></noscript>
+
+  {% if demo %}
+  <div class="demo" role="note">
+    <b>{{ demo_title }}</b> — {{ demo_text }} <b>אין להסיק מדוח זה דבר על לקוחות או על עובדים.</b>
+  </div>
+  {% endif %}
+
+  <section class="cover" aria-labelledby="doc-title">
+    <div class="eyebrow">פניות חוזרות · מסע הלקוח מקצה לקצה</div>
+    <h1 id="doc-title">{{ title }}</h1>
+    <div class="meta">
+      <span>תקופה: <b>{{ period | rich }}</b></span>
+      <span>סיפורי לקוח: <b class="n">{{ "{:,}".format(m.stories.value | int) }}</b></span>
+      <span>מגעים: <b class="n">{{ "{:,}".format(m.contacts.value | int) }}</b></span>
+      <span>חזרות: <b class="n">{{ "{:,}".format(m.returns.value | int) }}</b></span>
+      <span>הופק: <b class="n">{{ generated_at }}</b></span>
+    </div>
+    <div class="chips">
+      {% if content %}<span class="chip">סיווג לפי תוכן: {{ content.engine }}</span>
+      {% else %}<span class="chip">סיווג לפי תוכן עוד לא הורץ — הדוח מבוסס על עובדות בלבד</span>{% endif %}
+      {% for k, v in a.coverage.items() %}<span class="chip">{{ coverage_he.get(k, k) }}: <span class="n">{{ v }}</span></span>{% endfor %}
+      {% if not with_text %}<span class="chip">גרסה להפצה רחבה: ללא ציטוטים ונימוקים</span>{% endif %}
+    </div>
+  </section>
+
+  {# ========================================================= LEVEL 1 #}
+  <section class="level" id="level1" aria-labelledby="h-level1">
+    <div class="level-head">
+      <span class="num-badge">1</span>
+      <div><h2 id="h-level1">סיכום מנהלים</h2><p>למה לקוחות חוזרים, כמה זה עולה, ומה כדאי לעשות.</p></div>
+    </div>
+
+    <div class="card verdict {{ verdict_class }}">
+      <div>
+        <div class="label">חוות דעת מקצועית</div>
+        <h3>{{ opinion.assessment | rich }}</h3>
+        <div class="bl">{% for line in opinion.bottom_line %}<p>{{ line | rich }}</p>{% endfor %}</div>
+      </div>
+      <div class="gauge" aria-label="חזרות לסיפור">
+        <div class="big n">{{ fmt(m.returns_per_story.value) }}</div>
+        <div class="of">חזרות בממוצע לכל לקוח</div>
+      </div>
+    </div>
+
+    <div class="kpis" role="list">
+      {% for k in kpis %}
+      <div class="card kpi {{ k.cls }}" role="listitem">
+        <div class="k-label">{{ k.label }} {{ help(k.help) }}</div>
+        <div class="k-value"><span class="n">{{ k.value }}</span>{% if k.unit %}<small>{{ k.unit }}</small>{% endif %}</div>
+        <div class="k-sub">{{ k.sub | rich }}</div>
+        <div class="k-foot">
+          {% if k.badge %}<span class="badge b-{{ k.badge_cls }}">{{ k.badge }}</span>{% endif %}
+          <a class="small" href="{{ k.href }}">לפירוט</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="section" id="sec-findings">
+      <h3>הממצאים המרכזיים</h3>
+      <p class="lead">מדורגים לפי חומרה והיקף. כל ממצא נגזר ממספר מחושב; ממנו אפשר לעבור לניתוח (רמה 2) ולסיפורים עצמם (רמה 3).</p>
+      <div class="findings">
+        {% for f in opinion.top_findings %}
+        <article class="card finding">
+          <div class="sev"><span class="badge b-{{ f.severity }}">{{ severity_he[f.severity] }}</span></div>
+          <div>
+            <h4>{{ f.title | rich }}</h4>
+            <p class="txt">{{ f.text | rich }}</p>
+            <p class="mean">{{ f.meaning | rich }}</p>
+            <div class="links">
+              <a href="#{{ f.section }}">לניתוח המלא</a>
+              {% if f.filter %}<a href="#explorer" data-filter="{{ f.filter | fjson }}">{{ f.link_label }}</a>{% endif %}
+            </div>
+          </div>
+        </article>
+        {% else %}
+        <p class="muted">אין ממצאים להצגה.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if opinion.actions %}
+    <div class="section" id="sec-actions">
+      <h3>פעולות מומלצות</h3>
+      <p class="lead">לפי היקף הבעיה שכל פעולה מטפלת בה בדוח זה. ההשפעות מחושבות כל אחת בנפרד ואין לחבר ביניהן.</p>
+      <div class="actions">
+        {% for x in opinion.actions %}
+        <article class="card action">
+          <div class="rank">פעולה {{ loop.index }}</div>
+          <h4>{{ x.title | rich }}</h4>
+          <p class="small">{{ x.text | rich }}</p>
+          <div class="impact">{{ x.impact | rich }}</div>
+          <div class="owner">אחריות: {{ x.owner }}</div>
+          <div class="links">
+            <a href="#{{ x.section }}">לניתוח</a>
+            {% if x.filter %}<a href="#explorer" data-filter="{{ x.filter | fjson }}">לסיפורים הרלוונטיים</a>{% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </section>
+
+  {# ========================================================= LEVEL 2 #}
+  <section class="level" id="level2" aria-labelledby="h-level2">
+    <div class="level-head">
+      <span class="num-badge">2</span>
+      <div><h2 id="h-level2">ניתוח מעמיק</h2><p>היקף החזרות, הסיבות, הנושאים, הזמנים, ההבטחות, הנטישה והמאמץ של הבנקאים.</p></div>
+    </div>
+    <nav class="subnav no-print" aria-label="פרקי הניתוח">
+      <a href="#sec-returns">היקף</a><a href="#sec-categories">סיבות</a><a href="#sec-topics">נושאים</a>
+      <a href="#sec-gaps">זמנים</a><a href="#sec-resolution">סגירה</a><a href="#sec-promises">הבטחות</a>
+      <a href="#sec-abandon">נטישה</a><a href="#sec-effort">מאמץ ובנקאים</a><a href="#sec-metrics">כל המדדים</a>
+    </nav>
+
+    <div class="section" id="sec-returns">
+      <h3>היקף החזרות</h3>
+      <p class="lead">חזרה היא כל מגע אחרי הראשון בסיפור, בכל ערוץ. סיפור הוא כל המגעים של חשבון אחד בתקופה.</p>
+      {{ callouts("sec-returns") }}
+      <div class="grid g2">
+        <div class="card"><div class="bd chart-box">{{ charts.returns_dist or empty }}</div></div>
+        <div class="card"><div class="bd chart-box">{{ charts.kinds or empty }}</div></div>
+      </div>
+    </div>
+
+    <div class="section" id="sec-categories">
+      <h3>למה הלקוחות חזרו</h3>
+      <p class="lead">הסיווג הקפדני נשען על תוכן (הקלטה או התכתבות) או על עובדה (הבנק יזם). הסיווג המורחב מוסיף הסקה מרצף האירועים לחזרות בלי תוכן — ומסומן כהסקה.</p>
+      {{ callouts("sec-categories") }}
+      <div class="grid g2">
+        <div class="card"><div class="bd chart-box">{{ charts.cat_strict or empty }}</div></div>
+        <div class="card"><div class="bd chart-box">{{ charts.cat_extended or empty }}</div></div>
+      </div>
+      <div class="card" style="margin-top:16px"><div class="hd"><h4>מה ידוע על כל חזרה, גם בלי תוכן</h4><span class="sub">מתוך נתוני המוקד והאטלס בלבד</span></div><div class="bd chart-box">{{ charts.objective or empty }}</div></div>
+      <div class="card" style="margin-top:16px"><div class="bd chart-box">{{ charts.channel_cat or empty }}</div></div>
+      <div class="card" style="margin-top:16px"><div class="hd"><h4>הקטגוריות</h4></div><div class="bd tbl-wrap">
+        <table><thead><tr><th>קטגוריה</th><th>כשל</th><th>הגדרה</th></tr></thead><tbody>
+        {% for c in categories %}<tr><td><span class="cat-dot ch-cat-{{ c.id }}"></span>{{ c.label }}</td><td>{{ "כן" if c.failure else "" }}</td><td class="small">{{ c.definition }}</td></tr>{% endfor %}
+        </tbody></table></div></div>
+    </div>
+
+    <div class="section" id="sec-topics">
+      <h3>נושאים</h3>
+      <p class="lead">נושא הסיפור נקבע מתוכן הפניות. שיעור כשל ורווח סמך מוצגים רק לנושא עם <span class="n">10</span> חזרות עם תוכן לפחות.</p>
+      {% if not content %}<p class="callout">נושא נקבע מתוך תוכן השיחות וההתכתבויות; שלב התוכן עוד לא הורץ על batch זה, ולכן כל הסיפורים מופיעים תחת „אחר”.</p>{% endif %}
+      {{ callouts("sec-topics") }}
+      <div class="card"><div class="bd tbl-wrap">
+        <table><thead><tr><th>נושא</th><th class="num">סיפורים</th><th class="num">חזרות</th><th class="num">עם תוכן</th><th class="num">כשל</th><th class="num">שיעור כשל</th><th class="num">רווח סמך 95%</th><th></th></tr></thead><tbody>
+        {% for t in topics %}
+        <tr><td>{{ t.label }}</td><td class="num n">{{ t.stories }}</td><td class="num n">{{ t.returns }}</td><td class="num n">{{ t.content_returns }}</td><td class="num n">{{ t.failures }}</td>
+          <td class="num n">{{ pct1(t.rate) if t.rate is not none else "—" }}</td>
+          <td class="num n">{% if t.low is not none %}{{ pct1(t.low) }}–{{ pct1(t.high) }}{% endif %}</td>
+          <td class="small"><a href="#explorer" data-filter="{{ {'topic': t.topic} | fjson }}">לסיפורים</a></td></tr>
+        {% else %}<tr><td colspan="8" class="muted">אין נתונים.</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      <div class="card" style="margin-top:16px"><div class="bd chart-box">{{ charts.topic_cat or empty }}</div></div>
+    </div>
+
+    <div class="section" id="sec-gaps">
+      <h3>זמנים בין מגעים</h3>
+      <p class="lead">חזרה מהירה — באותה יממה — היא בדרך כלל לקוח שלא קיבל מענה, לא לקוח עם עניין חדש.</p>
+      {{ callouts("sec-gaps") }}
+      <div class="grid g2">
+        <div class="card"><div class="bd chart-box">{{ charts.gaps or empty }}</div></div>
+        <div class="card"><div class="bd chart-box">{{ charts.same_day or empty }}</div></div>
+      </div>
+    </div>
+
+    <div class="section" id="sec-resolution">
+      <h3>איך הסיפורים הסתיימו</h3>
+      <p class="lead">סטטוס נקבע לפי התוכן כשיש, אחרת לפי הסקה (פעולה בחשבון אחרי הפנייה האחרונה ושקט של שבוע). עקומת Kaplan-Meier סופרת סיפור שעוד לא נסגר כ„עדיין פתוח” ולא משמיטה אותו.</p>
+      {{ callouts("sec-resolution") }}
+      <div class="grid g2">
+        <div class="card"><div class="bd chart-box">{{ charts.status or empty }}</div></div>
+        <div class="card"><div class="bd chart-box">{{ charts.km or empty }}</div></div>
+      </div>
+    </div>
+
+    <div class="section" id="sec-promises">
+      <h3>הבטחות „נחזור אליך”</h3>
+      <p class="lead">ההבטחה מזוהה מתוך השיחה; קיומה נקבע מעובדות: שיחה יוצאת או פעולה באטלס לפני שהלקוח חזר, ובתוך <span class="n">2</span> ימי עסקים (א׳–ה׳).</p>
+      {{ callouts("sec-promises") }}
+      <div class="card"><div class="bd chart-box">{{ charts.promises or empty }}</div></div>
+    </div>
+
+    <div class="section" id="sec-abandon">
+      <h3>שיחות שננטשו</h3>
+      <p class="lead">מה קרה אחרי שיחה שלא נענתה: האם הבנק יזם חזרה, או שהלקוח נאלץ לנסות שוב. נמדד רק בסיפורים עם כיסוי אטלס מלא.</p>
+      {{ callouts("sec-abandon") }}
+      <div class="card"><div class="bd chart-box">{{ charts.after_abandon or empty }}</div></div>
+    </div>
+
+    <div class="section" id="sec-effort">
+      <h3>מאמץ ובנקאים</h3>
+      <p class="lead">מתוך יומן האטלס: מי פתח את החשבון, מתי, ומה עשה. דקות הבנקאי הן חסם תחתון — עבודה מחוץ לאטלס לא נספרת.</p>
+      {{ callouts("sec-effort") }}
+      <div class="grid g2">
+        <div class="card"><div class="bd chart-box">{{ charts.bankers or empty }}</div></div>
+        <div class="card"><div class="bd chart-box">{{ charts.unit_kinds or empty }}</div></div>
+      </div>
+      {% if handoffs %}
+      <div class="card" style="margin-top:16px"><div class="hd"><h4>מעברים בין יחידות</h4><span class="sub">סשן אחרי סשן באותו סיפור: מאיזו יחידה לאיזו</span></div><div class="bd tbl-wrap">
+        <table class="matrix"><thead><tr><th>מ \ אל</th>{% for c in handoffs.cols %}<th class="num">{{ c }}</th>{% endfor %}</tr></thead><tbody>
+        {% for r in handoffs.rows %}<tr><th scope="row">{{ r.label }}</th>{% for v in r.cells %}<td class="num n">{{ v or "" }}</td>{% endfor %}</tr>{% endfor %}
+        </tbody></table></div></div>
+      {% endif %}
+    </div>
+
+    <div class="section" id="sec-metrics">
+      <h3>כל המדדים</h3>
+      <p class="lead">כל מספר בדוח, עם הבסיס שלו, ההגדרה, ומה עלול להפוך אותו ללא נכון. שיעור עם בסיס קטן מ־<span class="n">10</span> לא מוצג; מתחת ל־<span class="n">30</span> הוא מסומן ראשוני.</p>
+      <div class="card"><div class="bd tbl-wrap">
+        <table class="metrics"><thead><tr><th>מדד</th><th class="num">ערך</th><th class="num">בסיס</th><th class="num">רווח סמך 95%</th><th>סוג</th><th>הגדרה</th><th>מתי זה לא נכון</th></tr></thead><tbody>
+        {% for r in metric_table %}
+        <tr><td>{{ r.label }}{% if r.prelim %} <span class="badge b-warn">ראשוני</span>{% endif %}</td><td class="num n"><b>{{ r.value }}</b></td><td class="num n">{{ r.base }}</td><td class="num n">{{ r.ci }}</td><td class="small">{{ r.basis }}</td><td class="small">{{ r.definition }}</td><td class="small muted">{{ r.wrong_if }}</td></tr>
+        {% endfor %}
+        </tbody></table></div></div>
+    </div>
+  </section>
+
+  {# ========================================================= LEVEL 3 #}
+  <section class="level" id="level3" aria-labelledby="h-level3">
+    <div class="level-head">
+      <span class="num-badge">3</span>
+      <div><h2 id="h-level3">סיפורי הלקוחות</h2><p>כל סיפור: הלקוח למעלה, הבנקאים למטה, ולכל מגע — מה היה ולמה.</p></div>
+    </div>
+
+    <div class="card explorer" id="explorer">
+      <div class="xp-bar no-print">
+        <div class="field"><label for="f-q">מספר סיפור</label><input id="f-q" type="search" inputmode="numeric" placeholder="למשל 7"></div>
+        <div class="field"><label for="f-topic">נושא</label><select id="f-topic"><option value="">הכל</option>{% for k, v in topic_options %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="f-status">סטטוס</label><select id="f-status"><option value="">הכל</option>{% for k, v in status_he.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="f-category">סיבת חזרה</label><select id="f-category"><option value="">הכל</option>{% for c in categories %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="f-min">חזרות לפחות</label><input id="f-min" type="number" min="0" step="1" value="0"></div>
+        <div class="field"><label for="f-flag">סימון</label><select id="f-flag"><option value="">הכל</option>
+          <option value="failure">עם חזרת כשל</option><option value="promise">עם הבטחה שהופרה</option>
+          <option value="abandoned">עם נטישה</option><option value="retold">סיפר מחדש</option>
+          <option value="same_day">3 מגעים ומעלה ביום</option><option value="bankers">3 בנקאים ומעלה</option></select></div>
+      </div>
+      <div class="xp-active no-print" id="xp-active" aria-live="polite"></div>
+      <div class="tbl-wrap">
+        <table class="xp-table" id="xp-table">
+          <thead><tr>
+            <th aria-sort="none"><button type="button" data-sort="no">סיפור</button></th>
+            <th aria-sort="none"><button type="button" data-sort="tl">נושא</button></th>
+            <th aria-sort="none"><button type="button" data-sort="fa">פנייה ראשונה</button></th>
+            <th class="num" aria-sort="descending"><button type="button" data-sort="r">חזרות</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="d">ימים</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="f">כשל</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="pb">הבטחות שהופרו</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="ab">נטישות</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="bk">בנקאים</button></th>
+            <th aria-sort="none"><button type="button" data-sort="st">סטטוס</button></th>
+          </tr></thead>
+          <tbody id="xp-body"></tbody>
+        </table>
+      </div>
+      <div class="pager no-print" id="xp-pager"></div>
+    </div>
+
+    <div class="section" id="sec-stories">
+      <h3>כרטיסי הסיפורים</h3>
+      <p class="lead">פתחו סיפור מהטבלה או מהרשימה. בציר: <b>הזמן זורם מימין לשמאל</b>; פערים ארוכים מכווצים ומסומנים ב־≈. מספר מתחת לכל סימן הוא מספר המגע בטבלה.{% if n_drawn < cards|length %} ציר זמן מוצג ל־<span class="n">{{ n_drawn }}</span> הסיפורים עם הכי הרבה חזרות.{% endif %}</p>
+      <div class="card"><div class="bd">{{ legend }}</div></div>
+      <div class="stories" id="stories">
+        {% for s in cards %}
+        <details class="card story" id="{{ s.anchor }}" data-no="{{ s.no }}">
+          <summary>
+            <span class="st-no">{{ s.label }}</span>
+            <span class="st-topic">{{ s.topic }}</span>
+            <span class="st-facts"><span class="n">{{ s.contacts }}</span> מגעים · <span class="n">{{ s.returns }}</span> חזרות · <span class="n">{{ s.days }}</span> ימים</span>
+            <span class="badge b-{{ {'closed': 'ok', 'open': 'bad'}.get(s.status_key, 'muted') }}">{{ s.status }}</span>
+            <span class="st-cats">{% for c in s.cats %}<span class="cat-chip"><span class="cat-dot {{ c.cls }}"></span>{{ c.label }} <span class="n">{{ c.n }}</span></span>{% endfor %}</span>
+          </summary>
+          <div class="story-body">
+            {% if s.headline %}<h4 class="st-head">{{ s.headline }}</h4>{% endif %}
+            {% if s.narrative %}<p class="st-narr">{{ s.narrative }}</p>{% endif %}
+            <dl class="st-meta">
+              <div><dt>סניף</dt><dd class="n">{{ s.branch }}</dd></div>
+              <div><dt>תקופה</dt><dd><span class="n">{{ s.first }}</span> – <span class="n">{{ s.last }}</span></dd></div>
+              <div><dt>סטטוס</dt><dd>{{ s.status }}{% if s.status_basis and s.status_basis != "—" %} ({{ s.status_basis }}){% endif %}{% if s.status_note %} — {{ s.status_note }}{% endif %}{% if s.model_status %} <span class="muted">(מודל השפה: {{ s.model_status }})</span>{% endif %}</dd></div>
+              <div><dt>אטלס</dt><dd>{{ s.coverage }}{% if s.sessions %} · <span class="n">{{ s.sessions }}</span> סשנים · <span class="n">{{ s.bankers }}</span> בנקאים · <span class="n">{{ s.minutes }}</span> דק'{% endif %}</dd></div>
+            </dl>
+            {% if s.svg %}<div class="chart-box tl-box">{{ s.svg }}</div>{% endif %}
+            <div class="tbl-wrap">
+              <table class="contacts">
+                <thead><tr><th class="num">#</th><th>מועד</th><th>ערוץ</th><th>סיבת החזרה</th><th>מה ידוע</th><th>הכריע</th><th>באטלס</th></tr></thead>
+                <tbody>
+                {% for r in s.rows %}
+                <tr id="{{ r.id }}" class="{{ 'brk' if r['break'] else '' }}">
+                  <td class="num n">{{ r.n }}</td>
+                  <td class="n">{{ r.at }}</td>
+                  <td>{{ r.kind }}{% if r.dir %} · {{ r.dir }}{% endif %}{% if r.ref %}<div class="mono muted">{{ r.ref }}</div>{% endif %}{% if r.report %}<div><a href="{{ r.report }}">דוח השיחה</a></div>{% endif %}</td>
+                  <td>{% if r.first %}<span class="muted">פנייה ראשונה</span>{% else %}<span class="cat-dot {{ r.category_cls }}"></span>{{ r.category }}{% if r.inferred %}<div class="small muted">הסקה מרצף האירועים: {{ r.inferred }}</div>{% endif %}{% endif %}
+                    {% if r['break'] %}<div><span class="badge b-bad">נקודת שבר</span> {{ r.break_text }}</div>{% endif %}</td>
+                  <td class="small">{% if r.objective %}<div>{{ r.objective }}</div>{% endif %}
+                    {% if r.retold %}<div><span class="badge b-warn">{{ r.retold }}</span></div>{% endif %}
+                    {% for p in r.promises %}<div><span class="badge b-{{ p.cls }}">{{ p.text }}</span></div>{% endfor %}
+                    {% if r.reason %}<div>{{ r.reason }}</div>{% endif %}
+                    {% if r.quote %}<div class="quote">„{{ r.quote }}”</div>{% endif %}</td>
+                  <td class="small">{% if r.decided %}{{ r.decided }}{% if r.basis and r.basis != "—" %}<div class="muted">{{ r.basis }}</div>{% endif %}{% endif %}</td>
+                  <td class="small">{{ r.sessions }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  {# ========================================================= METHOD #}
+  <section class="level method" id="method" aria-labelledby="h-method">
+    <div class="level-head">
+      <span class="num-badge">i</span>
+      <div><h2 id="h-method">מתודולוגיה, מקורות וכיסוי</h2><p>מאיפה הנתונים, מה חושב בקוד ומה הוסק, ומה המגבלות.</p></div>
+    </div>
+    <div class="card"><div class="bd">
+      <dl>
+        <dt>מקורות</dt><dd>קובץ המגעים (שיחות מוקלטות ולא מוקלטות, נטישות והתכתבויות), ההקלטות עצמן, ויומן הפעולות של האטלס. <span class="n">{{ "{:,}".format(import_counts.interactions) }}</span> מגעים ב־<span class="n">{{ "{:,}".format(import_counts.stories) }}</span> חשבונות; <span class="n">{{ "{:,}".format(import_counts.recorded_calls) }}</span> שיחות מוקלטות מ־<span class="n">{{ "{:,}".format(import_counts.audio_files_mapped) }}</span> קבצים (<span class="n">{{ "{:,}".format(import_counts.multi_file_calls) }}</span> שיחות מפוצלות לכמה קבצים, שחוברו לשיחה אחת); <span class="n">{{ "{:,}".format(import_counts.correspondences) }}</span> התכתבויות עם <span class="n">{{ "{:,}".format(import_counts.messages) }}</span> הודעות; <span class="n">{{ "{:,}".format(import_counts.atlas_sessions) }}</span> סשנים באטלס.</dd>
+        {% if import_issues %}<dt>הערות ייבוא</dt><dd><ul class="plain">{% for i in import_issues %}<li>{{ i.message }}: <span class="n">{{ "{:,}".format(i.count) }}</span></li>{% endfor %}</ul></dd>{% endif %}
+        <dt>סיפור וחזרה</dt><dd>סיפור = כל המגעים של חשבון אחד בתקופה, לפי הזמן. חזרה = כל מגע אחרי הראשון. מספר החשבון לא מופיע בדוח: כל חשבון מוצג כ„סיפור NNN”, והמיפוי נשמר בתיקייה פרטית בלבד.</dd>
+        <dt>מה חושב בקוד (עובדה)</dt><dd>כיוון השיחה, נטישה, זמנים ופערים, מגעים באותו יום, ערוצים, בנקאים ויחידות, דקות באטלס, והאם בוצעה פעולה או רק צפייה. חזרה ביוזמת הבנק נקבעת בחוק ואינה ניתנת לשינוי על ידי מודל השפה.</dd>
+        <dt>מה נקרא מהתוכן</dt><dd>נושא, בקשה, תוצאה, הבטחות, „סיפר מחדש” וסיבת החזרה — מתוך התמלול או ההתכתבות. כל ציטוט מאומת מול השורה בתמלול; שורה שהתמלול שלה לא ודאי אינה מצוטטת.{% if not content %} <b>בדוח זה שלב התוכן עוד לא הורץ</b>, ולכן המדדים שתלויים בו מוצגים כ„ממתין”.{% endif %}</dd>
+        <dt>מה הוסק</dt><dd>סטטוס „נסגר” בלי תוכן (פעולה בחשבון אחרי הפנייה האחרונה ושקט של שבוע), קיום הבטחה, וסיבה משוערת לחזרה בלי תוכן (הבטחה שהופרה קודם; רצף באותו יום עם החלפת יחידה). כל הסקה מסומנת בדוח.</dd>
+        <dt>שיוך סשן אטלס למגע</dt><dd>שיחה יוצאת: מ־<span class="n">20</span> דקות לפניה ועד סופה; שיחה נכנסת: עד <span class="n">30</span> דקות אחריה; הודעה יוצאת: <span class="n">30</span> דקות לפניה; הודעה נכנסת: עד <span class="n">60</span> דקות אחריה. סשן שלא נפל באף חלון נספר כ„עבודה בלי פנייה מתועדת”.</dd>
+        <dt>סטטיסטיקה</dt><dd>שיעור בין חזרות מחושב עם רווח סמך מסוג bootstrap ברמת הסיפור, כי חזרות של אותו לקוח תלויות זו בזו; שיעור בין סיפורים — Wilson. זמן עד סגירה — Kaplan-Meier, עם סיפורים פתוחים כמצונזרים. שיעור מוצג רק כשהבסיס <span class="n">10</span> לפחות, ומסומן „ראשוני” מתחת ל־<span class="n">30</span>.</dd>
+        <dt>פרטיות</dt><dd>אין בדוח מספרי חשבון, מספרי זהות או שמות. בנקאים מוצגים כקוד ויחידה. ציטוטים עוברים שוב הסתרת פרטים מזהים לפני שהם נכנסים לדוח. הקובץ לא מתחבר לרשת.</dd>
+        <dt>מגבלות</dt><dd>יומן האטלס נשמר כ־<span class="n">90</span> יום, ולכן לחלק מהסיפורים הכיסוי חלקי — מדדי המאמץ מחושבים רק על סיפורים בכיסוי מלא. שיחה שלא הוקלטה נשארת בלי סיבה ידועה. הדוח אינו כלי להערכת עובד בודד.</dd>
+      </dl>
+    </div></div>
+  </section>
+</main>
+
+<footer class="foot">{{ footer }}</footer>
+
+<script type="application/json" id="xr-data">{{ data_json }}</script>
+<script>
+{% include "journey_report.js.j2" %}
+</script>
+</body>
+</html>

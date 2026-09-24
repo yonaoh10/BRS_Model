@@ -61,6 +61,15 @@ jobs:
           # The installed Chrome, driven by Playwright (nothing downloaded).
           pip install playwright==1.55.0
           python .github/check_executive_browser.py "$report" --channel chrome
+      # The journey report (repeat contacts) over 100 synthetic stories: the
+      # vendor-format workbook, NICE recordings split across several files,
+      # and the Atlas exports - imported, reported, and opened in Chrome.
+      - name: Journey report over 100 synthetic stories
+        if: always()
+        run: |
+          set -eux
+          python scripts/generate_journey_demo.py --stories 100 --audio --workspace "$RUNNER_TEMP/journey"
+          python .github/check_journey_report.py "$RUNNER_TEMP/journey/output/reports/journey.html" --stories 100 --channel chrome
       - name: Deployability of a bare archive
         if: always()
         # What a reviewer downloads from GitHub is `git archive`, not the
@@ -167,6 +176,13 @@ jobs:
           python .github/check_executive_report.py $report --calls 1000
           python -m pip install playwright==1.55.0
           python .github/check_executive_browser.py $report --channel msedge --screenshot (Join-Path $env:RUNNER_TEMP "executive-edge.png")
+      - name: Journey report over 100 synthetic stories, opened in Edge
+        if: always()
+        run: |
+          $ErrorActionPreference = "Stop"; $PSNativeCommandUseErrorActionPreference = $true
+          $ws = Join-Path $env:RUNNER_TEMP "journey"
+          python scripts/generate_journey_demo.py --stories 100 --audio --workspace $ws
+          python .github/check_journey_report.py (Join-Path $ws "output\reports\journey.html") --stories 100 --channel msedge --screenshot (Join-Path $env:RUNNER_TEMP "journey-edge.png")
       - name: Keep the management report and how Edge drew it
         if: always()
         uses: actions/upload-artifact@v4
@@ -175,6 +191,8 @@ jobs:
           path: |
             ${{ runner.temp }}/executive-edge.png
             ${{ runner.temp }}/batch/output/reports/executive.html
+            ${{ runner.temp }}/journey-edge.png
+            ${{ runner.temp }}/journey/output/reports/journey.html
           if-no-files-found: warn
       - name: The README's Windows steps, from a GitHub ZIP, in a path with a space and Hebrew
         if: always()

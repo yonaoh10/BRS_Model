@@ -1,0 +1,349 @@
+/* Journey report behaviour. Plain ES2017, no libraries, no network. Values
+   from the data are placed with textContent, never innerHTML. Nothing is
+   stored except the colour-theme preference. */
+(function () {
+  "use strict";
+  var doc = document;
+  var data;
+  try { data = JSON.parse(doc.getElementById("xr-data").textContent); }
+  catch (e) { data = {stories: [], cats: {}}; }
+  var STORIES = data.stories || [];
+  var CATS = data.cats || {};
+  var STATUS_HE = {closed: "נסגר", open: "פתוח", unclear: "לא ברור"};
+  var STATUS_CLS = {closed: "b-ok", open: "b-bad", unclear: "b-muted"};
+  var PAGE = 50;
+
+  function $(id) { return doc.getElementById(id); }
+  function el(tag, attrs, text) {
+    var node = doc.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) {
+        if (attrs[k] === null || attrs[k] === undefined || attrs[k] === false) { return; }
+        if (k === "class") { node.className = attrs[k]; } else { node.setAttribute(k, attrs[k]); }
+      });
+    }
+    if (text !== undefined && text !== null) { node.textContent = String(text); }
+    return node;
+  }
+  function dateHe(iso) {
+    if (!iso) { return "—"; }
+    var p = iso.split("-");
+    return p.length === 3 ? p[2] + "." + p[1] + "." + p[0] : iso;
+  }
+  function pad3(n) { return ("00" + n).slice(-3); }
+
+  /* ------------------------------------------------ dashboard token */
+  (function () {
+    var token = null;
+    try { token = new URLSearchParams(location.search).get("t"); } catch (e) { token = null; }
+    if (!token) { return; }
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) { /* ignore */ }
+    Array.prototype.forEach.call(doc.querySelectorAll("a[href]"), function (a) {
+      var href = a.getAttribute("href");
+      if (!href || href.charAt(0) === "#" || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.charAt(0) === "/") { return; }
+      var hash = "";
+      var i = href.indexOf("#");
+      if (i >= 0) { hash = href.slice(i); href = href.slice(0, i); }
+      a.setAttribute("href", href + (href.indexOf("?") >= 0 ? "&" : "?") + "t=" + encodeURIComponent(token) + hash);
+    });
+  })();
+
+  /* ------------------------------------------------ theme + print */
+  (function () {
+    var root = doc.documentElement;
+    try {
+      var saved = localStorage.getItem("callqa-report-theme");
+      if (saved === "light" || saved === "dark") { root.setAttribute("data-theme", saved); }
+    } catch (e) { /* storage blocked: follow the system */ }
+    var btn = $("btn-theme");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        var dark = root.getAttribute("data-theme") === "dark" ||
+          (!root.getAttribute("data-theme") && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+        var next = dark ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem("callqa-report-theme", next); } catch (e) { /* ignore */ }
+      });
+    }
+    var pr = $("btn-print");
+    if (pr) { pr.addEventListener("click", function () { window.print(); }); }
+  })();
+
+  /* ------------------------------------------------ level navigation */
+  (function () {
+    var links = doc.querySelectorAll(".levels a[data-level]");
+    if (!links.length) { return; }
+    var ids = Array.prototype.map.call(links, function (a) { return a.getAttribute("data-level"); });
+    var pending = false;
+    function update() {
+      pending = false;
+      var current = ids[0];
+      ids.forEach(function (id) {
+        var sec = $(id);
+        if (sec && sec.getBoundingClientRect().top < 160) { current = id; }
+      });
+      if (window.innerHeight + window.scrollY >= doc.documentElement.scrollHeight - 2) {
+        current = ids[ids.length - 1];
+      }
+      Array.prototype.forEach.call(links, function (a) {
+        if (a.getAttribute("data-level") === current) { a.setAttribute("aria-current", "true"); }
+        else { a.removeAttribute("aria-current"); }
+      });
+    }
+    window.addEventListener("scroll", function () {
+      if (!pending) { pending = true; window.requestAnimationFrame(update); }
+    }, {passive: true});
+    update();
+  })();
+
+  /* ------------------------------------------------ open a story (and a contact) */
+  function openStory(anchor, contactId) {
+    var card = $(anchor);
+    if (!card) { return; }
+    card.open = true;
+    var target = contactId ? $(contactId) : card;
+    (target || card).scrollIntoView({block: contactId ? "center" : "start"});
+    if (contactId && target) {
+      try { history.replaceState(null, "", "#" + contactId); } catch (e) { /* ignore */ }
+    }
+  }
+  doc.addEventListener("click", function (e) {
+    var a = e.target.closest ? e.target.closest("a[href^='#s']") : null;
+    if (!a) { return; }
+    var m = /^#(s\d+)(-c\d+)?$/.exec(a.getAttribute("href"));
+    if (!m) { return; }
+    e.preventDefault();
+    openStory(m[1], m[2] ? m[1] + m[2] : null);
+  });
+  (function () {
+    var m = /^#(s\d+)(-c\d+)?$/.exec(location.hash || "");
+    if (m) { openStory(m[1], m[2] ? m[1] + m[2] : null); }
+  })();
+
+  /* ------------------------------------------------ explorer */
+  var S;
+  function reset() {
+    S = {q: "", topic: "", status: "", category: "", min: 0, flag: "", sort: "r", dir: -1, page: 0};
+  }
+  reset();
+  var controls = {q: "f-q", topic: "f-topic", status: "f-status", category: "f-category", min: "f-min",
+                  flag: "f-flag"};
+  var FLAGS = {
+    failure: function (s) { return s.f > 0; },
+    promise: function (s) { return s.pb > 0; },
+    abandoned: function (s) { return s.ab > 0; },
+    retold: function (s) { return s.rt > 0; },
+    same_day: function (s) { return s.sd >= 3; },
+    bankers: function (s) { return s.bk >= 3; }
+  };
+  var FLAG_HE = {failure: "עם חזרת כשל", promise: "עם הבטחה שהופרה", abandoned: "עם נטישה",
+                 retold: "סיפר מחדש", same_day: "3 מגעים ומעלה ביום", bankers: "3 בנקאים ומעלה"};
+  var filtered = [];
+
+  function matches(s) {
+    if (S.q) {
+      var q = String(S.q).replace(/\D/g, "");
+      if (q && String(s.no) !== String(Number(q))) { return false; }
+    }
+    if (S.topic && s.t !== S.topic) { return false; }
+    if (S.status && s.st !== S.status) { return false; }
+    if (S.category && (s.cats || []).indexOf(S.category) < 0) { return false; }
+    if (S.min && s.r < Number(S.min)) { return false; }
+    if (S.flag && FLAGS[S.flag] && !FLAGS[S.flag](s)) { return false; }
+    return true;
+  }
+
+  function sortRows(rows) {
+    var k = S.sort, dir = S.dir;
+    return rows.slice().sort(function (a, b) {
+      var x = a[k], y = b[k];
+      if (x === y) { return a.no - b.no; }
+      if (x === null || x === undefined) { return 1; }
+      if (y === null || y === undefined) { return -1; }
+      return (x < y ? -1 : 1) * dir;
+    });
+  }
+
+  function chips() {
+    var box = $("xp-active");
+    if (!box) { return; }
+    box.textContent = "";
+    var parts = [];
+    if (S.q) { parts.push(["q", "סיפור " + S.q]); }
+    if (S.topic) {
+      var o = $("f-topic").querySelector("option[value='" + S.topic.replace(/'/g, "") + "']");
+      parts.push(["topic", "נושא: " + (o ? o.textContent : S.topic)]);
+    }
+    if (S.status) { parts.push(["status", "סטטוס: " + (STATUS_HE[S.status] || S.status)]); }
+    if (S.category) { parts.push(["category", "סיבה: " + (CATS[S.category] || S.category)]); }
+    if (Number(S.min)) { parts.push(["min", S.min + " חזרות לפחות"]); }
+    if (S.flag) { parts.push(["flag", FLAG_HE[S.flag] || S.flag]); }
+    box.appendChild(el("span", {class: "small muted"},
+      filtered.length === 1 ? "סיפור אחד" : filtered.length.toLocaleString("en-US") + " סיפורים"));
+    parts.forEach(function (p) {
+      var c = el("span", {class: "chip"}, p[1]);
+      var x = el("button", {type: "button", "aria-label": "הסר סינון"}, "×");
+      x.addEventListener("click", function () {
+        S[p[0]] = p[0] === "min" ? 0 : ""; S.page = 0; syncControls(); render();
+      });
+      c.appendChild(x);
+      box.appendChild(c);
+    });
+    if (parts.length) {
+      var clear = el("button", {type: "button", class: "btn"}, "נקה הכל");
+      clear.addEventListener("click", function () { reset(); syncControls(); render(); });
+      box.appendChild(clear);
+    }
+  }
+
+  function syncControls() {
+    Object.keys(controls).forEach(function (k) {
+      var c = $(controls[k]);
+      if (c) { c.value = S[k] === undefined ? "" : S[k]; }
+    });
+  }
+
+  function render() {
+    filtered = sortRows(STORIES.filter(matches));
+    var body = $("xp-body");
+    if (!body) { return; }
+    body.textContent = "";
+    var pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+    if (S.page >= pages) { S.page = pages - 1; }
+    filtered.slice(S.page * PAGE, S.page * PAGE + PAGE).forEach(function (s) {
+      var tr = el("tr", {class: "row", tabindex: "0"});
+      var link = el("a", {href: "#" + s.a}, "סיפור " + pad3(s.no));
+      var td = el("td");
+      td.appendChild(link);
+      tr.appendChild(td);
+      tr.appendChild(el("td", null, s.tl));
+      tr.appendChild(el("td", {class: "n"}, dateHe(s.fa)));
+      [s.r, s.d, s.f, s.pb, s.ab, s.bk].forEach(function (v) {
+        tr.appendChild(el("td", {class: "num n"}, v === null || v === undefined ? "—" : v));
+      });
+      var st = el("td");
+      st.appendChild(el("span", {class: "badge " + (STATUS_CLS[s.st] || "b-muted")}, STATUS_HE[s.st] || s.st));
+      tr.appendChild(st);
+      tr.addEventListener("click", function (e) {
+        if (e.target.closest && e.target.closest("a")) { return; }
+        openStory(s.a);
+      });
+      tr.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); openStory(s.a); }
+      });
+      body.appendChild(tr);
+    });
+    if (!filtered.length) {
+      var empty = el("tr");
+      empty.appendChild(el("td", {colspan: "10", class: "muted"}, "אין סיפורים שעונים על הסינון."));
+      body.appendChild(empty);
+    }
+    Array.prototype.forEach.call(doc.querySelectorAll("#xp-table th[aria-sort]"), function (th) {
+      var b = th.querySelector("button");
+      th.setAttribute("aria-sort", b && b.getAttribute("data-sort") === S.sort
+        ? (S.dir > 0 ? "ascending" : "descending") : "none");
+    });
+    // the story cards follow the same filter
+    var shown = {};
+    filtered.forEach(function (s) { shown[s.a] = true; });
+    Array.prototype.forEach.call(doc.querySelectorAll("#stories > details.story"), function (d) {
+      d.hidden = !shown[d.id];
+    });
+    pager(pages);
+    chips();
+  }
+
+  function pager(pages) {
+    var box = $("xp-pager");
+    if (!box) { return; }
+    box.textContent = "";
+    box.appendChild(el("span", {class: "small muted grow"},
+      "עמוד " + (S.page + 1) + " מתוך " + pages));
+    var prev = el("button", {type: "button", class: "btn"}, "הקודם");
+    prev.disabled = S.page <= 0;
+    prev.addEventListener("click", function () { S.page -= 1; render(); });
+    var next = el("button", {type: "button", class: "btn"}, "הבא");
+    next.disabled = S.page >= pages - 1;
+    next.addEventListener("click", function () { S.page += 1; render(); });
+    var csv = el("button", {type: "button", class: "btn"}, "ייצוא CSV");
+    csv.addEventListener("click", exportCsv);
+    box.appendChild(prev);
+    box.appendChild(next);
+    box.appendChild(csv);
+  }
+
+  function applyFilter(f) {
+    reset();
+    if (f.topic) { S.topic = f.topic; }
+    if (f.status) { S.status = f.status; }
+    if (f.category) { S.category = f.category; }
+    if (f.min_returns) { S.min = f.min_returns; }
+    if (f.failure) { S.flag = "failure"; }
+    if (f.promise) { S.flag = "promise"; }
+    if (f.abandoned) { S.flag = "abandoned"; }
+    if (f.retold) { S.flag = "retold"; }
+    if (f.same_day) { S.flag = "same_day"; }
+    if (f.min_bankers) { S.flag = "bankers"; }
+    syncControls();
+    render();
+    var x = $("explorer");
+    if (x) { x.scrollIntoView({block: "start"}); }
+  }
+
+  function csvCell(v) {
+    if (v === null || v === undefined) { return ""; }
+    var s = String(v);
+    if (/^[=+\-@\t\r]/.test(s)) { s = "'" + s; }
+    if (/[",\n\r]/.test(s)) { s = "\"" + s.replace(/"/g, "\"\"") + "\""; }
+    return s;
+  }
+
+  function exportCsv() {
+    var head = ["story_no", "topic", "first_contact", "returns", "days", "failures", "promises_broken",
+                "abandoned", "bankers", "status", "status_basis"];
+    var lines = [head.join(",")];
+    filtered.forEach(function (s) {
+      lines.push([s.no, s.tl, s.fa, s.r, s.d, s.f, s.pb, s.ab, s.bk, s.st, s.sb].map(csvCell).join(","));
+    });
+    var blob = new Blob(["﻿" + lines.join("\r\n")], {type: "text/csv;charset=utf-8"});
+    var a = el("a", {download: "stories_filtered.csv"});
+    a.href = URL.createObjectURL(blob);
+    doc.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
+  if ($("explorer")) {
+    Object.keys(controls).forEach(function (k) {
+      var c = $(controls[k]);
+      if (!c) { return; }
+      var ev = c.tagName === "INPUT" ? "input" : "change";
+      c.addEventListener(ev, function () { S[k] = c.value; S.page = 0; render(); });
+    });
+    Array.prototype.forEach.call(doc.querySelectorAll("#xp-table th button[data-sort]"), function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-sort");
+        if (S.sort === k) { S.dir = -S.dir; } else { S.sort = k; S.dir = (k === "no" || k === "tl" || k === "fa" || k === "st") ? 1 : -1; }
+        S.page = 0; render();
+      });
+    });
+    doc.addEventListener("click", function (e) {
+      var t = e.target.closest ? e.target.closest("[data-filter]") : null;
+      if (!t) { return; }
+      var f;
+      try { f = JSON.parse(t.getAttribute("data-filter")); } catch (err) { return; }
+      e.preventDefault();
+      applyFilter(f);
+    });
+    doc.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") { return; }
+      var t = e.target;
+      if (t && t.classList && t.classList.contains("ch-link") && t.getAttribute("data-filter")) {
+        e.preventDefault();
+        try { applyFilter(JSON.parse(t.getAttribute("data-filter"))); } catch (err) { /* ignore */ }
+      }
+    });
+    render();
+    doc.documentElement.setAttribute("data-explorer", "ready");
+  }
+})();

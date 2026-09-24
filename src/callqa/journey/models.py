@@ -261,3 +261,16 @@ class StoryVerdict(BaseModel):
     narrative_he: str = ""
     break_point_interaction_id: str | None = None
     quotes: list[Evidence] = Field(default_factory=list)
+
+
+class ContentLayer(BaseModel):
+    """What was read from the contents of a batch - by the language model, the
+    mock engine, or the synthetic demo - saved beside the dataset."""
+
+    engine: str                              # vllm / llama / mock / synthetic-demo
+    model: str = ""
+    prompt_versions: dict[str, str] = Field(default_factory=dict)
+    created_at: datetime
+    cards: dict[str, InteractionCard] = Field(default_factory=dict)       # by interaction id
+    judgements: dict[str, ReturnJudgement] = Field(default_factory=dict)  # by interaction id
+    verdicts: dict[str, StoryVerdict] = Field(default_factory=dict)       # by story key
