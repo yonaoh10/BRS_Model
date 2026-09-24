@@ -608,7 +608,12 @@ def test_the_report_is_built_opened_and_its_dashboard_hint_runs(
         assert (reports / name).is_file() and (reports / name).stat().st_size > 0, name
     assert opened == [(reports / "executive.html").as_uri()]
     lines = capsys.readouterr().out.splitlines()
-    hint = next(line for line in lines if line.startswith("In the dashboard: "))
+    hints = [line for line in lines if line.startswith("In the dashboard: ")]
+    if not (REPO_ROOT / "dashboard" / "server.py").is_file():
+        # The dashboard is optional and deletable; with it gone there is no hint.
+        assert hints == []
+        return
+    hint = hints[0]
     command = hint.removeprefix("In the dashboard: ")
     expected = [sys.executable, str(REPO_ROOT / "dashboard" / "server.py"), "--output-dir",
                 str(ws.resolve() / "output")]
