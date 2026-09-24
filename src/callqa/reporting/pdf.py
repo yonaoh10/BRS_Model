@@ -56,15 +56,29 @@ def print_pdf(html: Path, pdf: Path, *, browser: str | None = None,
                "--no-pdf-header-footer", "--run-all-compositor-stages-before-draw",
                "--virtual-time-budget=5000", f"--print-to-pdf={pdf}",
                html.resolve().as_uri()]
-        if hasattr(os, "geteuid") and os.geteuid() == 0:
+        posix = os.name == "posix"
+        if posix and hasattr(os, "geteuid") and os.geteuid() == 0:
             # Chromium will not start as root (containers, CI) with its sandbox;
             # a bank desktop user is never root, so there it keeps the sandbox
             cmd.insert(1, "--no-sandbox")
-        try:
-            proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise PDFError(f"the browser could not print the PDF: {exc}") from exc
-    if not pdf.exists() or pdf.stat().st_size < 1000:
-        tail = (proc.stderr or b"").decode("utf-8", "replace")[-300:]
+        proc = _run(cmd, timeout)
+        if not _printed(pdf) and posix and "--no-sandbox" not in cmd:
+            # a Linux browser whose sandbox helper is not set up (Edge for
+            # Linux on a CI runner) aborts; the page is a local file this
+            # program wrote, so it is printed once more without the sandbox
+            proc = _run([cmd[0], "--no-sandbox", *cmd[1:]], timeout)
+    if not _printed(pdf):
+        tail = (proc.stderr or b"").decode("utf-8", "replace")[-500:]
         raise PDFError(f"the browser printed no PDF (exit {proc.returncode}): {tail}")
     return pdf
+
+
+def _printed(pdf: Path) -> bool:
+    return pdf.exists() and pdf.stat().st_size >= 1000
+
+
+def _run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PDFError(f"the browser could not print the PDF: {exc}") from exc
