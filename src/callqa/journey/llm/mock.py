@@ -116,7 +116,9 @@ class MockContentEngine:
             prev_bank_promise = any(c["by"] == "bank" for c in prev_card.get("commitments", []))
             if r.get("broken_here") or (card.get("prior_contact_mentioned") and prev_bank_promise):
                 cat, why = "unclosed_loop", "הלקוח חזר כי ההבטחה לחזור אליו לא קוימה."
-            elif card.get("retold") in ("yes", "partial") or prev_card.get("redirect", "none") != "none":
+            elif (card.get("retold") in ("yes", "partial")
+                  or prev_card.get("redirect", "none") != "none"
+                  or sum(1 for p in prev if p["kind"] == "abandoned") >= 2):
                 cat, why = "excessive_runaround", "הלקוח הועבר בין גורמים ונאלץ לחזור על עניינו."
             elif prev_card and card.get("topic") != prev_card.get("topic") \
                     and card.get("topic") != "other":

@@ -152,6 +152,11 @@ def ask(ctx: Context, prompt: Prompt, parse, soft=None):  # noqa: ANN001, ANN201
 # -- one story --------------------------------------------------------------------------
 
 def _view(ctx: Context, c: Contact) -> ContentView | None:
+    return contact_view(ctx.output_dir, c, ctx.config.journey.uncertain_word_prob)
+
+
+def contact_view(output_dir: Path, c: Contact, uncertain_prob: float = 0.5) -> ContentView | None:
+    """The numbered text of one contact, or None when it has none (yet)."""
     i = c.interaction
     if c.kind == "message":
         if not c.messages:
@@ -159,13 +164,13 @@ def _view(ctx: Context, c: Contact) -> ContentView | None:
         return message_view(i.interaction_id, c.messages)
     if c.kind != "recorded_call" or not i.call_id:
         return None
-    path = ctx.output_dir / "redacted" / f"{i.call_id}.json"
+    path = output_dir / "redacted" / f"{i.call_id}.json"
     if not path.exists():
         return None
     transcript = RedactedTranscript.model_validate_json(path.read_text(encoding="utf-8"))
     if not transcript.enabled or not transcript.turns:
         return None          # never read text the redaction stage did not clean
-    dialog = ctx.output_dir / "transcripts" / f"{i.call_id}.dialog.json"
+    dialog = output_dir / "transcripts" / f"{i.call_id}.dialog.json"
     role_conf = None
     if dialog.exists():
         try:
@@ -174,9 +179,8 @@ def _view(ctx: Context, c: Contact) -> ContentView | None:
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             role_conf = None
     return call_view(i.interaction_id, transcript,
-                     segmap_path=ctx.output_dir / "audio" / "assembled" / f"{i.call_id}.segmap.json",
-                     dialog_path=dialog, role_confidence=role_conf,
-                     uncertain_prob=ctx.config.journey.uncertain_word_prob)
+                     segmap_path=output_dir / "audio" / "assembled" / f"{i.call_id}.segmap.json",
+                     dialog_path=dialog, role_confidence=role_conf, uncertain_prob=uncertain_prob)
 
 
 def _when(c: Contact) -> str:

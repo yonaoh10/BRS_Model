@@ -163,7 +163,8 @@
     <nav class="subnav no-print" aria-label="פרקי הניתוח">
       <a href="#sec-returns">היקף</a><a href="#sec-categories">סיבות</a><a href="#sec-topics">נושאים</a>
       <a href="#sec-gaps">זמנים</a><a href="#sec-resolution">סגירה</a><a href="#sec-promises">הבטחות</a>
-      <a href="#sec-abandon">נטישה</a><a href="#sec-effort">מאמץ ובנקאים</a><a href="#sec-metrics">כל המדדים</a>
+      <a href="#sec-abandon">נטישה</a><a href="#sec-effort">מאמץ ובנקאים</a><a href="#sec-quality">איכות השיחות</a>
+      <a href="#sec-branches">סניפים</a><a href="#sec-metrics">כל המדדים</a>
     </nav>
 
     <div class="section" id="sec-returns">
@@ -257,6 +258,43 @@
         {% for r in handoffs.rows %}<tr><th scope="row">{{ r.label }}</th>{% for v in r.cells %}<td class="num n">{{ v or "" }}</td>{% endfor %}</tr>{% endfor %}
         </tbody></table></div></div>
       {% endif %}
+    </div>
+
+    <div class="section" id="sec-quality">
+      <h3>איכות השיחות בתוך המסעות</h3>
+      <p class="lead">כל שיחה מוקלטת שקיבלה ציון במחוון האיכות, לפי מה שקרה אחריה: האם המגע הבא בסיפור היה חזרה בגלל כשל טיפול. זהו קשר ולא הוכחה לסיבה; מוצג רק כשבשתי הקבוצות יש לפחות <span class="n">8</span> שיחות.</p>
+      {{ callouts("sec-quality") }}
+      {% if quality %}{% set q = quality.q %}
+      <div class="card"><div class="bd">
+        <div class="dimbars">
+          <div class="dimbar"><div class="nm">שיחות שאחריהן חזרת כשל (<span class="n">{{ q.n_fail }}</span>)</div>
+            <div class="track" role="img" aria-label="מדד {{ fmt(q.mean_fail) }}"><div class="fill qfail" style="width:{{ quality.w_fail }}%"></div></div><div class="v n">{{ fmt(q.mean_fail) }}</div></div>
+          <div class="dimbar"><div class="nm">שאר השיחות (<span class="n">{{ q.n_other }}</span>)</div>
+            <div class="track" role="img" aria-label="מדד {{ fmt(q.mean_other) }}"><div class="fill" style="width:{{ quality.w_other }}%"></div></div><div class="v n">{{ fmt(q.mean_other) }}</div></div>
+        </div>
+        <p class="small muted" style="margin-top:10px">הפרש: <span class="n">{{ fmt(q.diff) }}</span> נקודות{% if quality.ci %} (רווח סמך <span class="n">95%</span>: <span class="n">{{ quality.ci }}</span>){% endif %} · {% if not q.enough %}מעט מדי שיחות להשוואה{% elif q.significant %}מובהק{% else %}לא מובהק{% endif %}</p>
+        {% if q.dims %}
+        <div class="tbl-wrap"><table><thead><tr><th>ממד</th><th class="num">אחרי חזרת כשל</th><th class="num">שאר השיחות</th><th class="num">הפרש</th></tr></thead><tbody>
+        {% for d in q.dims %}<tr><td>{{ d.name }}</td><td class="num n">{{ "%.2f" | format(d.mean_fail) }}</td><td class="num n">{{ "%.2f" | format(d.mean_other) }}</td><td class="num n">{{ "%+.2f" | format(d.diff) | replace("-", "−") }}</td></tr>{% endfor %}
+        </tbody></table></div>
+        {% endif %}
+      </div></div>
+      {% else %}<p class="muted">אין שיחות עם ציון איכות בסיפורים האלה. הרצה עם <span class="mono">journey process --score</span> מוסיפה אותן.</p>{% endif %}
+    </div>
+
+    <div class="section" id="sec-branches">
+      <h3>לפי סניף החשבון</h3>
+      <p class="lead">תיאור, לא דירוג: סניף עם מעט סיפורים אינו מושווה. שיעור כשל מוצג רק כשיש לסניף <span class="n">{{ min_rate_n }}</span> חזרות עם תוכן לפחות.</p>
+      {% if retold_bankers %}
+      <div class="card" style="margin-bottom:16px"><div class="hd"><h4>„סיפר מחדש” לפי מספר הבנקאים שטיפלו</h4><span class="sub">סיפורים בכיסוי אטלס מלא</span></div><div class="bd tbl-wrap">
+        <table><thead><tr><th></th><th class="num">סיפורים</th><th class="num">חזרות עם תוכן</th><th class="num">סיפר מחדש</th><th class="num">שיעור</th></tr></thead><tbody>
+        {% for r in retold_bankers %}<tr><td>{{ r.label }}</td><td class="num n">{{ r.stories }}</td><td class="num n">{{ r.n }}</td><td class="num n">{{ r.k }}</td><td class="num n">{{ pct1(r.rate) if r.rate is not none else "—" }}</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      {% endif %}
+      <div class="card"><div class="bd tbl-wrap">
+        <table><thead><tr><th>סניף</th><th class="num">סיפורים</th><th class="num">חזרות</th><th class="num">חזרות לסיפור</th><th class="num">עם תוכן</th><th class="num">כשל</th><th class="num">שיעור כשל</th></tr></thead><tbody>
+        {% for b in branches %}<tr><td class="n">{{ b.branch }}</td><td class="num n">{{ b.stories }}</td><td class="num n">{{ b.returns }}</td><td class="num n">{{ fmt(b.per_story) }}</td><td class="num n">{{ b.content }}</td><td class="num n">{{ b.failures }}</td><td class="num n">{{ pct1(b.rate) if b.rate is not none else "—" }}</td></tr>{% endfor %}
+        </tbody></table></div></div>
     </div>
 
     <div class="section" id="sec-metrics">

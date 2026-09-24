@@ -97,6 +97,8 @@ class Contact:
     call_key: str = ""
     um: str = ""
     parts: int = 1
+    truth: str = ""              # why this return happened (return categories), for `journey eval`
+    retold: str = ""             # "yes" / "no" for returns with content
 
 
 @dataclass
@@ -179,6 +181,7 @@ def build_story(rng: random.Random, n: int) -> Story:
             ("customer", f"שוב מההתחלה? {want}. זו כבר הפעם השלישית שאני מסביר."), *_ident(),
             ("banker", "אני מעבירה את זה לסניף, הם יטפלו בזה ויחזרו אלייך."),
             ("customer", "אני מקווה שהפעם באמת יחזרו.")]))
+        c[-1].truth, c[-1].retold = "unclosed_loop", "yes"
         if rng.random() < 0.55:
             t3 = _later(rng, t2, (20, 70))
             c.append(_call(t3, rng.uniform(120, 300), [
@@ -193,6 +196,7 @@ def build_story(rng: random.Random, n: int) -> Story:
                                          "יחזור אליי ואף אחד לא חזר."),
                 ("banker", "אני רואה שהפנייה עדיין פתוחה. אעביר שוב לסניף עם דחיפות."),
                 ("customer", "זה לא רציני, אני שוקל לעבור בנק.")]))
+            c[-1].truth, c[-1].retold = "unclosed_loop", "no"
             if rng.random() < 0.5:
                 story.background_exec.append((_later(rng, t3, (30, 90)), branch))
     elif scenario == "runaround":
@@ -211,12 +215,14 @@ def build_story(rng: random.Random, n: int) -> Story:
             ("customer", f"{want}, סיפרתי את זה כבר פעמיים היום."),
             ("banker", "אני מעבירה אותך לבנקאי אחר שמטפל בזה."),
             ("customer", "עוד העברה...")]))
+        c[-1].truth, c[-1].retold = "excessive_runaround", "yes"
         if rng.random() < 0.6:
             t5 = _later(rng, t4, (18, 48))
             c.append(_call(t5, rng.uniform(150, 360), [
                 _opening(), ("customer", f"שלום, {want}, זו הפעם החמישית שאני פונה."),
                 ("banker", "אני רואה את כל ההיסטוריה, אני מטפלת בזה עכשיו."),
                 ("banker", f"{resolve}."), ("customer", "תודה, סוף סוף.")], executes=True))
+            c[-1].truth, c[-1].retold = "excessive_runaround", "no"
     elif scenario == "legit_process":
         c.append(_call(t, rng.uniform(180, 400), [
             _opening(), ("customer", f"שלום, {want}"), *_ident(),
@@ -226,6 +232,7 @@ def build_story(rng: random.Random, n: int) -> Story:
         um = Contact(at=t2, channel="message", direction="inbound", messages=[
             ("Inbound", "מסמכים", "שלום, מצרף את תלוש השכר כפי שביקשתם. תודה."),
             ("Outbound", "מסמכים", f"שלום רב, קיבלנו את המסמך ונעדכן. בברכה, {NAME}")])
+        um.truth, um.retold = "legit_return", "no"
         c.append(um)
         t3 = _later(rng, t2, (20, 60))
         c.append(_call(t3, rng.uniform(120, 260), [
@@ -248,6 +255,7 @@ def build_story(rng: random.Random, n: int) -> Story:
             _opening(), ("customer", "שלום, אני מנסה להשיג אתכם כבר שעתיים, כל פעם זה מתנתק."),
             ("customer", f"{want}"), *_ident(), ("banker", f"{resolve}."),
             ("customer", "טוב, תודה.")], executes=True))
+        c[-1].truth, c[-1].retold = "excessive_runaround", "no"
         if rng.random() < 0.4:
             t2 = _later(rng, t, (24, 72))
             abandoned(t2)
@@ -260,12 +268,14 @@ def build_story(rng: random.Random, n: int) -> Story:
         c.append(Contact(at=t2, channel="message", direction="inbound", messages=[
             ("Inbound", "פנייה", "שלום, עברו יומיים ולא קיבלתי שום תשובה. מה קורה?"),
             ("Outbound", "פנייה", f"שלום רב, מתנצלים על העיכוב, נחזור אלייך עד סוף היום. {NAME}")]))
+        c[-1].truth, c[-1].retold = "unclosed_loop", "no"
         t3 = _later(rng, t2, (20, 50))
         if rng.random() < 0.5:
             c.append(_call(t3, rng.uniform(150, 300), [
                 _opening(), ("customer", "שלום, כתבתי לכם פעמיים בהודעות ואף אחד לא עונה."),
                 ("customer", f"{want}"), ("banker", f"{resolve}."), ("customer", "תודה.")],
                 executes=True))
+            c[-1].truth, c[-1].retold = "unclosed_loop", "no"
         else:
             abandoned(t3)
             branch_call(_later(rng, t3, (0.5, 3)), executes=rng.random() < 0.6)
@@ -278,6 +288,7 @@ def build_story(rng: random.Random, n: int) -> Story:
         c.append(_call(t2, rng.uniform(150, 300), [
             _opening(), ("customer", f"שלום, יש לי שאלה אחרת הפעם: {other[2]}"),
             *_ident(), ("banker", f"{other[3]}."), ("customer", "מצוין, תודה.")], executes=True))
+        c[-1].truth, c[-1].retold = "new_topic", "no"
         if rng.random() < 0.5:
             branch_call(_later(rng, t2, (24, 96)))
     # a first contact that is not a return but the start: everything is ordered
@@ -505,6 +516,19 @@ def prepare(workspace: Path) -> Path:
     return ws
 
 
+def write_truth(stories: list[Story], path: Path) -> int:
+    """What each return with content was really about, keyed as the report
+    numbers them: stories by first contact, contacts in time order."""
+    rows = ["story_no,contact_no,category,retold"]
+    ordered = sorted(stories, key=lambda s: min(x.at for x in s.contacts))
+    for no, s in enumerate(ordered, start=1):
+        for n, x in enumerate(sorted(s.contacts, key=lambda x: x.at), start=1):
+            if x.truth and n > 1:
+                rows.append(f"{no},{n},{x.truth},{x.retold}")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return len(rows) - 1
+
+
 def generate(workspace: Path, *, stories: int = 100, seed: int = 7, audio: bool = False,
              seconds: float = 2.0) -> dict:
     rng = random.Random(seed)
@@ -517,6 +541,7 @@ def generate(workspace: Path, *, stories: int = 100, seed: int = 7, audio: bool 
         write_audio(built, parts_of, inp / "recordings.zip", seconds, rng)
     write_atlas(built, inp / "atlas", rng)
     calls = write_call_artifacts(built, ws / "output", rng)
+    write_truth(built, inp / "truth_labels.csv")
     summary = {"stories": len(built), "contacts": sum(len(s.contacts) for s in built),
                "recorded_calls": calls,
                "scenarios": {k: sum(s.scenario == k for s in built) for k, _ in SCENARIOS}}

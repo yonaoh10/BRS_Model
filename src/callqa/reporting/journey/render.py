@@ -321,6 +321,45 @@ def _kpis(a: JourneyAnalysis) -> list[dict]:
     return out[:6]
 
 
+def _branches(a: JourneyAnalysis, min_rate_n: int) -> list[dict]:
+    """A description per branch - never a ranking: the rate is shown only on
+    a base of min_rate_n returns with content, and the rows are in order of
+    size."""
+    groups: dict[str, list] = defaultdict(list)
+    for s in a.stories:
+        groups[s.branch or "—"].append(s)
+    rows = []
+    for branch, group in groups.items():
+        content = sum(s.content_returns for s in group)
+        fails = sum(s.failures for s in group)
+        returns = sum(s.returns for s in group)
+        rows.append({"branch": branch, "stories": len(group), "returns": returns,
+                     "per_story": returns / len(group), "content": content, "failures": fails,
+                     "rate": fails / content if content >= min_rate_n else None})
+    rows.sort(key=lambda r: (-r["stories"], r["branch"]))
+    return rows[:40]
+
+
+def _retold_by_bankers(a: JourneyAnalysis) -> list[dict]:
+    covered = [s for s in a.stories if s.coverage == "full" and s.content_returns]
+    out = []
+    for label, test in (("עד 2 בנקאים", lambda s: s.bankers < 3),
+                        ("3 בנקאים ומעלה", lambda s: s.bankers >= 3)):
+        g = [s for s in covered if test(s)]
+        k, n = sum(s.retold for s in g), sum(s.content_returns for s in g)
+        out.append({"label": label, "stories": len(g), "k": k, "n": n,
+                    "rate": k / n if n else None})
+    return out if any(r["n"] for r in out) else []
+
+
+def _quality_view(q) -> dict | None:  # noqa: ANN001 - JourneyQuality
+    if q is None or not q.n_scored:
+        return None
+    return {"q": q, "w_fail": max(0.0, min(100.0, q.mean_fail or 0)),
+            "w_other": max(0.0, min(100.0, q.mean_other or 0)),
+            "ci": (f"{_fmt(q.low)} עד {_fmt(q.high)}" if q.low is not None else "")}
+
+
 def _metric_table(a: JourneyAnalysis) -> list[dict]:
     rows = []
     for m in a.metrics.values():
@@ -465,7 +504,8 @@ def _footer(dataset: JourneyDataset, content: ContentLayer | None, generated: da
 def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFacts],
                 opinion: Opinion, tax: Taxonomy, units: Units, content: ContentLayer | None, *,
                 with_text: bool = True, title: str | None = None,
-                call_reports: set[str] | None = None, generated_at: datetime | None = None) -> str:
+                call_reports: set[str] | None = None, generated_at: datetime | None = None,
+                quality=None, min_rate_n: int = 10) -> str:  # noqa: ANN001
     generated = (generated_at or datetime.now(UTC)).astimezone()
     env = jinja_env()
     env.filters["rich"] = _rich
@@ -488,6 +528,8 @@ def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFa
         "verdict_class": {"critical": "sev-critical", "high": "sev-high"}.get(sev, ""),
         "kpis": _kpis(a), "charts": _charts(a, facts, tax), "handoffs": _handoffs(a),
         "metric_table": _metric_table(a),
+        "quality": _quality_view(quality), "branches": _branches(a, min_rate_n),
+        "retold_bankers": _retold_by_bankers(a), "min_rate_n": min_rate_n,
         "cards": cards, "n_drawn": sum(1 for c in cards if c.get("svg")),
         "max_timelines": MAX_TIMELINES,
         "legend": charts.timeline_legend([(_cat_cls(c), _cat_label(tax, c)) for c in cats]
@@ -575,6 +617,18 @@ def settings_of(config: Config) -> RuleSettings:
                         quiet_days=config.journey.quiet_days)
 
 
+def _journey_quality(config: Config, facts: list[StoryFacts], tax: Taxonomy):  # noqa: ANN202
+    from callqa.reporting.journey.quality import journey_quality
+    from callqa.resources import find_config
+    from callqa.rubric import load_rubric
+    try:
+        rubric = load_rubric(find_config("rubric.yaml"))
+        names = {d.id: d.name_he for d in rubric.dimensions}
+    except (FileNotFoundError, ValueError):
+        names = {}
+    return journey_quality(facts, config.paths.output_dir, tax, names)
+
+
 def build_journey_report(config: Config, dataset_id: str | None = None, *,
                          with_text: bool = True, name: str | None = None,
                          title: str | None = None) -> JourneyReport:
@@ -591,12 +645,14 @@ def build_journey_report(config: Config, dataset_id: str | None = None, *,
         verdicts=content.verdicts if content else None,
         settings=settings_of(config), min_rate_n=config.journey.min_rate_n,
         min_firm_n=config.journey.min_firm_n)
-    opinion = build_opinion(analysis, tax)
+    quality = _journey_quality(config, facts, tax)
+    opinion = build_opinion(analysis, tax, quality)
     reports = config.paths.output_dir / "reports"
     calls_dir = reports / "calls"
     call_reports = {p.stem for p in calls_dir.glob("*.html")} if calls_dir.is_dir() else set()
     html = render_html(dataset, analysis, facts, opinion, tax, units, content,
-                       with_text=with_text, title=title, call_reports=call_reports)
+                       with_text=with_text, title=title, call_reports=call_reports,
+                       quality=quality, min_rate_n=config.journey.min_rate_n)
     paths = JourneyReport(html=reports / f"{stem}.html",
                           stories_csv=reports / f"{stem}_stories.csv",
                           returns_csv=reports / f"{stem}_returns.csv",

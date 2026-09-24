@@ -181,6 +181,83 @@ def cmd_journey_estimate(args: argparse.Namespace) -> int:
     return EXIT_SUCCESS
 
 
+def cmd_journey_label_sample(args: argparse.Namespace) -> int:
+    """A blind labelling form over a stratified sample of returns."""
+    from callqa.journey.content import contact_view
+    from callqa.journey.evaluate import sample_returns, write_label_form
+    from callqa.journey.store import dataset_dir, load_content, load_dataset, resolve_dataset_id
+    from callqa.journey.timeline import build_timelines
+    from callqa.journey.vocab import load_taxonomy
+
+    config = _config(args)
+    try:
+        ds_id = resolve_dataset_id(config, args.dataset)
+    except FileNotFoundError as exc:
+        print(f"journey label-sample: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    dataset = load_dataset(config, ds_id)
+    content = load_content(config, ds_id)
+    if content is None:
+        print("run `callqa journey content` first: the sample is drawn by the model's "
+              "categories", file=sys.stderr)
+        return EXIT_FAILED
+    sample = sample_returns(dataset, content, args.n, args.seed)
+    wanted = {iid for _s, _c, iid in sample}
+    views: dict[str, list[dict]] = {}
+    for tl in build_timelines(dataset):
+        for n, c in enumerate(tl.contacts):
+            nxt = tl.contacts[n + 1].interaction.interaction_id if n + 1 < len(tl.contacts) else None
+            if c.interaction.interaction_id in wanted or nxt in wanted:
+                v = contact_view(config.paths.output_dir, c, config.journey.uncertain_word_prob)
+                if v is not None:
+                    views[c.interaction.interaction_id] = [
+                        {"no": ln.no, "who": ln.who, "text": ln.text, "uncertain": ln.uncertain}
+                        for ln in v.lines]
+    out = Path(args.out) if args.out else dataset_dir(config, ds_id) / "labels" / "label_form.html"
+    write_label_form(out, dataset, content, load_taxonomy(config.journey.taxonomy), sample, views)
+    print(f"{len(sample)} returns to label: {out}")
+    return EXIT_SUCCESS
+
+
+def cmd_journey_eval(args: argparse.Namespace) -> int:
+    """Human labels against the content layer; optionally a regression gate."""
+    import json as _json
+
+    from callqa.journey.evaluate import compare_baseline, evaluate, read_labels, save_eval
+    from callqa.journey.store import dataset_dir, load_content, load_dataset, resolve_dataset_id
+    from callqa.journey.vocab import load_taxonomy
+
+    config = _config(args)
+    tax = load_taxonomy(config.journey.taxonomy)
+    try:
+        ds_id = resolve_dataset_id(config, args.dataset)
+        labels = read_labels(Path(args.labels), tax)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"journey eval: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    content = load_content(config, ds_id)
+    if content is None:
+        print("run `callqa journey content` first", file=sys.stderr)
+        return EXIT_FAILED
+    result = evaluate(load_dataset(config, ds_id), content, labels, tax)
+    for line in result.lines():
+        print(line)
+    save_eval(dataset_dir(config, ds_id) / "eval.json", result)
+    if args.write_baseline:
+        Path(args.write_baseline).write_text(_json.dumps(result.to_json(), ensure_ascii=False,
+                                                         indent=2), encoding="utf-8")
+        print(f"baseline written: {args.write_baseline}")
+    if args.baseline:
+        problems = compare_baseline(result, _json.loads(Path(args.baseline).read_text(
+            encoding="utf-8")))
+        for p in problems:
+            print(f"REGRESSION: {p}", file=sys.stderr)
+        if problems:
+            return EXIT_FAILED
+        print("no regression against the baseline")
+    return EXIT_SUCCESS
+
+
 def cmd_journey_report(args: argparse.Namespace) -> int:
     """The journey report of a dataset: HTML, the stories and the returns as
     CSV, and the numbers as JSON, under <output_dir>/reports/."""
@@ -357,6 +434,22 @@ def register(sub: argparse._SubParsersAction, add_common) -> None:
                    help="leave out every quote and reasoning (for wide distribution)")
     add_common(p)
     p.set_defaults(func=cmd_journey_report)
+
+    p = jsub.add_parser("label-sample", help="a blind labelling form over a sample of returns")
+    p.add_argument("--dataset", default=None)
+    p.add_argument("--n", type=int, default=60, help="returns in the sample (default 60)")
+    p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--out", default=None, help="where to write the form (default: the dataset)")
+    add_common(p)
+    p.set_defaults(func=cmd_journey_label_sample)
+
+    p = jsub.add_parser("eval", help="the content layer against human labels")
+    p.add_argument("--labels", required=True, help="labels.csv (story_no,contact_no,category,...)")
+    p.add_argument("--dataset", default=None)
+    p.add_argument("--baseline", default=None, help="fail on a drop against this result")
+    p.add_argument("--write-baseline", default=None, help="save this result as a baseline")
+    add_common(p)
+    p.set_defaults(func=cmd_journey_eval)
 
     p = jsub.add_parser("reveal", help="which account a story number is (logged)")
     p.add_argument("story_no", type=int)

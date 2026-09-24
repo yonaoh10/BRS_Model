@@ -32,7 +32,8 @@ except ImportError:
 
 REQUIRED_IDS = ("level1", "level2", "level3", "method", "explorer", "sec-findings",
                 "sec-returns", "sec-categories", "sec-topics", "sec-gaps", "sec-resolution",
-                "sec-promises", "sec-abandon", "sec-effort", "sec-metrics", "sec-stories")
+                "sec-promises", "sec-abandon", "sec-effort", "sec-quality", "sec-branches",
+                "sec-metrics", "sec-stories")
 MAX_BYTES = 8_000_000
 FORBIDDEN_WORD = "אצלכם"
 

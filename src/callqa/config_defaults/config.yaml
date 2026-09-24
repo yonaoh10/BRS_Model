@@ -75,3 +75,22 @@ monitoring:
   # Machine cost per GPU-hour, for the cost line in each run manifest.
   # 0 = report GPU-hours only, no currency figure.
   gpu_cost_per_hour: 0.0
+
+# Customer journeys and repeat contacts (`callqa journey ...`;
+# docs/journey_report_he.md). Every value here has a default; this section
+# only shows the ones worth knowing.
+journey:
+  callback_business_days: 2   # a promise is kept if the bank acts within this many Sun-Thu days
+  quiet_days: 7               # no contact this long after the bank acted = the story closed
+  min_rate_n: 10              # rates are shown only on at least this many cases
+  min_firm_n: 30              # below this a figure is marked preliminary
+  redact_messages: true       # message bodies go through the redactor at import
+  llm:
+    # cpu = a small model on this machine (8K context, one at a time, calls
+    # shortened around cue phrases); gpu = the bank's internal GPU server
+    # (32K, six at once, whole calls). The endpoint and model default to the
+    # judge's above; set gpu_base_url for the GPU server.
+    profile: cpu
+    engine: inherit            # inherit | vllm | mock
+    # gpu_base_url: "https://llm.internal.example/v1"
+    # model: "..."

@@ -5,6 +5,76 @@ All notable changes to callqa are recorded here. The format follows
 semantic versioning: the CLI commands, exit codes, and on-disk artifact schemas
 are the public contract.
 
+## [1.4.0] — 2026-09-24
+
+Customer journeys and repeat contacts. A tool that takes a batch of customers
+- every contact of each account, the recorded calls, the written
+correspondence and the Atlas banker log - and answers why customers come back,
+what it costs, and what to do about it. It runs entirely on the bank's
+machines, on a CPU with a small local model or on an internal GPU server.
+
+### Added
+- `callqa journey import`: a batch from the vendor-format handoff workbook
+  (three sheets, found by their content), or from a documented CSV contract,
+  with the recordings (a folder or a ZIP) and the Atlas exports. Accounts
+  become keyed pseudonyms at import ("story NNN"); the map back lives only in
+  the dataset's private folder, and `callqa journey reveal` logs every look.
+  An import report of counts and problems (orphan files, a declared repeat
+  count that does not match) to check before anything runs. `--dry-run`.
+- Calls recorded in several files: the parts of one call id are joined into
+  one recording with a segment map, transcribed once, and speaker roles are
+  checked across the joins. NICE `.nmf` recordings are read directly
+  (G.711 natively, other codecs through ffmpeg); `callqa nmf-info` shows a
+  file's structure - never its audio - and `callqa nmf-convert` makes WAVs
+  for a listening check. `metadata.csv` accepts a `segment` column.
+- The deterministic engine: each story's timeline, Atlas banker sessions
+  attached to the contact they served, the facts of every return
+  (abandoned, bank-initiated, answered with an operation / a look / no
+  trace), promises kept or broken from facts (an outbound contact or an Atlas
+  operation before the customer came back, within 2 Sunday-Thursday days),
+  and each story's status with its basis.
+- `callqa journey content`: the language model reads the recorded calls and
+  messages - a card per contact (topic, request, outcome, the bank's
+  promises, "told it again"), the reason for each return in six categories,
+  and a headline and paragraph per story. It reads numbered lines, and every
+  quote is verified against its line and stored in the line's own words.
+  Uncertain lines are never quoted, a claim with no verified evidence is
+  dropped, and answers are cached by content. One setting,
+  `journey.llm.profile`, switches between `cpu` and `gpu`. A mock engine
+  runs the whole chain in CI.
+- `callqa journey process`: transcribe, read and report a whole batch,
+  stories with the most returns first, stopping cleanly at `--until` or
+  `--max-hours` and continuing on the next run. One run per dataset at a
+  time. `callqa journey estimate` measures on the machine and predicts.
+- `callqa journey report`: `data/output/reports/journey.html`, with the
+  stories and the returns as CSV and the numbers as JSON beside it.
+  - Level 1: an opinion, key figures (each with a "?" giving its
+    definition, base and what would make it wrong), findings and actions.
+  - Level 2: returns, reasons (strict and with inference), what is known
+    about returns with no content, topics, time between contacts,
+    Kaplan-Meier time to close, promises, abandonment, banker effort and
+    handoffs, call quality inside journeys, branches, and a table of every
+    metric.
+  - Level 3: a story explorer and a card per story with a two-lane
+    timeline: the customer above, the bankers below, promise arcs.
+  - `--no-quotes` for wide distribution. Listed in the index and the
+    dashboard.
+- `callqa journey label-sample` (a blind offline labelling form over a
+  stratified sample) and `callqa journey eval`: accuracy, macro-F1 and
+  Cohen's kappa with story-level intervals, a confusion matrix, and a
+  baseline gate (`eval/journey_baseline.json`, run in CI against the
+  synthetic demo's known truth).
+- `scripts/generate_journey_demo.py`: 100 synthetic stories in the vendor
+  format, with split NICE recordings and Atlas exports.
+  `docs/examples/journey-demo.html` is the report it produces.
+- `docs/journey_report_he.md`: running it, the report, the method, the
+  accuracy check and privacy.
+
+### Changed
+- `VLLMJudge.chat_json`: the judge's structured-output request is shared
+  with the journey tasks; scoring behaves exactly as before.
+- `asr.beam_size` is configurable.
+
 ## [1.3.0] — 2026-09-24
 
 The management report. One self-contained HTML file over a whole batch of

@@ -276,7 +276,7 @@ def _topics(a: JourneyAnalysis) -> list[Finding]:
 
 # -- actions ----------------------------------------------------------------------
 
-def _actions(a: JourneyAnalysis, findings: dict[str, Finding]) -> list[Action]:
+def _actions(a: JourneyAnalysis, findings: dict[str, Finding], quality=None) -> list[Action]:  # noqa: ANN001
     acts: list[Action] = []
     m = a.metrics
     if "promises" in findings:
@@ -307,6 +307,15 @@ def _actions(a: JourneyAnalysis, findings: dict[str, Finding]) -> list[Action]:
                     else f"{_stories(k)} עם ⟦3⟧ בנקאים ומעלה"),
             owner="מרכז הבנקאות והסניפים", section="sec-effort", score=k * 1.5,
             filter={"retold": 1} if "retold" in findings else {"min_bankers": 3}))
+    if "quality" in findings and quality is not None and quality.worst_dim is not None:
+        w = quality.worst_dim
+        acts.append(Action(
+            title=f"אימון ממוקד: „{clean(w.name)}”",
+            text=("הממד שבו השיחות שהובילו לחזרת כשל חלשות במיוחד. אימון קצר על הממד הזה, "
+                  "עם הדוגמאות מסייר הסיפורים, מכוון בדיוק לשיחות שמייצרות חזרות."),
+            impact=f"{several(quality.n_fail, 'שיחה אחת', 'שיחות')} שאחריהן הלקוח חזר בגלל כשל",
+            owner="מנהלי צוותים והדרכה", section="sec-quality",
+            score=quality.n_fail * abs(w.diff)))
     if "topic" in findings:
         f = findings["topic"]
         acts.append(Action(
@@ -372,8 +381,28 @@ def bottom_line(a: JourneyAnalysis, findings: list[Finding], actions: list[Actio
     return lines
 
 
-def build_opinion(a: JourneyAnalysis, taxonomy: Taxonomy) -> Opinion:
+def _quality(q) -> list[Finding]:  # noqa: ANN001 - reporting.journey.quality.JourneyQuality
+    if q is None or not q.enough or q.diff is None or not q.significant or q.diff > -3:
+        return []
+    worst = q.worst_dim
+    text = (f"מדד האיכות הממוצע של {several(q.n_fail, 'שיחה אחת', 'שיחות')} שאחריהן הלקוח חזר "
+            f"בגלל כשל: {num(q.mean_fail)}, מול {num(q.mean_other)} ב־{count(q.n_other)} השיחות "
+            f"האחרות (הפרש {num(q.diff)}, רווח סמך ⟦95%⟧: {num(q.low)} עד {num(q.high)}).")
+    if worst is not None and worst.diff < 0:
+        text += (f" הפער הגדול ביותר בממד „{clean(worst.name)}”: {num(worst.mean_fail, 2)} מול "
+                 f"{num(worst.mean_other, 2)} (מתוך ⟦5⟧).")
+    return [Finding(
+        key="quality", severity="high" if q.diff <= -8 else "medium",
+        title=f"שיחות שאחריהן הלקוח חזר בגלל כשל קיבלו {num(abs(q.diff))} נקודות איכות פחות",
+        text=text,
+        meaning=("החיבור בין איכות השיחה לבין מה שקרה אחריה: הוא מראה איפה בשיחה נזרע הכשל. "
+                 "זהו קשר, לא הוכחה לסיבה."),
+        section="sec-quality", weight=abs(q.diff) * 3)]
+
+
+def build_opinion(a: JourneyAnalysis, taxonomy: Taxonomy, quality=None) -> Opinion:  # noqa: ANN001
     findings: list[Finding] = []
+    findings.extend(_quality(quality))
     for rule in (_burden, _abandon, _promises, _retold, _same_day, _status, _effort,
                  _topics, _visibility):
         findings.extend(rule(a))
@@ -383,7 +412,7 @@ def build_opinion(a: JourneyAnalysis, taxonomy: Taxonomy) -> Opinion:
     by_section: dict[str, list[Finding]] = {}
     for f in findings:
         by_section.setdefault(f.section, []).append(f)
-    actions = _actions(a, by_key)
+    actions = _actions(a, by_key, quality)
     top = [f for f in findings if f.severity != "info"][:5]
     if len(top) < 5:
         top += [f for f in findings if f.severity == "info"][: 5 - len(top)]

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>תיוג חזרות — {{ dataset_id }}</title>
+<style>
+:root{color-scheme:light dark; --ink:#1a1c22; --ink-3:#5f6672; --card:#fff; --page:#f5f6f8; --border:#dcdfe6; --accent:#4f46e5; --hl:#eef0fe}
+@media (prefers-color-scheme: dark){:root{--ink:#eef0f4; --ink-3:#8b929e; --card:#16181d; --page:#0e0f13; --border:#333843; --accent:#8b93f8; --hl:#1c1f2e}}
+body{margin:0; background:var(--page); color:var(--ink); font:14px/1.6 "Segoe UI","Arial Hebrew","Noto Sans Hebrew",system-ui,sans-serif}
+.wrap{max-width:1000px; margin:0 auto; padding:20px 16px 80px}
+h1{font-size:22px; margin:0 0 6px}
+.lead{color:var(--ink-3); margin:0 0 16px}
+.item{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin:14px 0}
+.item h2{font-size:16px; margin:0 0 8px}
+.ctx{display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; font-size:12px; color:var(--ink-3)}
+.ctx span{border:1px solid var(--border); border-radius:100px; padding:1px 8px}
+.ctx .here{border-color:var(--accent); color:var(--accent); font-weight:600}
+.text{background:var(--page); border-radius:8px; padding:8px 12px; font-size:13px; max-height:320px; overflow:auto}
+.text p{margin:0 0 3px}
+.text .w{color:var(--ink-3); font-weight:600; margin-inline-end:6px}
+.text .u{opacity:.55}
+details{margin:6px 0}
+fieldset{border:1px solid var(--border); border-radius:8px; margin:10px 0 0; padding:8px 12px}
+legend{font-size:12px; color:var(--ink-3)}
+label{display:inline-flex; gap:6px; align-items:center; margin:3px 14px 3px 0; cursor:pointer}
+.defs{font-size:12px; color:var(--ink-3)}
+.bar{position:fixed; bottom:0; left:0; right:0; background:var(--card); border-top:1px solid var(--border); padding:10px 16px; display:flex; gap:12px; align-items:center; justify-content:center}
+button{font:inherit; padding:6px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer}
+.n{direction:ltr; unicode-bidi:isolate}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>תיוג חזרות — מדגם לבדיקת הדיוק</h1>
+  <p class="lead">לכל חזרה: קראו את הטקסט ואת המגע שלפניו, ובחרו למה הלקוח חזר. הטופס לא מציג את תשובת המערכת — כדי שהתיוג יהיה עצמאי. התשובות נשמרות בדפדפן הזה בזמן העבודה; בסוף לחצו „הורדת קובץ התיוג”.</p>
+  <details class="defs"><summary>ההגדרות</summary>
+    <ul>{% for c in categories %}<li><b>{{ c.label }}</b> — {{ c.definition }}</li>{% endfor %}</ul>
+  </details>
+  {% for it in items %}
+  <section class="item" data-story="{{ it.story_no }}" data-contact="{{ it.contact_no }}">
+    <h2>סיפור <span class="n">{{ "%03d" | format(it.story_no) }}</span> · מגע <span class="n">{{ it.contact_no }}</span></h2>
+    <div class="ctx">{% for c in it.context %}<span class="{{ 'here' if c.here else '' }}">#<span class="n">{{ c.no }}</span> <span class="n">{{ c.when }}</span> {{ {'recorded_call': 'שיחה מוקלטת', 'message': 'התכתבות', 'abandoned': 'ננטשה', 'unrecorded_answered': 'שיחה בלי הקלטה'}.get(c.kind, c.kind) }}{% if c.direction == 'outbound' %} (יוצאת){% endif %}</span>{% endfor %}</div>
+    {% if it.prev_lines %}<details><summary>המגע הקודם</summary><div class="text">{% for ln in it.prev_lines %}<p class="{{ 'u' if ln.uncertain else '' }}"><span class="w">{{ {'bank': 'בנק', 'customer': 'לקוח'}.get(ln.who, '?') }}</span>{{ ln.text }}</p>{% endfor %}</div></details>{% endif %}
+    <div class="text">{% for ln in it.lines %}<p class="{{ 'u' if ln.uncertain else '' }}"><span class="w">{{ {'bank': 'בנק', 'customer': 'לקוח'}.get(ln.who, '?') }}</span>{{ ln.text }}</p>{% else %}<p>(אין טקסט)</p>{% endfor %}</div>
+    <fieldset><legend>למה הלקוח חזר</legend>
+      {% for c in categories %}<label><input type="radio" name="c-{{ it.story_no }}-{{ it.contact_no }}" data-k="category" value="{{ c.id }}">{{ c.label }}</label>{% endfor %}
+    </fieldset>
+    <fieldset><legend>האם הלקוח נאלץ לספר את עניינו מחדש</legend>
+      {% for v, t in [('yes', 'כן'), ('partial', 'חלקית'), ('no', 'לא')] %}<label><input type="radio" name="r-{{ it.story_no }}-{{ it.contact_no }}" data-k="retold" value="{{ v }}">{{ t }}</label>{% endfor %}
+      <label><input type="checkbox" data-k="break_point" value="yes">כאן הטיפול השתבש (נקודת שבר)</label>
+    </fieldset>
+  </section>
+  {% endfor %}
+</main>
+<div class="bar"><span id="done" class="n"></span><button type="button" id="save">הורדת קובץ התיוג (CSV)</button></div>
+<script type="application/json" id="xr-data">{{ data_json }}</script>
+<script>
+(function () {
+  "use strict";
+  var KEY = "callqa-labels-{{ dataset_id }}";
+  var items = Array.prototype.slice.call(document.querySelectorAll(".item"));
+  function read() {
+    return items.map(function (it) {
+      var row = {story_no: it.getAttribute("data-story"), contact_no: it.getAttribute("data-contact"),
+                 category: "", retold: "", break_point: ""};
+      it.querySelectorAll("input[data-k]").forEach(function (inp) {
+        if (inp.checked) { row[inp.getAttribute("data-k")] = inp.value; }
+      });
+      return row;
+    });
+  }
+  function count() {
+    var rows = read();
+    var n = rows.filter(function (r) { return r.category; }).length;
+    document.getElementById("done").textContent = n + " / " + rows.length;
+    try { localStorage.setItem(KEY, JSON.stringify(rows)); } catch (e) { /* storage blocked */ }
+  }
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || "[]");
+    saved.forEach(function (r, i) {
+      if (!items[i]) { return; }
+      items[i].querySelectorAll("input[data-k]").forEach(function (inp) {
+        if (r[inp.getAttribute("data-k")] === inp.value) { inp.checked = true; }
+      });
+    });
+  } catch (e) { /* nothing saved */ }
+  document.addEventListener("change", count);
+  document.getElementById("save").addEventListener("click", function () {
+    var lines = ["story_no,contact_no,category,retold,break_point"];
+    read().forEach(function (r) {
+      lines.push([r.story_no, r.contact_no, r.category, r.retold, r.break_point].join(","));
+    });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], {type: "text/csv;charset=utf-8"}));
+    a.download = "labels.csv";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  });
+  count();
+})();
+</script>
+</body>
+</html>

@@ -282,12 +282,42 @@ C0001,B17,C0001.wav,L,דנה כהן
 
 ---
 
+## מסעות לקוח — פניות חוזרות
+
+כלי לניתוח **למה לקוחות חוזרים לבנק**. הוא מקבל batch של לקוחות: כל המגעים של כל חשבון, השיחות המוקלטות (גם כשהקלטה אחת מפוצלת לכמה קבצים עם אותו מזהה), ההתכתבויות ויומן האטלס. ממנו הוא מפיק דוח אחד: `data/output/reports/journey.html`.
+
+```
+.venv\Scripts\python -m callqa journey import --xlsx handoff.xlsx --audio recordings.zip --atlas atlas_exports
+.venv\Scripts\python -m callqa journey estimate
+.venv\Scripts\python -m callqa journey process --until 07:00
+```
+
+- **`import`** קורא את קובץ המסירה, את ההקלטות (כולל קובצי NICE ‏`.nmf`) ואת ייצוא האטלס, ומדפיס ספירות לבדיקה. `--dry-run` רק בודק.
+- **`estimate`** מודד על המחשב הזה וחוזה כמה זמן תיקח ההרצה.
+- **`process`** מתמלל את מה שעוד לא תומלל, קורא את השיחות וההתכתבויות, ומפיק את הדוח. הוא עוצר בצורה מסודרת בשעה שנקבעה, וההרצה הבאה ממשיכה מאותה נקודה.
+
+**מה יש בדוח:**
+- סיבת כל חזרה, ב־6 קטגוריות.
+- „סיפר מחדש”.
+- הבטחות „נחזור אליך” ומה עלה בהן. הקיום נקבע מעובדות: שיחה יוצאת או פעולה באטלס.
+- נטישה ומי פעל אחריה, והזמן עד סגירה.
+- מאמץ הבנקאים לפי האטלס, ואיכות השיחות בתוך המסעות.
+- כרטיס לכל סיפור, עם ציר זמן כפול: הלקוח למעלה, הבנקאים למטה.
+
+כל ציטוט מאומת מול השורה בתמלול, וכל מספר מגיע עם הגדרה, בסיס ורווח סמך. בשרת GPU פנימי מספיק לשנות הגדרה אחת: `journey.llm.profile: gpu`. בדיקת הדיוק מול תיוג אנושי: `journey label-sample` ו־`journey eval`.
+
+**דוח לדוגמה על 100 סיפורים סינתטיים:** [`docs/examples/journey-demo.html`](docs/examples/journey-demo.html). את הקובץ מורידים (Download raw file) ופותחים ב־Edge. להפקה מקומית: `.venv\Scripts\python scripts\generate_journey_demo.py --audio`. ההסבר המלא נמצא ב־`docs/journey_report_he.md`.
+
+---
+
 ## מה נוצר ואיפה
 
 | מיקום | מה יש שם |
 |---|---|
 | `data/output/reports/index.html` | הדוחות. **מתחילים מכאן.** |
 | `data/output/reports/executive.html` | דוח המנהלים. לצידו `data/output/reports/executive_calls.csv` — כל השיחות והציונים, לאקסל. |
+| `data/output/reports/journey.html` | דוח מסעות הלקוח. לצידו `data/output/reports/journey_stories.csv` ו־`data/output/reports/journey_returns.csv`, לאקסל. |
+| `data/output/journey/` | מערכי הנתונים של המסעות. בתיקייה `private/` של כל אחד מהם נמצא המיפוי ממספר סיפור למספר חשבון, והיא נגישה רק למשתמש שהריץ. |
 | `data/output/transcripts/` | ⚠️ תמלול **גולמי** עם פרטים מזהים. `.venv\Scripts\python -m callqa retention --apply` מוחק אותו אחרי מספר הימים שמוגדר ב־`retention.raw_days`. |
 | `data/output/redacted/` | תמלול אחרי הסתרת הפרטים המזהים |
 | `data/output/redacted_audio/` | הקלטה שבה הפרטים המזהים מושתקים |
@@ -359,6 +389,7 @@ TRANSFORMERS_OFFLINE=1
 
 - `docs/DEPLOYMENT.md` — פירוט מלא: אבטחה, רישוי, מה נשמר ולכמה זמן, ומגבלות ידועות.
 - `docs/executive_report_he.md` — דוח המנהלים: מה כל חלק מראה, איך כל מספר מחושב ואיך לקרוא אותו.
+- `docs/journey_report_he.md` — מסעות לקוח ופניות חוזרות: ההרצה, הדוח, המתודולוגיה ובדיקת הדיוק.
 - `docs/MLOPS.md` — תפעול לאורך זמן: הערכה, ניטור שינויים, שחזור תוצאות.
 - `CHANGELOG.md` — מה השתנה בכל גרסה.
 
@@ -644,12 +675,42 @@ The script creates 1,000 synthetic calls in a separate folder (`data/demo-batch`
 
 ---
 
+## Customer journeys — repeat contacts
+
+A tool for **why customers come back to the bank**. It takes a batch of customers: every contact of each account, the recorded calls (including a call recorded in several files under one id), the written correspondence, and the Atlas banker log. From them it produces one report: `data/output/reports/journey.html`.
+
+```
+.venv\Scripts\python -m callqa journey import --xlsx handoff.xlsx --audio recordings.zip --atlas atlas_exports
+.venv\Scripts\python -m callqa journey estimate
+.venv\Scripts\python -m callqa journey process --until 07:00
+```
+
+- **`import`** reads the handoff workbook, the recordings (NICE `.nmf` included) and the Atlas exports, and prints counts to check. `--dry-run` only checks.
+- **`estimate`** measures on this machine and predicts how long the run will take.
+- **`process`** transcribes what is not transcribed yet, reads the calls and messages, and writes the report. It stops cleanly at the set time, and the next run continues from there.
+
+**What the report holds:**
+- Why each return happened, in 6 categories.
+- "Told it again".
+- "We'll call you back" promises and what came of them. Whether a promise was kept is decided from facts: an outbound call or an Atlas operation.
+- Abandonment and who acted after it, and the time to close.
+- Banker effort from Atlas, and call quality inside journeys.
+- A card per story, with a two-lane timeline: the customer above, the bankers below.
+
+Every quote is verified against its line in the transcript, and every figure comes with its definition, base and confidence interval. On an internal GPU server one setting is enough: `journey.llm.profile: gpu`. To check accuracy against human labels, use `journey label-sample` and `journey eval`.
+
+**A sample report over 100 synthetic stories:** [`docs/examples/journey-demo.html`](docs/examples/journey-demo.html). Download the file (Download raw file) and open it in Edge. To produce one locally: `.venv\Scripts\python scripts\generate_journey_demo.py --audio`. The full guide (Hebrew) is `docs/journey_report_he.md`.
+
+---
+
 ## What is created, and where
 
 | Location | What is there |
 |---|---|
 | `data/output/reports/index.html` | The reports. **Start here.** |
 | `data/output/reports/executive.html` | The management report. Next to it, `data/output/reports/executive_calls.csv` — every call and its scores, for Excel. |
+| `data/output/reports/journey.html` | The customer-journey report. Next to it, `data/output/reports/journey_stories.csv` and `data/output/reports/journey_returns.csv`, for Excel. |
+| `data/output/journey/` | The journey datasets. Each one's `private/` folder holds the story-number-to-account map and is readable only by the user who ran it. |
 | `data/output/transcripts/` | ⚠️ **Raw** transcripts containing identifiers. `.venv\Scripts\python -m callqa retention --apply` deletes them once they are older than `retention.raw_days`. |
 | `data/output/redacted/` | Transcripts after the identifiers are hidden |
 | `data/output/redacted_audio/` | Recordings with the identifiers silenced |
@@ -721,5 +782,6 @@ and run `.venv\Scripts\python -m callqa preflight`.
 
 - `docs/DEPLOYMENT.md` — full detail: security, licensing, what is stored and for how long, and known limits.
 - `docs/executive_report_he.md` — the management report (Hebrew): what each part shows, how each number is computed and how to read it.
+- `docs/journey_report_he.md` — customer journeys and repeat contacts (Hebrew): running it, the report, the method and the accuracy check.
 - `docs/MLOPS.md` — running it over time: evaluation, drift monitoring, reproducing results.
 - `CHANGELOG.md` — what changed in each version.
