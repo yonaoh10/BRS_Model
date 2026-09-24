@@ -12,6 +12,8 @@ calls - made for a month of ~1,000 - written for management and readable at
 three depths, with every figure traceable to the calls behind it.
 
 ### Added
+- `docs/examples/executive-demo.html` and `.pdf`: a sample management report over
+  1,000 synthetic calls, to see the result before there is real data.
 - `callqa executive-report` and, automatically, every `callqa report`:
   `data/output/reports/executive.html`, plus a numbers-only CSV for Excel and
   JSON for BI tools beside it.

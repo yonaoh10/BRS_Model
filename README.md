@@ -278,6 +278,8 @@ C0001,B17,C0001.wav,L,דנה כהן
 
 הסקריפט יוצר 1,000 שיחות סינתטיות בתיקייה נפרדת (`data/demo-batch`), מפיק מהן דוח מנהלים ופותח אותו. הדוח מסומן בבירור כהדגמה, ואינו נוגע בשיחות האמיתיות.
 
+**דוח לדוגמה, מוכן לצפייה:** [`docs/examples/executive-demo.pdf`](docs/examples/executive-demo.pdf) (נפתח ישירות ב־GitHub) ו־[`docs/examples/executive-demo.html`](docs/examples/executive-demo.html) — הדוח האינטראקטיבי המלא על 1,000 שיחות סינתטיות. את קובץ ה־HTML מורידים (Download raw file) ופותחים ב־Edge.
+
 ---
 
 ## מה נוצר ואיפה
@@ -637,6 +639,8 @@ Every level-1 finding links to its analysis in level 2 and to the calls themselv
 ```
 
 The script creates 1,000 synthetic calls in a separate folder (`data/demo-batch`), produces a management report from them and opens it. The report is clearly marked as a demonstration and does not touch the real calls.
+
+**A sample report, ready to view:** [`docs/examples/executive-demo.pdf`](docs/examples/executive-demo.pdf) (opens directly on GitHub) and [`docs/examples/executive-demo.html`](docs/examples/executive-demo.html) — the full interactive report over 1,000 synthetic calls. Download the HTML file (Download raw file) and open it in Edge.
 
 ---
 
