@@ -177,16 +177,6 @@ def test_index_links_the_journey_report(config, tmp_path):
     assert 'href="journey.html"' in index.read_text(encoding="utf-8")
 
 
-def test_dashboard_serves_journey_reports():
-    spec = importlib.util.spec_from_file_location("dash_server", REPO_ROOT / "dashboard" / "server.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    ok = module._REPORT_PATH_RE.fullmatch
-    assert ok("journey.html") and ok("journey-q3.html") and ok("executive.html")
-    assert not ok("journeyx.html") and not ok("journey/x.html") and not ok("journey-.html")
-
-
 # ---------------------------------------------------------------- findings
 
 

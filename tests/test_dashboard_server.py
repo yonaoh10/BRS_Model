@@ -36,7 +36,7 @@ if not (REPO_ROOT / "dashboard" / "server.py").exists():
 
 sys.path.insert(0, str(REPO_ROOT / "dashboard"))
 
-from server import Handler, collect_state  # noqa: E402
+from server import _REPORT_PATH_RE, Handler, collect_state  # noqa: E402
 
 # The requests go to 127.0.0.1, and a bank desktop's system proxy (which Python
 # applies to every URL; its "<local>" bypass misses 127.0.0.1) must not see them.
@@ -516,3 +516,9 @@ def test_a_call_processed_without_redaction_shows_no_text(live_server: str,
         assert _status(f"{live_server}/reports/calls/{call_id}.html?t=test-token-value") == 404
     finally:
         redacted.write_text(original, encoding="utf-8")
+
+
+def test_report_pattern_serves_journey_reports():
+    ok = _REPORT_PATH_RE.fullmatch
+    assert ok("journey.html") and ok("journey-q3.html") and ok("executive.html")
+    assert not ok("journeyx.html") and not ok("journey/x.html") and not ok("journey-.html")
