@@ -33,7 +33,7 @@ except ImportError:
 REQUIRED_IDS = ("level1", "level2", "level3", "method", "explorer", "sec-findings",
                 "sec-returns", "sec-categories", "sec-topics", "sec-gaps", "sec-resolution",
                 "sec-promises", "sec-abandon", "sec-effort", "sec-quality", "sec-branches",
-                "sec-metrics", "sec-stories")
+                "sec-metrics", "sec-stories", "sec-calls", "sec-atlas", "xc", "xs")
 MAX_BYTES = 8_000_000
 FORBIDDEN_WORD = "אצלכם"
 
@@ -108,6 +108,15 @@ def static_checks(path: Path, n_stories: int) -> tuple[list[str], dict]:
         problems.append(f"data covers {len(data['stories'])} stories, expected {n_stories}")
     if page.stories != n_stories:
         problems.append(f"{page.stories} story cards, expected {n_stories}")
+    # the two analysis levels: a row per contact, a row per banker session
+    n_contacts = sum(s["c"] for s in data["stories"])
+    if len(data.get("contacts", [])) != n_contacts:
+        problems.append(f"{len(data.get('contacts', []))} contact rows, expected {n_contacts}")
+    if not data.get("sessions"):
+        problems.append("no banker session rows")
+    head = re.search(r'<table class="head-table">(.*?)</table>', html, re.S)
+    if not head or head.group(1).count("<tr>") != 16:          # header + fifteen lines
+        problems.append("the page of numbers does not have fifteen lines")
     root = path.parent
     for href in page.hrefs:
         if href.startswith("#"):
@@ -164,6 +173,26 @@ def browser_checks(path: Path, data: dict, launch: dict, screenshot: Path | None
             page.wait_for_timeout(200)
             if not page.evaluate(f"!!document.getElementById({json.dumps(target)})"):
                 problems.append(f"timeline mark points at a missing contact: {target}")
+        # the analysis levels: each tab draws its explorer, a row opens its story
+        for tab, body, prefix in (("xc", "#xc-body", "-c"), ("xs", "#xs-body", "-x")):
+            page.click(f".lvl-tabs .tab[data-panel={tab}]")
+            page.wait_for_timeout(150)
+            if page.evaluate(f"document.getElementById('{tab}').hidden"):
+                problems.append(f"the {tab} tab did not show its explorer")
+            n = page.evaluate(f"document.querySelectorAll('{body} tr.row').length")
+            if not n:
+                problems.append(f"the {tab} explorer drew no rows")
+                continue
+            page.click(f"{body} tr.row >> nth=0")
+            page.wait_for_timeout(200)
+            where = page.evaluate("location.hash").lstrip("#")
+            if prefix not in where:
+                problems.append(f"a {tab} row did not point at its contact or session ({where})")
+            elif not page.evaluate(
+                    f"(e => !!e && e.getClientRects().length > 0)(document.getElementById("
+                    f"{json.dumps(where)}))"):
+                problems.append(f"a {tab} row opened no visible target: {where}")
+        page.click(".lvl-tabs .tab[data-panel=explorer]")
         page.click("#btn-theme")
         page.emulate_media(media="print")
         page.wait_for_timeout(200)

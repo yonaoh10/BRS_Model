@@ -172,7 +172,7 @@
     <nav class="subnav no-print" aria-label="פרקי הניתוח">
       <a href="#sec-returns">היקף</a><a href="#sec-categories">סיבות</a><a href="#sec-topics">נושאים</a>
       <a href="#sec-gaps">זמנים</a><a href="#sec-resolution">סגירה</a><a href="#sec-promises">הבטחות</a>
-      <a href="#sec-abandon">נטישה</a><a href="#sec-effort">מאמץ ובנקאים</a><a href="#sec-quality">איכות השיחות</a>
+      <a href="#sec-abandon">נטישה</a><a href="#sec-effort">מאמץ ובנקאים</a>{% if show_calls and sc %}<a href="#sec-calls">שיחה בודדת</a>{% endif %}{% if show_sessions %}<a href="#sec-atlas">סשנים באטלס</a>{% endif %}<a href="#sec-quality">איכות השיחות</a>
       <a href="#sec-branches">סניפים</a><a href="#sec-metrics">כל המדדים</a>
     </nav>
 
@@ -269,6 +269,65 @@
       {% endif %}
     </div>
 
+    {% if show_calls and sc %}
+    <div class="section" id="sec-calls">
+      <h3>ברמת שיחה בודדת: מה עמד מאחורי כל פנייה</h3>
+      <p class="lead">לכל שיחה והתכתבות בסיפורים בכיסוי אטלס מלא: באיזה אחוז היה סשן של בנקאי בחלון הזמן שלה, באיזה אחוז בוצעה פעולה, ואיפה. שיחה שננטשה בדרך כלל אינה משאירה שורה באטלס, ולכן מה שקרה אחריה נמדד בנפרד. פירוט לכל פנייה — ב„סייר השיחות” ברמה 3.</p>
+      <div class="card"><div class="bd tbl-wrap">
+        <table><thead><tr><th>סוג הפנייה</th><th class="num">פניות</th><th class="num">עם פעילות</th><th class="num">עם ביצוע</th><th class="num">עם סניף</th><th class="num">עם מרכז הבנקאות</th><th class="num">בנקאים בממוצע</th></tr></thead><tbody>
+        {% for r in sc.by_type %}<tr><td>{{ r.label }}</td><td class="num n">{{ "{:,}".format(r.n) }}</td><td class="num n">{{ r.f_act }}</td><td class="num n">{{ r.f_do }}</td><td class="num n">{{ r.f_br }}</td><td class="num n">{{ r.f_ct }}</td><td class="num n">{{ r.f_bank }}</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      <div class="card" style="margin-top:16px"><div class="bd">
+        <p class="small">אחרי שיחה שננטשה: {% for x in sc.after %}{{ x.label }} <span class="n">{{ x.n }}</span>{% if not loop.last %} · {% endif %}{% endfor %}. „הלקוח פנה שוב ראשון” = הייתה פנייה נוספת לפני שבנקאי פתח את החשבון.</p>
+      </div></div>
+    </div>
+    {% endif %}
+
+    {% if show_sessions %}
+    <div class="section" id="sec-atlas">
+      <h3>ברמת סשן: מה עשו הבנקאים באטלס</h3>
+      <p class="lead">הזווית שאין בהקלטות ובתיעוד: מה עשו הבנקאים במסכי אטלס על החשבון, באיזו יחידה, כמה זמן, ומה נעשה בלי שום פנייה מתועדת. הנתונים מכסים <span class="n">{{ sc.n_covered }}</span> סיפורים מתוך <span class="n">{{ sc.n_stories }}</span>; ב־<span class="n">{{ sc.n_active }}</span> מהם יש פעילות בנקאי.</p>
+      <details class="card defs" open><summary>מה נבדק ואיך — ההגדרות</summary><div class="bd"><dl>
+        {% for k, v in sc.definitions %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}
+      </dl></div></details>
+      <div class="card" style="margin-top:16px"><div class="hd"><h4>דף המספרים</h4><span class="sub">סיפורים בכיסוי מלא של הלוג · לכל שורה — מה היא אומרת</span></div><div class="bd tbl-wrap">
+        <table class="head-table"><thead><tr><th class="num">#</th><th>ממצא</th><th class="num">ערך</th><th>מה זה אומר</th><th>בסיס</th></tr></thead><tbody>
+        {% for h in sc.head %}<tr><td class="num n">{{ h.item }}</td><td>{{ h.finding }}</td><td class="num val">{{ h.value }}{% if h.prelim %} <span class="badge b-warn">ראשוני</span>{% endif %}</td><td class="small">{{ h.explain }}</td><td class="small muted">{{ h.base }}{% if h.n %} · <span class="n">{{ "{:,}".format(h.n) }}</span>{% endif %}</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      <p class="small muted">לקריאה נכונה: ריבוי בנקאים במרכז הבנקאות הוא בחלקו מבני, כי כל שיחה נכנסת מגיעה לנציג פנוי — הבעיה אינה המספר עצמו אלא אם ההקשר עובר. עבודה בלי פנייה מתועדת כוללת גם ביקור בסניף ועבודת תפעול; זה אינו בזבוז אלא עבודה שאינה נראית במקום אחר. זמני הסשנים הם חסם תחתון.</p>
+      <div class="grid g2">
+        <div class="card"><div class="bd chart-box">{{ sc.kinds or empty }}</div></div>
+        <div class="card"><div class="bd chart-box">{{ sc.classes or empty }}</div></div>
+      </div>
+      {% if sc.by_status %}
+      <div class="card" style="margin-top:16px"><div class="hd"><h4>לפי סטטוס הסיפור</h4><span class="sub">כל הסיפורים בכיסוי מלא</span></div><div class="bd tbl-wrap">
+        <table><thead><tr><th>סטטוס</th><th class="num">סיפורים</th><th class="num">בנקאים בממוצע</th><th class="num">3 בנקאים ומעלה</th><th class="num">מעברים בין יחידות</th><th class="num">עברו בין המרכז לסניפים</th><th class="num">דקות בנקאי</th><th class="num">סשנים בלי פנייה</th><th class="num">עם ביצוע</th><th class="num">ביצוע אחרי הפנייה האחרונה</th><th class="num">חציון שעות עד ביצוע</th></tr></thead><tbody>
+        {% for r in sc.by_status %}<tr><td>{{ r.label }}</td><td class="num n">{{ r.n }}</td><td class="num n">{{ r.f_bank }}</td><td class="num n">{{ r.f_3b }}</td><td class="num n">{{ r.f_hoff }}</td><td class="num n">{{ r.f_cross }}</td><td class="num n">{{ r.f_min }}</td><td class="num n">{{ r.f_bg }}</td><td class="num n">{{ r.f_do }}</td><td class="num n">{{ r.f_after }}</td><td class="num n">{{ r.f_hrs }}</td></tr>{% endfor %}
+        </tbody></table>
+        <p class="small muted">פעולת ביצוע אחרי הפנייה האחרונה אינה מוכיחה לבדה שסיפור נסגר.{% if sc.small_status %} המדגמים קטנים — המספרים מראים כיוון ולא מסקנה סטטיסטית.{% endif %}</p>
+      </div></div>
+      {% endif %}
+      {% if sc.by_topic %}
+      <div class="card" style="margin-top:16px"><div class="hd"><h4>לפי נושא</h4><span class="sub">בכל נושא מעט סיפורים — ההבדלים הם סימן לבדיקה ולא מסקנה</span></div><div class="bd tbl-wrap">
+        <table><thead><tr><th>נושא</th><th class="num">סיפורים</th><th class="num">בנקאים בממוצע</th><th class="num">מעברים בין יחידות</th><th class="num">דקות בנקאי</th><th class="num">סשנים בלי פנייה</th><th class="num">ביצוע אחרי הפנייה האחרונה</th></tr></thead><tbody>
+        {% for r in sc.by_topic %}<tr><td>{{ r.label }}</td><td class="num n">{{ r.n }}</td><td class="num n">{{ r.f_bank }}</td><td class="num n">{{ r.f_hoff }}</td><td class="num n">{{ r.f_min }}</td><td class="num n">{{ r.f_bg }}</td><td class="num n">{{ r.f_after }}</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      {% endif %}
+      {% if sc.units %}
+      <div class="card" style="margin-top:16px"><div class="hd"><h4>היחידות שנגעו בחשבונות</h4><span class="sub">הגדולות לפי מספר הסשנים, ובאיזה אחוז מהסשנים העבודה הייתה סמוכה לפנייה</span></div><div class="bd tbl-wrap">
+        <table><thead><tr><th>יחידה</th><th>סוג</th><th class="num">סשנים</th><th class="num">סיפורים</th><th class="num">סמוך לפנייה</th><th class="num">דקות</th></tr></thead><tbody>
+        {% for r in sc.units %}<tr><td><span class="n">{{ r.unit }}</span>{% if r.label %} · {{ r.label }}{% endif %}</td><td>{{ r.class_label }}</td><td class="num n">{{ "{:,}".format(r.sessions) }}</td><td class="num n">{{ r.stories }}</td><td class="num n">{{ r.f_link }}</td><td class="num n">{{ r.f_min }}</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      {% endif %}
+      {% for c in sc.cases %}
+      <div class="card case" style="margin-top:16px"><div class="hd"><h4><a href="#{{ c.anchor }}">סיפור {{ "%03d" | format(c.no) }}</a>{% if c.why %} — {{ c.why }}{% endif %}</h4><span class="sub">שורות „פנייה” — מה הלקוח עשה; שורות „אטלס” — מה הבנקאים עשו על החשבון</span></div><div class="bd tbl-wrap">
+        <table class="case-table"><thead><tr><th>מועד</th><th>מה</th><th>סוג</th><th>יחידה</th><th>בנקאי</th><th class="num">דקות</th><th>פעולות</th></tr></thead><tbody>
+        {% for r in c.rows %}<tr class="{{ 'atl' if r.atlas else 'ev' }}"><td class="n">{{ r.at }}</td><td>{{ r.event }}</td><td>{{ r.what }}</td><td>{{ r.unit }}</td><td class="mono">{{ r.banker }}</td><td class="num n">{{ r.minutes }}</td><td class="small">{{ r.ops }}</td></tr>{% endfor %}
+        </tbody></table></div></div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="section" id="sec-quality">
       <h3>איכות השיחות בתוך המסעות</h3>
       <p class="lead">כל שיחה מוקלטת שקיבלה ציון במחוון האיכות, לפי מה שקרה אחריה: האם המגע הבא בסיפור היה חזרה בגלל כשל טיפול. זהו קשר ולא הוכחה לסיבה; מוצג רק כשבשתי הקבוצות יש לפחות <span class="n">8</span> שיחות.</p>
@@ -325,6 +384,15 @@
       <div><h2 id="h-level3">סיפורי הלקוחות</h2><p>כל סיפור: הלקוח למעלה, הבנקאים למטה, ולכל מגע — מה היה ולמה.</p></div>
     </div>
 
+    {% if show_calls or show_sessions %}
+    <div class="lvl-tabs no-print" role="tablist" aria-label="רמת הניתוח">
+      <span class="lvl-label">רמת הניתוח:</span>
+      <button type="button" role="tab" class="tab" data-panel="explorer" aria-selected="true">סיפור</button>
+      {% if show_calls %}<button type="button" role="tab" class="tab" data-panel="xc" aria-selected="false">שיחה בודדת <span class="n">{{ "{:,}".format(n_contacts) }}</span></button>{% endif %}
+      {% if show_sessions %}<button type="button" role="tab" class="tab" data-panel="xs" aria-selected="false">סשן <span class="n">{{ "{:,}".format(n_sessions) }}</span></button>{% endif %}
+    </div>
+    {% endif %}
+
     <div class="card explorer" id="explorer">
       <div class="xp-bar no-print">
         <div class="field"><label for="f-q">מספר סיפור</label><input id="f-q" type="search" inputmode="numeric" placeholder="למשל 7"></div>
@@ -357,6 +425,73 @@
       </div>
       <div class="pager no-print" id="xp-pager"></div>
     </div>
+
+    {% if show_calls %}
+    <div class="card explorer lx" id="xc" role="tabpanel" aria-label="סייר השיחות">
+      <div class="xp-bar no-print">
+        <div class="field"><label for="xc-q">מספר סיפור</label><input id="xc-q" type="search" inputmode="numeric" placeholder="למשל 7"></div>
+        <div class="field"><label for="xc-t">סוג הפנייה</label><select id="xc-t"><option value="">הכל</option>{% for k, v in int_types %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="xc-f">מאחוריה באטלס</label><select id="xc-f"><option value="">הכל</option>
+          <option value="act">עם פעילות</option><option value="none">בלי פעילות</option><option value="x">עם ביצוע</option>
+          <option value="br">עם סניף</option><option value="ct">עם מרכז הבנקאות</option></select></div>
+        <div class="field"><label for="xc-cv">כיסוי אטלס</label><select id="xc-cv"><option value="">הכל</option><option value="1">מלא בלבד</option></select></div>
+      </div>
+      <div class="xp-active no-print" id="xc-count" aria-live="polite"></div>
+      <div class="tbl-wrap">
+        <table class="xp-table" id="xc-table">
+          <thead><tr>
+            <th aria-sort="none"><button type="button" data-sort="s">סיפור</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="n">#</button></th>
+            <th aria-sort="none"><button type="button" data-sort="at">מועד</button></th>
+            <th aria-sort="none"><button type="button" data-sort="tl">סוג</button></th>
+            <th aria-sort="none"><button type="button" data-sort="cl">סיבת החזרה</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="ns">סשנים</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="nb">בנקאים</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="mn">דקות</button></th>
+            <th aria-sort="none"><button type="button" data-sort="x">ביצוע</button></th>
+            <th aria-sort="none"><button type="button" data-sort="u">איפה</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="rh">עד שבנקאי פתח</button></th>
+          </tr></thead>
+          <tbody id="xc-body"></tbody>
+        </table>
+      </div>
+      <div class="pager no-print" id="xc-pager"></div>
+      {% if n_contacts > max_rows %}<p class="small muted">בדף מוצגות <span class="n">{{ "{:,}".format(max_rows) }}</span> הפניות הראשונות; כולן בקובץ ה־CSV.</p>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if show_sessions %}
+    <div class="card explorer lx" id="xs" role="tabpanel" aria-label="סייר הסשנים">
+      <div class="xp-bar no-print">
+        <div class="field"><label for="xs-q">מספר סיפור</label><input id="xs-q" type="search" inputmode="numeric" placeholder="למשל 7"></div>
+        <div class="field"><label for="xs-k">סוג הסשן</label><select id="xs-k"><option value="">הכל</option>{% for k, v in session_kinds %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="xs-u">יחידה</label><select id="xs-u"><option value="">הכל</option>{% for k, v in unit_classes %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="xs-l">פנייה</label><select id="xs-l"><option value="">הכל</option>
+          <option value="linked">סמוך לפנייה</option><option value="bg">בלי פנייה מתועדת</option><option value="after">אחרי הפנייה האחרונה</option></select></div>
+        <div class="field"><label for="xs-cv">כיסוי אטלס</label><select id="xs-cv"><option value="">הכל</option><option value="1">מלא בלבד</option></select></div>
+      </div>
+      <div class="xp-active no-print" id="xs-count" aria-live="polite"></div>
+      <div class="tbl-wrap">
+        <table class="xp-table" id="xs-table">
+          <thead><tr>
+            <th aria-sort="none"><button type="button" data-sort="s">סיפור</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="n">#</button></th>
+            <th aria-sort="none"><button type="button" data-sort="at">התחלה</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="mn">דקות</button></th>
+            <th aria-sort="none"><button type="button" data-sort="b">בנקאי</button></th>
+            <th aria-sort="none"><button type="button" data-sort="ul">יחידה</button></th>
+            <th aria-sort="none"><button type="button" data-sort="kl">סוג</button></th>
+            <th class="num" aria-sort="none"><button type="button" data-sort="no">פעולות</button></th>
+            <th aria-sort="none"><button type="button" data-sort="cn">פנייה</button></th>
+            <th aria-sort="none"><button type="button" data-sort="ops">מה נעשה</button></th>
+          </tr></thead>
+          <tbody id="xs-body"></tbody>
+        </table>
+      </div>
+      <div class="pager no-print" id="xs-pager"></div>
+      {% if n_sessions > max_rows %}<p class="small muted">בדף מוצגים <span class="n">{{ "{:,}".format(max_rows) }}</span> הסשנים הראשונים; כולם בקובץ ה־CSV.</p>{% endif %}
+    </div>
+    {% endif %}
 
     <div class="section" id="sec-stories">
       <h3>כרטיסי הסיפורים</h3>
@@ -398,7 +533,7 @@
                 <tr id="{{ r.id }}" class="{{ 'brk' if r['break'] else '' }}">
                   <td class="num n">{{ r.n }}</td>
                   <td class="n">{{ r.at }}</td>
-                  <td>{{ r.kind }}{% if r.dir %} · {{ r.dir }}{% endif %}{% if r.ref %}<div class="mono muted">{{ r.ref }}</div>{% endif %}{% if r.report %}<div><a href="{{ r.report }}">דוח השיחה</a></div>{% endif %}</td>
+                  <td>{{ r.kind }}{% if r.dir %} · {{ r.dir }}{% endif %}{% if r.ref %}<div class="mono muted">{{ r.ref }}</div>{% endif %}</td>
                   <td>{% if r.first %}<span class="muted">פנייה ראשונה</span>{% else %}<span class="cat-dot {{ r.category_cls }}"></span>{{ r.category }}{% if r.inferred %}<div class="small muted">הסקה מרצף האירועים: {{ r.inferred }}</div>{% endif %}{% endif %}
                     {% if r['break'] %}<div><span class="badge b-bad">נקודת שבר</span> {{ r.break_text }}</div>{% endif %}</td>
                   <td class="small">{% if r.objective %}<div>{{ r.objective }}</div>{% endif %}
@@ -407,12 +542,31 @@
                     {% if r.reason %}<div>{{ r.reason }}</div>{% endif %}
                     {% if r.quote %}<div class="quote">„{{ r.quote }}”</div>{% endif %}</td>
                   <td class="small">{% if r.decided %}{{ r.decided }}{% if r.basis and r.basis != "—" %}<div class="muted">{{ r.basis }}</div>{% endif %}{% endif %}</td>
-                  <td class="small">{{ r.sessions }}</td>
+                  <td class="small">{% if r.atlas and r.atlas.n %}<div><span class="n">{{ r.atlas.n }}</span> סשנים · <span class="n">{{ r.atlas.bankers }}</span> בנקאים · <span class="n">{{ r.atlas.minutes }}</span> דק'</div><div class="muted">{{ r.atlas.strongest }}</div>
+                    <details class="sess-list"><summary>הסשנים</summary><ul class="plain">{% for x in r.atlas.sessions %}<li><a href="#{{ x.id }}"><span class="n">{{ x.at }}</span></a> · {{ x.unit }} · בנקאי <span class="mono">{{ x.banker }}</span> · <span class="n">{{ x.minutes }}</span> דק' · {{ x.kind }}{% if x.ops %} — {{ x.ops }}{% endif %}</li>{% endfor %}</ul></details>
+                    {% elif r.atlas %}<span class="muted">אין סשן בחלון הזמן</span>{% else %}{{ r.sessions }}{% endif %}
+                    {% if r.atlas and r.atlas.resp %}<div class="muted">עד שבנקאי פתח: {{ r.atlas.resp }}</div>{% endif %}
+                    {% if r.atlas and r.atlas.first_move %}<div><span class="badge b-muted">{{ r.atlas.first_move }}</span></div>{% endif %}
+                    {% if r.report %}<div><a href="{{ r.report }}">דוח השיחה</a></div>{% endif %}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
               </table>
             </div>
+            {% if s.sessions_table %}
+            <details class="st-sessions"><summary>כל הסשנים באטלס (<span class="n">{{ s.sessions_table|length }}</span>{% if s.background %}, מהם <span class="n">{{ s.background }}</span> בלי פנייה מתועדת{% endif %})</summary>
+            <div class="tbl-wrap">
+              <table class="contacts sessions">
+                <thead><tr><th class="num">#</th><th>התחלה</th><th class="num">דקות</th><th>בנקאי</th><th>יחידה</th><th>סוג</th><th>פנייה</th><th>מה נעשה</th></tr></thead>
+                <tbody>
+                {% for x in s.sessions_table %}
+                <tr id="{{ x.id }}" class="{{ 'bg' if x.contact is none else '' }}"><td class="num n">{{ x.no }}</td><td class="n">{{ x.at }}</td><td class="num n">{{ x.minutes }}</td><td class="mono">{{ x.banker }}</td><td>{{ x.unit }}</td><td>{{ x.kind }}{% if x.peek %} <span class="muted">(הצצה)</span>{% endif %}</td><td>{% if x.contact is none %}<span class="muted">בלי פנייה{% if x.after %} · אחרי הפנייה האחרונה{% endif %}</span>{% else %}<a href="#{{ s.anchor }}-c{{ x.contact - 1 }}">פנייה <span class="n">{{ x.contact }}</span></a>{% endif %}</td><td class="small">{{ x.ops }}</td></tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            </details>
+            {% endif %}
           </div>
         </details>
         {% endfor %}
@@ -434,12 +588,23 @@
         <dt>מה חושב בקוד (עובדה)</dt><dd>כיוון השיחה, נטישה, זמנים ופערים, מגעים באותו יום, ערוצים, בנקאים ויחידות, דקות באטלס, והאם בוצעה פעולה או רק צפייה. חזרה ביוזמת הבנק נקבעת בחוק ואינה ניתנת לשינוי על ידי מודל השפה.</dd>
         <dt>מה נקרא מהתוכן</dt><dd>נושא, בקשה, תוצאה, הבטחות, „סיפר מחדש” וסיבת החזרה — מתוך התמלול או ההתכתבות. כל ציטוט מאומת מול השורה בתמלול; שורה שהתמלול שלה לא ודאי אינה מצוטטת.{% if not content %} <b>בדוח זה שלב התוכן עוד לא הורץ</b>, ולכן המדדים שתלויים בו מוצגים כ„ממתין”.{% endif %}</dd>
         <dt>מה הוסק</dt><dd>סטטוס „נסגר” בלי תוכן (פעולה בחשבון אחרי הפנייה האחרונה ושקט של שבוע), קיום הבטחה, וסיבה משוערת לחזרה בלי תוכן (הבטחה שהופרה קודם; רצף באותו יום עם החלפת יחידה). כל הסקה מסומנת בדוח.</dd>
-        <dt>שיוך סשן אטלס למגע</dt><dd>שיחה יוצאת: מ־<span class="n">20</span> דקות לפניה ועד סופה; שיחה נכנסת: עד <span class="n">30</span> דקות אחריה; הודעה יוצאת: <span class="n">30</span> דקות לפניה; הודעה נכנסת: עד <span class="n">60</span> דקות אחריה. סשן שלא נפל באף חלון נספר כ„עבודה בלי פנייה מתועדת”.</dd>
+        {% if sc %}{% for k, v in sc.definitions %}<dt>{{ k }} (אטלס)</dt><dd>{{ v }}</dd>{% endfor %}
+        <dt>שתי רמות ניתוח</dt><dd>שיחה בודדת: כל פנייה ומה שעמד מאחוריה באטלס — סשנים, בנקאים, דקות, ביצוע ואיפה. סשן: הסשן של הבנקאי הוא יחידת הניתוח, כולל עבודה בלי שום פנייה מתועדת. ההגדרות והנוסחאות הן אלה של פרויקט האטלס של הבנק (ATL_R01–R03).</dd>{% endif %}
         <dt>סטטיסטיקה</dt><dd>שיעור בין חזרות מחושב עם רווח סמך מסוג bootstrap ברמת הסיפור, כי חזרות של אותו לקוח תלויות זו בזו; שיעור בין סיפורים — Wilson. זמן עד סגירה — Kaplan-Meier, עם סיפורים פתוחים כמצונזרים. שיעור מוצג רק כשהבסיס <span class="n">10</span> לפחות, ומסומן „ראשוני” מתחת ל־<span class="n">30</span>.</dd>
         <dt>פרטיות</dt><dd>אין בדוח מספרי חשבון, מספרי זהות או שמות. בנקאים מוצגים כקוד ויחידה. ציטוטים עוברים שוב הסתרת פרטים מזהים לפני שהם נכנסים לדוח. הקובץ לא מתחבר לרשת.</dd>
         <dt>מגבלות</dt><dd>יומן האטלס נשמר כ־<span class="n">90</span> יום, ולכן לחלק מהסיפורים הכיסוי חלקי — מדדי המאמץ מחושבים רק על סיפורים בכיסוי מלא. שיחה שלא הוקלטה נשארת בלי סיבה ידועה. הדוח אינו כלי להערכת עובד בודד.</dd>
       </dl>
     </div></div>
+    {% if sc and sc.codecat %}
+    <details class="card" style="margin-top:16px"><summary class="hd"><h4>נספח — סיווג הפעולות</h4><span class="sub">כל קוד פעולה שהופיע, והסוג שנקבע לו. קוד שהתיאור שלו אינו מכריע בין צפייה לפעולה נשאר לא מסווג</span></summary><div class="bd tbl-wrap">
+      <table><thead><tr><th>סוג</th><th>קוד</th><th>תיאור</th><th class="num">שורות</th><th class="num">סיפורים</th></tr></thead><tbody>
+      {% for r in sc.codecat %}<tr><td>{{ r.label or "לא סווג" }}</td><td class="mono">{{ r.code }}</td><td>{{ r.description }}</td><td class="num n">{{ "{:,}".format(r.rows) }}</td><td class="num n">{{ r.stories }}</td></tr>{% endfor %}
+      </tbody></table></div></details>
+    <div class="card" style="margin-top:16px"><div class="hd"><h4>נספח — בדיקות שלמות נתוני האטלס</h4></div><div class="bd tbl-wrap">
+      <table><thead><tr><th>מה נבדק</th><th>ערך</th><th>תוצאה</th></tr></thead><tbody>
+      {% for c in sc.checks %}<tr><td>{{ c.check }}</td><td>{{ c.value }}</td><td>{% if c.ok %}<span class="badge b-ok">תקין</span>{% else %}<span class="badge b-warn">לעיון</span>{% endif %}</td></tr>{% endfor %}
+      </tbody></table></div></div>
+    {% endif %}
   </section>
 </main>
 

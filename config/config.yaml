@@ -85,6 +85,20 @@ journey:
   min_rate_n: 10              # rates are shown only on at least this many cases
   min_firm_n: 30              # below this a figure is marked preliminary
   redact_messages: true       # message bodies go through the redactor at import
+  atlas:
+    # Banker sessions in the Atlas log, as the bank's Atlas project builds
+    # them (ATL_R01): a new session when the banker changes, after a pause
+    # longer than gap_min minutes, or on the code that opens the customer screen.
+    gap_min: 30
+    start_op: "201"
+    # coverage_from: 2026-06-25  # the first day the log holds (default: its earliest row)
+    windows:                   # minutes in which a session serves a contact
+      call_out_before: 20      # outbound call: from before the dial to its end
+      call_in_after: 30        # inbound call: from its start to after its end
+      msg_out_before: 30       # outbound message: before it
+      msg_in_after: 60         # inbound message: after it
+      unk_before: 20           # direction unknown: before ...
+      unk_after: 30            # ... and after the moment
   llm:
     # cpu = a small model on this machine (8K context, one at a time, calls
     # shortened around cue phrases); gpu = the bank's internal GPU server

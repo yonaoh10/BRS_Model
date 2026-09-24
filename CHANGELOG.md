@@ -5,6 +5,54 @@ All notable changes to callqa are recorded here. The format follows
 semantic versioning: the CLI commands, exit codes, and on-disk artifact schemas
 are the public contract.
 
+## [1.5.0] — 2026-09-24
+
+Two levels of analysis - the single contact and the banker session - built
+exactly as the bank's own Atlas repeat-contact project defines and shows them
+(ATL_R01, ATL_R02, ATL_R03).
+
+### Added
+- Banker sessions built from the Atlas log rows by the bank's rules: a new
+  session when the banker changes, after a pause of more than 30 minutes, or
+  on code 201; rows of one second keep the export's order. An export's own
+  session table is checked against the sessions its rows make, and any
+  difference is reported at import (`atlas_sessions_differ`).
+- The session kind (execute > info > unclassified > screen opening; 990 alone
+  = not about the customer) and the unit class (banking centre, back office,
+  the account's branch, another branch or unit). The code lists ship as
+  `journey_atlas_codes.yaml`, the lists of ATL_R02.
+- Report, single-contact level: what stood behind each contact type in
+  Atlas; a contact explorer; each contact's sessions in its story card; and
+  `journey report --contact STORY:N`, a page for one contact in three
+  layers (the contact table, what was said, Atlas) with the "executed since
+  the previous contact" test of ATL_R04.
+- Report, session level: the definitions, the page of fifteen numbers with
+  what each one means, sessions by kind and unit, tables by status, topic and
+  unit, three stories as a timeline table, a session explorer, and appendices
+  with the code classification and the completeness checks.
+- `journey report --level all|call|session`; `data/output/reports/journey_contacts.csv`,
+  `data/output/reports/journey_sessions.csv`, `data/output/reports/journey_codes.csv`.
+- `journey atlas-check [--expect eval/atlas_r02_expected.yaml]`: the checks
+  and the page of numbers, compared with the figures ATL_R02 published on the
+  96 stories.
+- `journey.atlas` settings: `gap_min`, `start_op`, `windows`,
+  `coverage_from`, `codes`, `top_units`, `cases`.
+
+### Changed
+- Sessions are tied to every message of a correspondence (each at its own
+  time and direction), not to the correspondence as a whole; a contact of
+  unknown direction is measured from its moment, not from its end; on equal
+  distance, the earlier contact wins.
+- Atlas coverage is by day: a story is covered when its first contact is on
+  or after the first day the log holds (ATL_R02).
+- The banker figures are measured on ATL_R02's base (covered stories with at
+  least one session). "Crossed" = the banking centre and a branch both worked
+  on the story; handoffs are every change of unit class; "sessions with no
+  execute operation" replaces "view-only sessions".
+- After an abandoned call, the customer "came back first" when any next
+  contact came before a banker opened the account (ATL_R02).
+- The synthetic demo exports log rows only; its sessions are built on import.
+
 ## [1.4.1] — 2026-09-24
 
 The reports on the desktops they are really opened on.

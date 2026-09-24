@@ -188,13 +188,12 @@ def test_analysis_over_the_fixture_workbook(tmp_path):
     assert m["abandoned"].k == 1 and not m["abandoned"].shown
     assert m["abandoned"].preliminary
     s1 = next(s for s in analysis.stories if s.story_no == 1)
-    assert s1.abandoned == 1 and s1.coverage == "partial"
+    assert s1.abandoned == 1 and s1.coverage == "full"
     assert s1.bankers == 2 and s1.crossings == 1
     assert sum(analysis.objective_classes.values()) == 5
     assert all(metric.definition_he for metric in m.values())
-    # a story in full Atlas coverage feeds the Atlas metrics; the fixture's
-    # one covered account has no sessions, so they exist but read zero
-    assert analysis.coverage == {"partial": 1, "full": 2}
+    # every story began on or after the first day the log holds (ATL_R02)
+    assert analysis.coverage == {"full": 3}
 
 
 def test_every_metric_says_what_would_make_it_wrong_where_it_matters(tmp_path):

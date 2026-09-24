@@ -122,8 +122,12 @@
   function openStory(anchor, contactId) {
     var card = $(anchor);
     if (!card) { return; }
+    card.hidden = false;         // a story filtered out of the list is still opened when asked for
     card.open = true;
     var target = contactId ? $(contactId) : card;
+    for (var up = target; up && up !== card; up = up.parentNode) {
+      if (up.tagName === "DETAILS") { up.open = true; }
+    }
     (target || card).scrollIntoView({block: contactId ? "center" : "start"});
     if (contactId && target) {
       try { history.replaceState(null, "", "#" + contactId); } catch (e) { /* ignore */ }
@@ -132,7 +136,7 @@
   doc.addEventListener("click", function (e) {
     var a = e.target.closest ? e.target.closest("a[href^='#s']") : null;
     if (!a) { return; }
-    var m = /^#(s\d+)(-c\d+)?$/.exec(a.getAttribute("href"));
+    var m = /^#(s\d+)(-[cx]\d+)?$/.exec(a.getAttribute("href"));
     if (!m) { return; }
     e.preventDefault();
     openStory(m[1], m[2] ? m[1] + m[2] : null);
@@ -368,4 +372,142 @@
     render();
     doc.documentElement.setAttribute("data-explorer", "ready");
   }
+
+  /* ------------------------------------------------ the analysis levels: tabs */
+  (function () {
+    var tabs = doc.querySelectorAll(".lvl-tabs .tab");
+    if (!tabs.length) { return; }
+    function show(id) {
+      Array.prototype.forEach.call(tabs, function (t) {
+        var panel = $(t.getAttribute("data-panel"));
+        var on = t.getAttribute("data-panel") === id;
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        if (panel) { panel.hidden = !on; }
+      });
+    }
+    Array.prototype.forEach.call(tabs, function (t) {
+      t.addEventListener("click", function () { show(t.getAttribute("data-panel")); });
+    });
+    show("explorer");
+  })();
+
+  /* ------------------------------------------------ contacts and sessions explorers */
+  function listExplorer(cfg) {
+    var box = $(cfg.id);
+    if (!box) { return; }
+    var rows = cfg.rows || [];
+    var st = {sort: "s", dir: 1, page: 0};
+    var shown = rows;
+    function val(id) { var c = $(id); return c ? c.value : ""; }
+    function apply() {
+      var q = val(cfg.id + "-q").replace(/\D/g, "");
+      shown = rows.filter(function (r) {
+        if (q && String(r.s).indexOf(q) !== 0) { return false; }
+        return cfg.filters.every(function (f) {
+          var v = val(f.id);
+          return !v || f.test(r, v);
+        });
+      });
+      var k = st.sort;
+      shown = shown.slice().sort(function (a, b) {
+        var x = a[k], y = b[k];
+        if (x === y) { return (a.s - b.s) || (a.n - b.n); }
+        if (x === null || x === undefined || x === "") { return 1; }
+        if (y === null || y === undefined || y === "") { return -1; }
+        return (x < y ? -1 : 1) * st.dir;
+      });
+      draw();
+    }
+    function draw() {
+      var body = $(cfg.id + "-body");
+      body.textContent = "";
+      shown.slice(st.page * PAGE, st.page * PAGE + PAGE).forEach(function (r) {
+        var tr = el("tr", {class: "row", tabindex: "0"});
+        cfg.cells(r).forEach(function (c) {
+          var td = el("td", {class: c.cls || null}, c.text);
+          tr.appendChild(td);
+        });
+        function go() { openStory(r.a, r.a + cfg.target(r)); }
+        tr.addEventListener("click", go);
+        tr.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); go(); } });
+        body.appendChild(tr);
+      });
+      var count = $(cfg.id + "-count");
+      if (count) { count.textContent = shown.length.toLocaleString("he-IL") + " מתוך " + rows.length.toLocaleString("he-IL"); }
+      Array.prototype.forEach.call(box.querySelectorAll("th[aria-sort]"), function (th) {
+        var b = th.querySelector("button");
+        th.setAttribute("aria-sort", b && b.getAttribute("data-sort") === st.sort ? (st.dir > 0 ? "ascending" : "descending") : "none");
+      });
+      var pages = Math.max(1, Math.ceil(shown.length / PAGE));
+      var pg = $(cfg.id + "-pager");
+      pg.textContent = "";
+      var prev = el("button", {type: "button", class: "btn", disabled: st.page === 0 ? "disabled" : null}, "הקודם");
+      var info = el("span", {class: "muted"}, "עמוד " + (st.page + 1) + " מתוך " + pages);
+      var next = el("button", {type: "button", class: "btn", disabled: st.page >= pages - 1 ? "disabled" : null}, "הבא");
+      prev.addEventListener("click", function () { st.page -= 1; draw(); });
+      next.addEventListener("click", function () { st.page += 1; draw(); });
+      pg.appendChild(prev); pg.appendChild(info); pg.appendChild(next);
+    }
+    [cfg.id + "-q"].concat(cfg.filters.map(function (f) { return f.id; })).forEach(function (id) {
+      var c = $(id);
+      if (!c) { return; }
+      c.addEventListener(c.tagName === "INPUT" ? "input" : "change", function () { st.page = 0; apply(); });
+    });
+    Array.prototype.forEach.call(box.querySelectorAll("th button[data-sort]"), function (b) {
+      b.addEventListener("click", function () {
+        var k = b.getAttribute("data-sort");
+        if (st.sort === k) { st.dir = -st.dir; } else { st.sort = k; st.dir = cfg.desc.indexOf(k) >= 0 ? -1 : 1; }
+        st.page = 0; apply();
+      });
+    });
+    apply();
+  }
+  function num(v, d) {
+    if (v === null || v === undefined) { return "—"; }
+    return Number(v).toLocaleString("he-IL", {maximumFractionDigits: d === undefined ? 1 : d});
+  }
+  function hours(h) {
+    if (h === null || h === undefined) { return "—"; }
+    if (h < 1) { return num(h * 60, 0) + " דק'"; }
+    if (h < 48) { return num(h, 1) + " שע'"; }
+    return num(h / 24, 1) + " ימים";
+  }
+  function when(s) { var p = s.split(" "); return dateHe(p[0]) + " " + (p[1] || ""); }
+
+  listExplorer({
+    id: "xc", rows: data.contacts, desc: ["ns", "nb", "mn", "x", "rh"],
+    target: function (r) { return "-c" + (r.n - 1); },
+    filters: [
+      {id: "xc-t", test: function (r, v) { return r.t === v; }},
+      {id: "xc-f", test: function (r, v) {
+        return v === "act" ? r.ns > 0 : v === "none" ? r.ns === 0 : !!r[v]; }},
+      {id: "xc-cv", test: function (r) { return r.cv === 1; }}
+    ],
+    cells: function (r) {
+      return [{text: "סיפור " + pad3(r.s), cls: "n"}, {text: r.n, cls: "num n"}, {text: when(r.at), cls: "n"},
+              {text: r.tl + (r.d ? " · " + r.d : "") + (r.sg > 1 ? " · " + r.sg + " קטעים" : "")},
+              {text: r.n === 1 ? "פנייה ראשונה" : (r.c || "—")},
+              {text: r.ns, cls: "num n"}, {text: r.nb, cls: "num n"}, {text: num(r.mn), cls: "num n"},
+              {text: r.x ? "כן" : ""}, {text: r.u || (r.fm ? "אחרי הנטישה: " + r.fm : "")},
+              {text: hours(r.rh), cls: "num n"}];
+    }
+  });
+  listExplorer({
+    id: "xs", rows: data.sessions, desc: ["mn", "no"],
+    target: function (r) { return "-x" + r.n; },
+    filters: [
+      {id: "xs-k", test: function (r, v) { return r.k === v; }},
+      {id: "xs-u", test: function (r, v) { return r.uc === v; }},
+      {id: "xs-l", test: function (r, v) {
+        return v === "linked" ? r.cn !== null : v === "bg" ? r.cn === null : r.al === 1; }},
+      {id: "xs-cv", test: function (r) { return r.cv === 1; }}
+    ],
+    cells: function (r) {
+      return [{text: "סיפור " + pad3(r.s), cls: "n"}, {text: r.n, cls: "num n"}, {text: when(r.at), cls: "n"},
+              {text: num(r.mn), cls: "num n"}, {text: r.b, cls: "mono"}, {text: r.ul},
+              {text: r.kl + (r.pk ? " (הצצה)" : "")}, {text: r.no, cls: "num n"},
+              {text: r.cn === null ? "בלי פנייה" + (r.al ? " · אחרי האחרונה" : "") : "פנייה " + r.cn},
+              {text: r.ops, cls: "small"}];
+    }
+  });
 })();

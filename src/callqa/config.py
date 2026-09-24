@@ -8,6 +8,7 @@ nested keys separated by double underscores (e.g. CALLQA_JUDGE__BASE_URL).
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -215,12 +216,40 @@ class RetentionConfig(StrictModel):
     raw_days: int = Field(default=90, ge=1)
 
 
+class JourneyAtlasWindows(StrictModel):
+    """Minutes around a contact in which a banker session is taken to serve it
+    (the bank's Atlas project, ATL_R01)."""
+
+    call_out_before: float = Field(default=20.0, ge=0.0, le=240.0)
+    call_in_after: float = Field(default=30.0, ge=0.0, le=240.0)
+    msg_out_before: float = Field(default=30.0, ge=0.0, le=240.0)
+    msg_in_after: float = Field(default=60.0, ge=0.0, le=240.0)
+    unk_before: float = Field(default=20.0, ge=0.0, le=240.0)
+    unk_after: float = Field(default=30.0, ge=0.0, le=240.0)
+
+
 class JourneyAtlasConfig(StrictModel):
     # A contact in the Atlas export is the dataset's contact when the ids match
     # and the times are within this many seconds (the bank's calls table and
     # the vendor workbook agree to the second in 460 of 504 calls, and within
     # a minute in all of them).
     join_tolerance_sec: float = Field(default=60.0, ge=0.0)
+    # A banker session (ATL_R01): a new one starts when the banker changes,
+    # after a pause longer than gap_min minutes, or on the code that opens the
+    # customer screen.
+    gap_min: float = Field(default=30.0, gt=0.0, le=480.0)
+    start_op: str = "201"
+    windows: JourneyAtlasWindows = JourneyAtlasWindows()
+    # The first day the log holds; empty = the earliest row in the export.
+    # Only stories that began on or after it count in the Atlas figures.
+    coverage_from: date | None = None
+    # Operation code -> open / info / execute / not_customer (ATL_R02 lists).
+    codes: str = "journey_atlas_codes.yaml"
+    # The session chapter: how many units to list, and the three stories drawn
+    # as a table of contacts and sessions (story numbers; empty = chosen as
+    # ATL_R02 does).
+    top_units: int = Field(default=15, ge=1, le=100)
+    cases: list[int] = Field(default_factory=list, max_length=6)
 
 
 class JourneyNMFConfig(StrictModel):

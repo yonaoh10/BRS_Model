@@ -66,9 +66,13 @@ def cmd_journey_import(args: argparse.Namespace) -> int:
             from callqa.journey.importers.contract import import_contract
             built = import_contract(args.contract, audio=args.audio, redact_messages=redact)
         if args.atlas:
+            from callqa.journey.sessions import rules_from_config
+            from callqa.journey.vocab import load_atlas_codes
             attach_atlas(built.dataset, args.atlas,
-                         join_tolerance_sec=config.journey.atlas.join_tolerance_sec)
-    except (XlsxError, FileNotFoundError, OSError) as exc:
+                         join_tolerance_sec=config.journey.atlas.join_tolerance_sec,
+                         rules=rules_from_config(config.journey.atlas),
+                         codes=load_atlas_codes(config.journey.atlas.codes))
+    except (XlsxError, FileNotFoundError, OSError, ValueError) as exc:
         print(f"import failed: {exc}", file=sys.stderr)
         return EXIT_FAILED
     dataset = built.dataset
@@ -83,6 +87,56 @@ def cmd_journey_import(args: argparse.Namespace) -> int:
     folder = save_dataset(config, dataset)
     write_private_map(private_dir(config, dataset.dataset_id), built.private_rows)
     print(f"dataset {dataset.dataset_id} written to {folder}")
+    return EXIT_SUCCESS
+
+
+def cmd_journey_atlas_check(args: argparse.Namespace) -> int:
+    """The banker sessions of a dataset, measured as the bank's Atlas project
+    measures them (ATL_R01/R02): the completeness checks, the sessions by kind
+    and unit class, and the page of numbers. With --expect, every figure is
+    compared with the published one, and a difference fails the command."""
+    from callqa.journey.session_analysis import compare_expected, rows_by_category
+    from callqa.journey.sessions import SESSION_KIND_HE, UNIT_CLASS_HE
+    from callqa.journey.store import resolve_dataset_id
+    from callqa.reporting.journey.render import _analyse, session_analysis_of
+    from callqa.resources import load_yaml
+
+    config = _config(args)
+    try:
+        dataset, _content, tax, units, analysis, facts = _analyse(
+            config, resolve_dataset_id(config, args.dataset))
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"no dataset: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    if not dataset.atlas_sessions:
+        print("this dataset has no Atlas sessions (import with --atlas)", file=sys.stderr)
+        return EXIT_FAILED
+    a = session_analysis_of(config, dataset, analysis, facts, tax, units)
+    print(f"dataset {dataset.dataset_id}")
+    for c in a.checks:
+        print(f"  [{'ok' if c['ok'] else '!!'}] {c['check']}: {c['value']}")
+    print("sessions of covered stories by kind: " + " / ".join(
+        f"{SESSION_KIND_HE[k]} {v:,}" for k, v in a.kinds.items()))
+    print("sessions of covered stories by unit: " + " / ".join(
+        f"{UNIT_CLASS_HE[k]} {v:,}" for k, v in a.classes.items()))
+    print("log rows by code category: " + " / ".join(
+        f"{SESSION_KIND_HE[k]} {v:,}" for k, v in rows_by_category(dataset).items()))
+    for h in a.head:
+        print(f"  {h.item:>2}. {h.finding_he}: {h.value_txt}")
+    if not args.expect:
+        return EXIT_SUCCESS
+    try:
+        expected = load_yaml(args.expect) or {}
+    except (OSError, ValueError) as exc:
+        print(f"cannot read {args.expect}: {exc}", file=sys.stderr)
+        return EXIT_FAILED
+    diffs = compare_expected(a, dataset, expected)
+    if diffs:
+        print(f"{len(diffs)} figure(s) differ from {args.expect.name}:")
+        for d in diffs:
+            print(f"  - {d}")
+        return EXIT_FAILED
+    print(f"every figure matches {args.expect.name}")
     return EXIT_SUCCESS
 
 
@@ -269,22 +323,31 @@ def cmd_journey_eval(args: argparse.Namespace) -> int:
 def cmd_journey_report(args: argparse.Namespace) -> int:
     """The journey report of a dataset: HTML, the stories and the returns as
     CSV, and the numbers as JSON, under <output_dir>/reports/."""
-    from callqa.reporting.journey import build_journey_report
+    from callqa.reporting.journey import build_contact_report, build_journey_report
 
     config = _config(args)
     try:
-        report = build_journey_report(config, args.dataset, with_text=not args.no_quotes,
-                                      name=args.name, title=args.title)
+        if args.contact:
+            story_no, _, n = args.contact.partition(":")
+            if not (story_no.strip().isdigit() and n.strip().isdigit()):
+                raise ValueError("--contact takes STORY:N, e.g. 7:3")
+            html = build_contact_report(config, args.dataset, int(story_no), int(n),
+                                        with_text=not args.no_quotes)
+            print(f"report: {html}")
+        else:
+            report = build_journey_report(config, args.dataset, with_text=not args.no_quotes,
+                                          name=args.name, title=args.title, level=args.level)
+            html = report.html
+            a = report.analysis
+            print(f"{len(a.stories):,} stories, {sum(s.contacts for s in a.stories):,} contacts")
+            print(f"report: {html}")
     except (FileNotFoundError, ValueError) as exc:
         print(f"journey report failed: {exc}", file=sys.stderr)
         return EXIT_FAILED
-    a = report.analysis
-    print(f"{len(a.stories):,} stories, {sum(s.contacts for s in a.stories):,} contacts")
-    print(f"report: {report.html}")
     if args.pdf:
         from callqa.reporting.pdf import PDFError, print_pdf
         try:
-            pdf = print_pdf(report.html, report.html.with_suffix(".pdf"))
+            pdf = print_pdf(html, html.with_suffix(".pdf"))
         except PDFError as exc:
             print(f"PDF: {exc}", file=sys.stderr)
             return EXIT_FAILED
@@ -450,8 +513,21 @@ def register(sub: argparse._SubParsersAction, add_common) -> None:
                    help="leave out every quote and reasoning (for wide distribution)")
     p.add_argument("--pdf", action="store_true",
                    help="also print a PDF next to it, with the Edge or Chrome on this machine")
+    p.add_argument("--level", choices=("all", "call", "session"), default="all",
+                   help="which analysis levels the report carries beside the stories: "
+                        "single contacts (call), banker sessions (session), or both (default)")
+    p.add_argument("--contact", default=None, metavar="STORY:N",
+                   help="a page for one contact only - e.g. 7:3 = story 7, its third contact")
     add_common(p)
     p.set_defaults(func=cmd_journey_report)
+
+    p = jsub.add_parser("atlas-check",
+                        help="the banker sessions measured as the bank's Atlas project does")
+    p.add_argument("--dataset", default=None, help="dataset id (default: the latest import)")
+    p.add_argument("--expect", type=Path, default=None,
+                   help="published figures to compare with (eval/atlas_r02_expected.yaml)")
+    add_common(p)
+    p.set_defaults(func=cmd_journey_atlas_check)
 
     p = jsub.add_parser("label-sample", help="a blind labelling form over a sample of returns")
     p.add_argument("--dataset", default=None)

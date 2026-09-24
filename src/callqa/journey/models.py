@@ -81,6 +81,15 @@ class AtlasOp(BaseModel):
     description: str = ""
 
 
+SessionKind = Literal["execute", "info", "unclassified", "open", "not_customer"]
+# A session's kind is its strongest operation (ATL_R02): execute, then info,
+# then an unclassified code; a session with nothing but the screen opening is a
+# peek ("open"), and one with nothing but the banker's own entry report (990)
+# is not about the customer.
+SESSION_KIND_ORDER: tuple[SessionKind, ...] = ("execute", "info", "unclassified", "open",
+                                               "not_customer")
+
+
 class AtlasSession(BaseModel):
     session_id: str
     story_key: str
@@ -91,6 +100,8 @@ class AtlasSession(BaseModel):
     ops: list[AtlasOp] = Field(default_factory=list)
     n_ops: int = 0
     matched_interaction_id: str | None = None
+    first_op: str = ""               # the code of the session's first row
+    peek: bool = False               # one row, and it is the opening code (ATL_R01 PEEK)
 
     @property
     def minutes(self) -> float:
@@ -101,9 +112,39 @@ class AtlasSession(BaseModel):
         return any(op.op_category == "execute" for op in self.ops)
 
     @property
-    def view_only(self) -> bool:
+    def kind(self) -> SessionKind:
+        """ATL_R02 S_CAT: execute > info > unclassified > open; not_customer
+        only when the session holds nothing else. No rows read = open, as R02
+        counts a session without classified rows."""
         cats = {op.op_category for op in self.ops}
-        return not ({"execute", "unclassified"} & cats)
+        for kind in ("execute", "info", "unclassified"):
+            if kind in cats:
+                return kind
+        if "not_customer" in cats and "open" not in cats:
+            return "not_customer"
+        return "open"
+
+    @property
+    def view_only(self) -> bool:
+        """No execute and no unclassified operation (kept for older callers;
+        the session figures use `kind`)."""
+        return self.kind in ("info", "open", "not_customer")
+
+
+class AtlasRules(BaseModel):
+    """How the banker sessions of a dataset were built and tied to contacts
+    (ATL_R01), kept with the dataset so every later stage uses the same."""
+
+    gap_min: float = 30.0            # a longer pause opens a new session
+    start_op: str = "201"            # the code that opens the customer screen
+    call_out_before: float = 20.0    # outbound call: from N minutes before the dial to its end
+    call_in_after: float = 30.0      # inbound call: from its start to N minutes after its end
+    msg_out_before: float = 30.0     # outbound message: N minutes before it
+    msg_in_after: float = 60.0       # inbound message: N minutes after it
+    unk_before: float = 20.0         # unknown direction: N before ...
+    unk_after: float = 30.0          # ... to N after the moment of the contact
+    coverage_from: datetime | None = None   # the first day the log holds
+    sessions_from: Literal["export", "rows", "none"] = "none"
 
 
 class Story(BaseModel):
@@ -167,6 +208,7 @@ class JourneyDataset(BaseModel):
     calls: dict[str, CallAudio] = Field(default_factory=dict)   # by call_key
     messages: list[Message] = Field(default_factory=list)
     atlas_sessions: list[AtlasSession] = Field(default_factory=list)
+    atlas_rules: AtlasRules = Field(default_factory=AtlasRules)
     report: ImportReport
 
     def story(self, story_key: str) -> Story:

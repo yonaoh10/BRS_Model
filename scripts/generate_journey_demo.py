@@ -9,8 +9,11 @@ Writes, into a folder of its own (never the real data folders):
                                 files, messages) - sheets in the order an EG
                                 import leaves them, the files sheet without a header
     input/recordings.zip        synthetic NICE .nmf parts (tones, two streams) - --audio
-    input/atlas/ATLR_*.csv      Atlas exports: contacts, banker sessions, operations,
-                                operation categories (SAS DATETIME format)
+    input/atlas/ATLR_*.csv      Atlas exports: the contacts and the log rows (SAS
+                                DATETIME format). No sessions table: the import
+                                builds the banker sessions from the rows by the
+                                bank's own rules (ATL_R01), and classifies the
+                                codes by the shipped journey_atlas_codes.yaml
     output/...                  the per-call artifacts of the recorded calls, as the
                                 pipeline would leave them after transcription:
                                 redacted transcripts, ingestion records, results and
@@ -368,7 +371,6 @@ def write_atlas(stories: list[Story], folder: Path, rng: random.Random) -> None:
     center_bankers = [f"B{n:04d}" for n in range(1, 41)]
     branch_bankers: dict[str, list[str]] = {}
     ints = ["ACC_KEY,INT_SEQ,INT_ID,INT_DT,INT_TYPE,KIND,DIR1,TALK_N,CHURN_N"]
-    sess = ["ACC_KEY,SESS_NO,S_START,S_END,S_BANKER,S_UNIT,N_OPS,INT_SEQ,LINKED"]
     rows = ["ROW_ID,ACC_KEY,TS_DT,UNIT_NO,BANKER_CODE,OP_KEY,OP_DESC"]
     row_id = 0
     seq = 0
@@ -387,12 +389,12 @@ def write_atlas(stories: list[Story], folder: Path, rng: random.Random) -> None:
                 return
             n_sess += 1
             at = start
+            if rng.random() < 0.05:        # the banker's own entry report, not the customer
+                ops = [("990", "דוח כניסה")] + ops
             for code, desc in ops:
                 row_id += 1
                 rows.append(f"{row_id},{acc},{_sas(at)},{unit},{banker},{code},{desc}")
                 at += timedelta(seconds=rng.randint(20, 150))
-            sess.append(f"{acc},{n_sess},{_sas(start)},{_sas(at - timedelta(seconds=10))},{banker},"
-                        f"{unit},{len(ops)},{int_seq or ''},{1 if int_seq else 0}")
         for x in s.contacts:
             seq += 1
             if x.channel == "call":
@@ -431,11 +433,7 @@ def write_atlas(stories: list[Story], folder: Path, rng: random.Random) -> None:
                                                  ("332", "פרטי חשבון / לקוח"),
                                                  ("649", "תשלומים")], None)
     (folder / "ATLR_INT.csv").write_text("\n".join(ints) + "\n", encoding="utf-8")
-    (folder / "ATLR_SESS.csv").write_text("\n".join(sess) + "\n", encoding="utf-8")
     (folder / "ATLR_ROWS.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
-    (folder / "ATLR_CODECAT.csv").write_text(
-        "CAT,OP_KEY\nOPEN,201\nLOOK,332\nLOOK,011\nDO,970\nDO,675\nDO,649\nOTHER,505\n",
-        encoding="utf-8")
 
 
 def write_call_artifacts(stories: list[Story], output: Path, rng: random.Random) -> int:

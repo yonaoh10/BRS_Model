@@ -98,6 +98,33 @@ table.contacts tr.brk td{background:var(--bad-soft)}
 table.contacts tr:target td{background:var(--accent-soft)}
 table.contacts .badge{margin-top:2px}
 
+/* the analysis levels: story / single contact / banker session */
+.lvl-tabs{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 var(--s3)}
+.lvl-tabs .lvl-label{color:var(--ink-3); font-size:12.5px; margin-inline-end:4px}
+.lvl-tabs .tab{border:1px solid var(--border-2); background:var(--card); color:var(--ink-2); border-radius:999px;
+  padding:5px 14px; font:inherit; font-size:13px; cursor:pointer}
+.lvl-tabs .tab[aria-selected="true"]{background:var(--accent-soft); color:var(--accent-ink); border-color:var(--accent); font-weight:600}
+.lvl-tabs .tab .n{color:var(--ink-3); font-size:11.5px; margin-inline-start:4px}
+.explorer.lx{margin-top:0}
+.explorer[hidden]{display:none}
+table.head-table td.val{white-space:nowrap; font-weight:600}
+table.case-table tr.ev td{background:var(--sunken)}
+table.case-table td{font-size:12.5px}
+details.defs > summary{cursor:pointer; padding:10px var(--s5); font-weight:600}
+details.defs dl{margin:0}
+details.defs dt{font-weight:600; margin-top:8px}
+details.defs dd{margin:2px 0 0; color:var(--ink-2); font-size:13px; max-width:110ch}
+details.sess-list > summary{cursor:pointer; color:var(--accent-ink); font-size:12px}
+details.sess-list ul{margin:4px 0 0; font-size:12px}
+details.st-sessions{margin-top:var(--s3)}
+details.st-sessions > summary{cursor:pointer; color:var(--ink-2); font-size:13px; padding:6px 0}
+table.sessions tr.bg td{color:var(--ink-2)}
+table.sessions tr:target td{background:var(--accent-soft)}
+@media print{
+  .lvl-tabs{display:none !important}
+  details.st-sessions::details-content, details.sess-list::details-content{content-visibility:visible; display:block}
+}
+
 @media print{
   .mdef{display:none}
   /* a closed <details> still takes a page in Chrome's print: only the

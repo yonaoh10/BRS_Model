@@ -77,3 +77,32 @@ def load_taxonomy(name: str = "journey_taxonomy.yaml") -> Taxonomy:
     if "other" not in topics:
         raise ValueError(f"{path.name}: topics must include 'other'")
     return Taxonomy(topics=topics, categories=cats, sha256=_sha(path))
+
+
+ATLAS_CODE_KINDS = ("open", "info", "execute", "not_customer")
+
+
+def normalise_op_code(value: object) -> str:
+    """Atlas codes are text with leading zeros ('035'); decode tables drop
+    them (35). Both sides are compared without them, as ATL_03 does."""
+    v = str(value if value is not None else "").strip()
+    if v.endswith(".0") and v[:-2].isdigit():
+        v = v[:-2]
+    return v.lstrip("0") or ("0" if v else "")
+
+
+def load_atlas_codes(name: str = "journey_atlas_codes.yaml") -> dict[str, str]:
+    """Operation code -> open / info / execute / not_customer (ATL_R02)."""
+    path = find_config(name)
+    data = load_yaml(path) or {}
+    codes: dict[str, str] = {}
+    for kind, values in data.items():
+        if kind not in ATLAS_CODE_KINDS:
+            raise ValueError(f"{path.name}: unknown kind {kind!r} "
+                             f"(use {', '.join(ATLAS_CODE_KINDS)})")
+        for v in values or []:
+            code = normalise_op_code(v)
+            if code in codes and codes[code] != kind:
+                raise ValueError(f"{path.name}: code {v} is listed as both {codes[code]} and {kind}")
+            codes[code] = kind
+    return codes

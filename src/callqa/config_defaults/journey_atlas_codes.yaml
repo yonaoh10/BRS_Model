@@ -1,0 +1,19 @@
+# What each Atlas operation code is, for the banker-session figures.
+#
+# The lists are the ones the Atlas repeat-contact project classified from the
+# description of every code in the decode table (DWH.T61150_ATLAS_ISKA_ID),
+# ATL_R02_repeat_insights, 24.9.2026. A code in no list stays "unclassified"
+# and is shown apart; it does not decide any figure on its own. An exported
+# ATLR_CODECAT table, when given at import, wins over this file.
+#
+#   open           the customer screen was opened (it opens every session)
+#   info           information and queries: movements, account details ...
+#   execute        an execution or a change: transfer, card order, deposit ...
+#   not_customer   not an action on the customer (the banker's entry report)
+open: ["201"]
+info: ["011", "019", "332", "081", "020", "312", "035", "104", "195", "106", "056", "021",
+       "015", "014", "012", "059", "025", "936", "947"]
+execute: ["943", "970", "649", "333", "648", "675", "670", "278", "197", "609", "275", "085",
+          "211", "210", "344", "441", "615", "258", "192", "257", "277", "280", "442", "175",
+          "001", "075", "070", "610", "414", "105", "967", "809", "049", "103", "022", "071"]
+not_customer: ["990"]

@@ -188,8 +188,13 @@ def test_atlas_attaches_facts_sessions_and_coverage(workbook, tmp_path):
     assert second.has_execute and not second.view_only
     assert second.unit_code == "83"
     story1 = min(ds.stories, key=lambda s: s.story_no)
-    assert story1.atlas_coverage == "partial"
+    # ATL_R02: covered when the story's first contact is on or after the first
+    # DAY the log holds - here the same day as the first row
+    assert story1.atlas_coverage == "full"
+    assert ds.atlas_rules.sessions_from == "export"
     assert "335145" not in ds.model_dump_json()
+    # the exported sessions are exactly the ones their rows make
+    assert any(i.code == "atlas_sessions_rebuilt" for i in ds.report.issues)
 
 
 # ---------------------------------------------------------------- contract

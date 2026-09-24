@@ -17,8 +17,9 @@ from pydantic import BaseModel, Field
 
 from callqa.journey.models import InteractionCard, JourneyDataset, StoryVerdict
 from callqa.journey.rules import RuleSettings, StoryFacts, apply_rules
+from callqa.journey.session_analysis import classes_of, first_move_after, story_sessions
 from callqa.journey.stats import cluster_bootstrap_share, kaplan_meier, km_median
-from callqa.journey.timeline import StoryTimeline, build_timelines
+from callqa.journey.timeline import build_timelines
 from callqa.journey.vocab import Taxonomy, Units
 from callqa.reporting.executive.stats import proportion_ci, quantile
 
@@ -91,11 +92,13 @@ class StorySummary(BaseModel):
     bankers: int = 0
     units: int = 0
     unit_kinds: list[str] = Field(default_factory=list)
-    crossings: int = 0
+    crossings: int = 0               # changes of unit class between consecutive sessions
+    crossed: bool = False            # the banking centre and a branch both worked on it
     banker_minutes: float = 0.0
     background_minutes: float = 0.0
     sessions: int = 0
-    view_only_sessions: int = 0
+    no_execute_sessions: int = 0     # sessions with no execute operation (ATL_R02)
+    execute_after_last: bool = False
 
 
 class JourneyAnalysis(BaseModel):
@@ -137,19 +140,6 @@ def _share_metric(key, label, k, n, *, definition, wrong_if, basis="fact", min_n
     m.shown = n >= min_n
     m.preliminary = n < firm_n
     return m
-
-
-def _unit_kinds(units: Units, tl: StoryTimeline) -> list[str]:
-    return [units.kind(s.unit_code, tl.story.branch) for s in tl.sessions]
-
-
-def _crossings(kinds: list[str]) -> int:
-    center = {"center"}
-    n = 0
-    for a, b in zip(kinds, kinds[1:], strict=False):
-        if (a in center) != (b in center):
-            n += 1
-    return n
 
 
 def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
@@ -211,8 +201,7 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
         retold = sum(1 for c in tl.returns if c.interaction.interaction_id in judged
                      and cards.get(c.interaction.interaction_id)
                      and cards[c.interaction.interaction_id].retold in ("yes", "partial"))
-        kinds = _unit_kinds(units, tl)
-        linked = {id(s) for c in tl.contacts for s in c.sessions}
+        ss = story_sessions(tl, units)
         summaries.append(StorySummary(
             story_key=tl.story.story_key, story_no=tl.story.story_no, branch=tl.story.branch,
             topic=topic, first_at=tl.story.first_at, last_at=tl.story.last_at,
@@ -227,13 +216,12 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
             status=facts.verdict.status if facts.verdict else "unclear",
             status_basis=facts.verdict.status_basis if facts.verdict else "none",
             coverage=tl.story.atlas_coverage,
-            bankers=len({s.banker_code for s in tl.sessions}),
-            units=len({s.unit_code for s in tl.sessions}),
-            unit_kinds=sorted(set(kinds)), crossings=_crossings(kinds),
-            banker_minutes=round(sum(s.minutes for s in tl.sessions), 2),
-            background_minutes=round(sum(s.minutes for s in tl.sessions if id(s) not in linked), 2),
-            sessions=len(tl.sessions),
-            view_only_sessions=sum(1 for s in tl.sessions if s.view_only)))
+            bankers=ss.n_bankers, units=len({s.unit_code for s in tl.sessions}),
+            unit_kinds=sorted(k for k, v in ss.n_by_class.items() if v),
+            crossings=ss.n_handoff, crossed=ss.x_cross,
+            banker_minutes=round(ss.banker_min, 2), background_minutes=round(ss.bg_min, 2),
+            sessions=ss.n_sess, no_execute_sessions=ss.n_nodo_sess,
+            execute_after_last=ss.do_after))
         story_clusters_fail.append((fails, len(content)))
 
     # ---- distributions
@@ -296,15 +284,16 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
             resolved.append(False)
     km = kaplan_meier(durations, resolved) if summaries else []
 
-    # banker handoffs between unit kinds (consecutive sessions of a story)
+    # banker handoffs between unit classes (consecutive sessions of a story,
+    # ATL_R02): the matrix sums to the stories' handoff counts
     handoffs: dict[str, Counter] = defaultdict(Counter)
     for facts in all_facts:
-        kinds = _unit_kinds(units, facts.timeline)
-        for a, b in zip(kinds, kinds[1:], strict=False):
+        classes = classes_of(facts.timeline, units)
+        for a, b in zip(classes, classes[1:], strict=False):
             if a != b:
                 handoffs[a][b] += 1
 
-    # after an abandoned call: who acted first
+    # after an abandoned call: who acted first (ATL_R02 B5, covered stories)
     after = Counter()
     wait_hours: list[float] = []
     for facts in all_facts:
@@ -314,17 +303,10 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
         for c in tl.contacts:
             if c.kind != "abandoned":
                 continue
-            nxt = tl.next_contact_after(c.at, inbound_only=True)
-            bank = [s.start for s in tl.sessions if s.start > c.at]
-            bank += [x.at for x in tl.contacts if x.direction == "outbound" and x.at > c.at]
-            first_bank = min(bank) if bank else None
-            if first_bank and (nxt is None or first_bank < nxt.at):
-                after["bank_first"] += 1
-                wait_hours.append((first_bank - c.at).total_seconds() / 3600)
-            elif nxt is not None:
-                after["customer_first"] += 1
-            else:
-                after["nobody"] += 1
+            move, hours = first_move_after(tl, c)
+            after[{"bank": "bank_first", "customer": "customer_first", "none": "nobody"}[move]] += 1
+            if hours is not None:
+                wait_hours.append(hours)
 
     promise_funnel = Counter()
     for facts in all_facts:
@@ -422,49 +404,53 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
         count("median_gap_hours", "חציון זמן בין מגעים (שעות)", quantile(gap_hours, 0.5),
               "הזמן בין מגע למגע הבא באותו סיפור.", "", unit="hours")
 
-    covered = [s for s in summaries if s.coverage == "full"]
+    # the Atlas figures on ATL_R02's base: stories in full log coverage with at
+    # least one banker session
+    covered = [s for s in summaries if s.coverage == "full" and s.sessions > 0]
     if covered:
         n_cov = len(covered)
         count("bankers_per_story", "בנקאים שונים לסיפור (ממוצע)",
               statistics.fmean(s.bankers for s in covered),
-              "בנקאים שונים שפתחו את החשבון באטלס, בסיפורים בכיסוי אטלס מלא.",
+              "בנקאים שונים שפתחו את החשבון באטלס, בסיפורים בכיסוי אטלס מלא עם פעילות.",
               "בנקאי שטיפל בלי לפתוח את החשבון באטלס אינו נספר.", unit="number")
         m["three_bankers"] = _share_metric(
             "three_bankers", "סיפורים עם 3 בנקאים ומעלה", sum(1 for s in covered if s.bankers >= 3),
-            n_cov, definition="מתוך הסיפורים בכיסוי אטלס מלא.",
+            n_cov, definition="מתוך הסיפורים בכיסוי אטלס מלא עם פעילות בנקאי.",
             wrong_if="ריבוי בנקאים במוקד הוא בחלקו מבני (מי שעונה); הבעיה היא כשההקשר לא עובר.",
             min_n=min_rate_n, firm_n=min_firm_n)
         m["crossed"] = _share_metric(
-            "crossed", "סיפורים שעברו בין המוקד לסניפים",
-            sum(1 for s in covered if s.crossings > 0), n_cov,
-            definition="סיפורים שבהם פעלו גם מרכז הבנקאות וגם יחידה אחרת, לסירוגין.",
+            "crossed", "סיפורים שעברו בין מרכז הבנקאות לסניפים",
+            sum(1 for s in covered if s.crossed), n_cov,
+            definition=("סיפורים שבהם עבדו על החשבון גם מרכז הבנקאות וגם סניף - סניף החשבון "
+                        "או סניף ויחידה אחרים."),
             wrong_if="", min_n=min_rate_n, firm_n=min_firm_n)
         minutes = sum(s.banker_minutes for s in covered)
         bg = sum(s.background_minutes for s in covered)
         count("banker_minutes_per_story", "דקות בנקאי לסיפור (ממוצע, חסם תחתון)",
-              minutes / n_cov, "משך הסשנים באטלס מפתיחת החשבון עד הפעולה האחרונה.",
+              minutes / n_cov, "משך הסשנים באטלס מהפעולה הראשונה בסשן עד האחרונה.",
               "הזמן שבין פעולות בתוך סשן נספר; עבודה מחוץ לאטלס לא נספרת.", unit="minutes")
         m["background_share"] = Metric(
             key="background_share", label_he="זמן בנקאי בלי פנייה מתועדת", value=bg / minutes
             if minutes else None, k=None, unit="share",
-            definition_he="חלק מזמן הבנקאים שלא היה צמוד לשום פנייה מתועדת של הלקוח.",
+            definition_he="חלק מזמן הבנקאים שלא היה בחלון הזמן של שום פנייה מתועדת של הלקוח.",
             wrong_if_he="כולל ביקור פיזי בסניף ועבודת תפעול עורפי, שאין להם רישום פנייה.",
             n=n_cov, shown=minutes > 0 and n_cov >= min_rate_n,
             preliminary=n_cov < min_firm_n)
         sessions = sum(s.sessions for s in covered)
-        m["view_only"] = _share_metric(
-            "view_only", "סשנים של צפייה בלבד", sum(s.view_only_sessions for s in covered),
-            sessions, definition="סשנים שבהם הבנקאי רק פתח את המסך או שאל מידע, בלי לבצע פעולה.",
-            wrong_if="פעולה שנרשמה בקוד שלא סווג נספרת כלא-צפייה.",
+        m["no_execute"] = _share_metric(
+            "no_execute", "סשנים בלי שום פעולת ביצוע", sum(s.no_execute_sessions for s in covered),
+            sessions, definition=("סשנים שבהם הבנקאי פתח את המסך, שאל מידע או הפעיל קוד שלא "
+                                  "סווג - בלי העברה, הזמנה או שינוי."),
+            wrong_if="פעולת ביצוע בקוד שלא סווג נספרת כאן כלא-ביצוע.",
             min_n=min_rate_n, firm_n=min_firm_n)
     ab_total = sum(after.values())
     if ab_total:
         m["customer_first_after_abandon"] = _share_metric(
             "customer_first_after_abandon", "אחרי נטישה: הלקוח חזר לפני שהבנק פעל",
             after.get("customer_first", 0), ab_total,
-            definition=("שיחות שננטשו, שאחריהן הלקוח פנה שוב לפני שבנקאי פתח את החשבון או חזר "
-                        "אליו (בסיפורים בכיסוי אטלס מלא)."),
-            wrong_if="חזרה ללקוח שלא נרשמה באטלס או כשיחה יוצאת לא נראית.",
+            definition=("שיחות שננטשו, שאחריהן הייתה פנייה נוספת לפני שבנקאי פתח את החשבון "
+                        "(בסיפורים בכיסוי אטלס מלא)."),
+            wrong_if="חזרה ללקוח שלא נרשמה באטלס ולא כפנייה לא נראית.",
             min_n=min_rate_n, firm_n=min_firm_n)
         if wait_hours:
             count("bank_first_hours", "כשהבנק פעל ראשון - חציון שעות", quantile(wait_hours, 0.5),

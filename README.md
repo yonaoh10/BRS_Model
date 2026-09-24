@@ -303,6 +303,11 @@ C0001,B17,C0001.wav,L,דנה כהן
 - נטישה ומי פעל אחריה, והזמן עד סגירה.
 - מאמץ הבנקאים לפי האטלס, ואיכות השיחות בתוך המסעות.
 - כרטיס לכל סיפור, עם ציר זמן כפול: הלקוח למעלה, הבנקאים למטה.
+- **שתי רמות ניתוח, כמו בדוח האטלס של הבנק:**
+  - **שיחה בודדת:** כל פנייה ומה עמד מאחוריה באטלס. `journey report --contact 7:3` מפיק דף לפנייה אחת.
+  - **סשן:** הסשן של הבנקאי הוא יחידת הניתוח, עם דף של 15 מספרים ועם סייר סשנים.
+  - הסשנים נבנים ומוצמדים לפניות לפי הכללים של ATL_R01/R02.
+  - `journey atlas-check --expect eval/atlas_r02_expected.yaml` משווה למספרים שפורסמו.
 
 כל ציטוט מאומת מול השורה בתמלול, וכל מספר מגיע עם הגדרה, בסיס ורווח סמך. בשרת GPU פנימי מספיק לשנות הגדרה אחת: `journey.llm.profile: gpu`. בדיקת הדיוק מול תיוג אנושי: `journey label-sample` ו־`journey eval`.
 
@@ -318,7 +323,7 @@ C0001,B17,C0001.wav,L,דנה כהן
 |---|---|
 | `data/output/reports/index.html` | הדוחות. **מתחילים מכאן.** |
 | `data/output/reports/executive.html` | דוח המנהלים. לצידו `data/output/reports/executive_calls.csv` — כל השיחות והציונים, לאקסל. |
-| `data/output/reports/journey.html` | דוח מסעות הלקוח. לצידו `data/output/reports/journey_stories.csv` ו־`data/output/reports/journey_returns.csv`, לאקסל. |
+| `data/output/reports/journey.html` | דוח מסעות הלקוח. לצידו, לאקסל: `data/output/reports/journey_stories.csv`, `data/output/reports/journey_returns.csv`, `data/output/reports/journey_contacts.csv` (שורה לכל פנייה), `data/output/reports/journey_sessions.csv` (שורה לכל סשן) ו־`data/output/reports/journey_codes.csv`. |
 | `data/output/journey/` | מערכי הנתונים של המסעות. בתיקייה `private/` של כל אחד מהם נמצא המיפוי ממספר סיפור למספר חשבון, והיא נגישה רק למשתמש שהריץ. |
 | `data/output/transcripts/` | ⚠️ תמלול **גולמי** עם פרטים מזהים. `.venv\Scripts\python -m callqa retention --apply` מוחק אותו אחרי מספר הימים שמוגדר ב־`retention.raw_days`. |
 | `data/output/redacted/` | תמלול אחרי הסתרת הפרטים המזהים |
@@ -698,6 +703,11 @@ A tool for **why customers come back to the bank**. It takes a batch of customer
 - Abandonment and who acted after it, and the time to close.
 - Banker effort from Atlas, and call quality inside journeys.
 - A card per story, with a two-lane timeline: the customer above, the bankers below.
+- **Two levels of analysis, as in the bank's Atlas report:**
+  - **Single contact:** every contact, and what stood behind it in Atlas. `journey report --contact 7:3` makes a page for one contact.
+  - **Session:** the banker's session is the unit of analysis, with a page of 15 numbers and a session explorer.
+  - Sessions are built and tied to contacts by the ATL_R01/R02 rules.
+  - `journey atlas-check --expect eval/atlas_r02_expected.yaml` compares with the published figures.
 
 Every quote is verified against its line in the transcript, and every figure comes with its definition, base and confidence interval. On an internal GPU server one setting is enough: `journey.llm.profile: gpu`. To check accuracy against human labels, use `journey label-sample` and `journey eval`.
 
@@ -713,7 +723,7 @@ Every quote is verified against its line in the transcript, and every figure com
 |---|---|
 | `data/output/reports/index.html` | The reports. **Start here.** |
 | `data/output/reports/executive.html` | The management report. Next to it, `data/output/reports/executive_calls.csv` — every call and its scores, for Excel. |
-| `data/output/reports/journey.html` | The customer-journey report. Next to it, `data/output/reports/journey_stories.csv` and `data/output/reports/journey_returns.csv`, for Excel. |
+| `data/output/reports/journey.html` | The customer-journey report. Next to it, for Excel: `data/output/reports/journey_stories.csv`, `data/output/reports/journey_returns.csv`, `data/output/reports/journey_contacts.csv` (a row per contact), `data/output/reports/journey_sessions.csv` (a row per session) and `data/output/reports/journey_codes.csv`. |
 | `data/output/journey/` | The journey datasets. Each one's `private/` folder holds the story-number-to-account map and is readable only by the user who ran it. |
 | `data/output/transcripts/` | ⚠️ **Raw** transcripts containing identifiers. `.venv\Scripts\python -m callqa retention --apply` deletes them once they are older than `retention.raw_days`. |
 | `data/output/redacted/` | Transcripts after the identifiers are hidden |

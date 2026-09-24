@@ -1,0 +1,41 @@
+# What the bank's Atlas project measured on the 96 repeat-contact stories
+# (ATL_R02_repeat_insights, run 24.9.2026; results as recorded in the Drive,
+# file 56). `callqa journey atlas-check --expect eval/atlas_r02_expected.yaml`
+# on a dataset imported from the same R01 tables must print these numbers.
+#
+# Not here: the page's line 12 and the table by status - ATL_R02 groups by the
+# vendor's story status, which is not part of the import.
+counts:
+  stories: 96
+  sessions: 767
+  ops: 3406
+  covered: 64
+  covered_active: 61
+  codes: 69
+head:
+  covered: "64 / 61"
+  bankers: "7.4 / 6.0"
+  three_bankers: "98.4%"
+  cross: "86.9% / 5.5"
+  minutes: "25.0 / 20.4"
+  background_minutes: "61.7%"
+  background_branch: "57.5%"
+  no_execute: "73.3%"
+  talk: "54 / 10 / 51 מתוך 72"
+  after_abandon: "20 / 68 / 4"
+  bank_hours: "0.22"
+  hours_to_execute: "0.3"
+  multi_segment: "131 מתוך 280"
+  segment_bankers: "1.09 / 1.42"
+# sessions of the covered stories, by kind and by unit class
+kinds: {execute: 197, info: 331, unclassified: 16, open: 195, not_customer: 0}
+classes: {center: 307, back: 86, own: 295, other: 51}
+# every log row, by the category of its code
+rows_by_category: {open: 720, info: 1482, execute: 874, unclassified: 323, not_customer: 7}
+# contacts of the covered stories: count, then % with any session, with an
+# execution, with a branch, with the banking centre; bankers where any
+by_type:
+  ABN: {n: 92, pct_activity: 9.8, pct_execute: 4.3, pct_branch: 6.5, pct_center: 2.2, avg_bankers: 1.0}
+  REC: {n: 190, pct_activity: 89.5, pct_execute: 22.1, pct_branch: 15.8, pct_center: 86.8, avg_bankers: 1.2}
+  TALK: {n: 72, pct_activity: 75.0, pct_execute: 13.9, pct_branch: 70.8, pct_center: 2.8, avg_bankers: 1.1}
+  UM: {n: 35, pct_activity: 62.9, pct_execute: 25.7, pct_branch: 40.0, pct_center: 14.3, avg_bankers: 1.6}

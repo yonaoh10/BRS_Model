@@ -47,7 +47,7 @@ def test_css_without_variables_is_unchanged():
 
 def test_both_reports_carry_the_fallbacks_and_the_notice():
     env = jinja_env()
-    for name in ("executive_report.html.j2", "journey_report.html.j2"):
+    for name in ("executive_report.html.j2", "journey_report.html.j2", "journey_contact.html.j2"):
         src = (TEMPLATES / name).read_text(encoding="utf-8")
         assert "{% filter legacy_css %}" in src
         assert 'http-equiv="X-UA-Compatible" content="IE=edge"' in src

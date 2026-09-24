@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="callqa {{ version }}">
+<title>{{ title }}</title>
+<style>
+{% filter legacy_css %}
+{% include "executive_report.css.j2" %}
+{% include "journey_report.css.j2" %}
+.layer{margin-top:16px}
+.layer .hd h4 .lv{display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--accent-soft); color:var(--accent-ink); font-size:12px; margin-inline-end:8px}
+dl.facts{display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px var(--s4); margin:0; font-size:13px}
+dl.facts dt{color:var(--ink-3); font-size:11.5px}
+dl.facts dd{margin:0}
+@media (max-width: 900px){ dl.facts{grid-template-columns:repeat(2, minmax(0,1fr))} }
+table.ops td{font-size:12px}
+tr.me td{background:var(--accent-soft); font-weight:600}
+{% endfilter %}
+@supports (--callqa: 1) { .compat-note{display:none !important} }
+</style>
+</head>
+<body>
+<div class="compat-note" role="alert" style="background:#fdf1e3;color:#8a4308;border:1px solid #b45309;padding:12px 16px;margin:12px;font:15px/1.6 Arial,sans-serif;direction:rtl;text-align:right">
+  <b>הדף מוצג בלי העיצוב המלא שלו.</b> זה קורה כשהקובץ נפתח ב־Internet Explorer או ב„מצב תאימות” (IE mode), או כשמערכת הדואר הסירה ממנו את העיצוב. כדי לראות אותו כמו שצריך: לחיצה ימנית על הקובץ ← „פתח באמצעות” ← <b>Microsoft Edge</b> (או Chrome), או השתמשו בגרסת ה־PDF.
+</div>
+<main class="wrap" id="main">
+  {% if demo %}<div class="demo" role="note"><b>נתונים סינתטיים להדגמה</b> — אין להסיק מדף זה דבר על לקוחות או על עובדים.</div>{% endif %}
+  <section class="level" aria-labelledby="h-title">
+    <div class="level-head">
+      <span class="num-badge">1</span>
+      <div><h2 id="h-title">{{ story_label }} · פנייה {{ n }} מתוך {{ n_contacts }}</h2>
+        <p>ניתוח ברמת שיחה בודדת: מה היה בפנייה, מה נאמר בה, ומה עשו הבנקאים באטלס סביבה. <span class="n">{{ at }}</span> · <span class="mono">{{ ref }}</span></p></div>
+    </div>
+
+    <div class="card layer"><div class="hd"><h4><span class="lv">א</span>שכבת הטבלה — מה ידוע על הפנייה</h4></div><div class="bd">
+      <dl class="facts">
+        <div><dt>סוג</dt><dd>{{ atlas.layer.type }}</dd></div>
+        <div><dt>כיוון</dt><dd>{{ atlas.layer.direction }}</dd></div>
+        <div><dt>משך השיחה</dt><dd class="n">{{ atlas.layer.talk }}</dd></div>
+        <div><dt>קבצי הקלטה</dt><dd class="n">{{ atlas.layer.segments or "—" }}</dd></div>
+      </dl>
+      {% if report %}<p class="small"><a href="{{ report }}">דוח האיכות של השיחה</a></p>{% endif %}
+    </div></div>
+
+    <div class="card layer"><div class="hd"><h4><span class="lv">ב</span>שכבת התוכן — מה נאמר ולמה הלקוח חזר</h4></div><div class="bd">
+      <dl class="facts">
+        <div><dt>סיבת החזרה</dt><dd><span class="cat-dot {{ said.category_cls }}"></span>{{ said.category }}</dd></div>
+        <div><dt>מי הכריע</dt><dd>{{ said.decided or "—" }}{% if said.basis and said.basis != "—" %} <span class="muted">({{ said.basis }})</span>{% endif %}</dd></div>
+        <div><dt>סיפר מחדש</dt><dd>{{ said.retold or "—" }}</dd></div>
+        <div><dt>תוצאה</dt><dd>{{ said.outcome or "—" }}</dd></div>
+      </dl>
+      {% if said.objective %}<p class="small">{{ said.objective }}</p>{% endif %}
+      {% if said.topic %}<p class="small"><b>נושא:</b> {{ said.topic }}{% if said.issue %} — {{ said.issue }}{% endif %}</p>{% endif %}
+      {% if said.request %}<p class="small"><b>הבקשה:</b> {{ said.request }}</p>{% endif %}
+      {% for p in said.promises %}<div><span class="badge b-{{ p.cls }}">{{ p.text }}</span></div>{% endfor %}
+      {% if said.reason %}<p class="small">{{ said.reason }}</p>{% endif %}
+      {% if said.quote %}<div class="quote">„{{ said.quote }}”</div>{% endif %}
+      {% if not said.read %}<p class="small muted">לפנייה זו אין תוכן שנקרא — שיחה שלא הוקלטה, או ששלב התוכן לא הורץ.</p>{% endif %}
+      {% if not with_text %}<p class="small muted">דף זה הופק בלי ציטוטים ונימוקים.</p>{% endif %}
+    </div></div>
+
+    <div class="card layer"><div class="hd"><h4><span class="lv">ג</span>שכבת אטלס — מה עשו הבנקאים</h4><span class="sub">{{ coverage }}</span></div><div class="bd">
+      {% if not has_atlas %}<p class="muted">למערך הנתונים הזה לא יובאו נתוני אטלס.</p>{% else %}
+      <dl class="facts">
+        <div><dt>סשנים בחלון הזמן של הפנייה</dt><dd class="n">{{ atlas.layer.n_sess }}</dd></div>
+        <div><dt>בנקאים</dt><dd class="n">{{ atlas.layer.bankers }}</dd></div>
+        <div><dt>דקות (חסם תחתון)</dt><dd class="n">{{ atlas.layer.minutes }}</dd></div>
+        <div><dt>פעולות</dt><dd class="n">{{ atlas.layer.ops }}</dd></div>
+        {% if atlas.layer.resp != "—" %}<div><dt>עד שבנקאי פתח את החשבון</dt><dd class="n">{{ atlas.layer.resp }}</dd></div>{% endif %}
+        {% if atlas.layer.first_move %}<div><dt>אחרי הנטישה</dt><dd>{{ atlas.layer.first_move }}</dd></div>{% endif %}
+        <div><dt>ביצוע מאז הפנייה הקודמת</dt><dd>{% if atlas.since_prev.prev_at %}{% if atlas.since_prev.execute %}כן — <span class="n">{{ atlas.since_prev.execute }}</span> סשנים עם ביצוע{% else %}לא{% endif %} <span class="muted">(<span class="n">{{ atlas.since_prev.sessions }}</span> סשנים מאז <span class="n">{{ atlas.since_prev.prev_at }}</span>)</span>{% else %}<span class="muted">פנייה ראשונה</span>{% endif %}</dd></div>
+      </dl>
+      {% for x in atlas.sessions %}
+      <h5 style="margin:14px 0 4px"><span class="n">{{ x.at }}</span> · {{ x.unit }} · בנקאי <span class="mono">{{ x.banker }}</span> · <span class="n">{{ x.minutes }}</span> דק' · {{ x.kind }}</h5>
+      <div class="tbl-wrap"><table class="ops"><thead><tr><th>שעה</th><th>קוד</th><th>סוג הפעולה</th><th>תיאור</th></tr></thead><tbody>
+        {% for op in x.ops %}<tr><td class="n">{{ op.at }}</td><td class="mono">{{ op.code }}</td><td>{{ op.category or "לא סווג" }}</td><td>{{ op.description }}</td></tr>{% endfor %}
+      </tbody></table></div>
+      {% else %}<p class="muted small">אין סשן של בנקאי בחלון הזמן של הפנייה.</p>{% endfor %}
+      {% endif %}
+    </div></div>
+
+    <div class="card layer"><div class="hd"><h4>הפנייה בתוך הסיפור</h4></div><div class="bd tbl-wrap">
+      <table><thead><tr><th class="num">#</th><th>מועד</th><th>סוג</th><th class="num">סשנים</th></tr></thead><tbody>
+      {% for c in atlas.timeline %}<tr class="{{ 'me' if c.me else '' }}"><td class="num n">{{ c.n }}</td><td class="n">{{ c.at }}</td><td>{{ c.type }}{% if c.dir %} · {{ c.dir }}{% endif %}</td><td class="num n">{{ c.sessions }}</td></tr>{% endfor %}
+      </tbody></table></div></div>
+  </section>
+</main>
+<footer class="foot">{{ footer }}</footer>
+</body>
+</html>

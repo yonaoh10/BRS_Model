@@ -36,6 +36,8 @@ from callqa.journey.analysis import (
 from callqa.journey.findings import build_opinion
 from callqa.journey.models import ContentLayer, JourneyDataset
 from callqa.journey.rules import RuleSettings, StoryFacts
+from callqa.journey.session_analysis import SessionAnalysis, analyse_sessions
+from callqa.journey.sessions import SESSION_KIND_HE, UNIT_CLASS_HE
 from callqa.journey.store import dataset_dir, load_content, load_dataset, resolve_dataset_id
 from callqa.journey.vocab import Taxonomy, Units, load_taxonomy, load_units
 from callqa.reporting.common import jinja_env
@@ -52,6 +54,7 @@ from callqa.reporting.executive.render import (
     script_json,
 )
 from callqa.reporting.journey import charts
+from callqa.reporting.journey import sessions_view as sv
 from callqa.state import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -82,11 +85,12 @@ OUTCOME_HE = {"kept": "קוימה", "broken": "הופרה", "unknown": "לא י�
 SETTLED_HE = {"bank_contact": "הבנק חזר ללקוח", "atlas_execute": "בוצעה פעולה בחשבון",
               "customer_returned": "הלקוח חזר לפני שהבנק פעל",
               "deadline": "עבר המועד בלי פעולה"}
-UNIT_KIND_HE = {"center": "מרכז הבנקאות", "own_branch": "סניף החשבון", "branch": "סניף אחר",
-                "back_office": "תפעול עורפי", "other": "יחידה אחרת"}
 CATEGORY_ORDER = ["unclosed_loop", "excessive_runaround", "legit_return", "new_topic",
                   "bank_initiated", "unclassifiable", PENDING]
 PENDING_HE = "ממתין לסיווג לפי תוכן"
+
+
+LEVELS = ("all", "call", "session")
 
 
 @dataclass
@@ -97,6 +101,10 @@ class JourneyReport:
     json: Path
     analysis: JourneyAnalysis
     opinion: Opinion
+    contacts_csv: Path | None = None
+    sessions_csv: Path | None = None
+    codes_csv: Path | None = None
+    sessions: SessionAnalysis | None = None
 
 
 # -- helpers ----------------------------------------------------------------------
@@ -221,9 +229,9 @@ def _charts(a: JourneyAnalysis, facts: list[StoryFacts], tax: Taxonomy) -> dict[
     if sum(ab.values()):
         out["after_abandon"] = charts.hbars(
             [{"label": "הבנק פעל ראשון", "value": ab.get("bank_first", 0), "cls": "ch-bar-ok"},
-             {"label": "הלקוח חזר לפני הבנק", "value": ab.get("customer_first", 0),
+             {"label": "הלקוח פנה שוב ראשון", "value": ab.get("customer_first", 0),
               "cls": "ch-bar-bad"},
-             {"label": "אף אחד לא פעל עד סוף הנתונים", "value": ab.get("nobody", 0),
+             {"label": "אף אחד עד סוף הנתונים", "value": ab.get("nobody", 0),
               "cls": "ch-bar-muted"}],
             label="אחרי שיחה שננטשה: מי פעל ראשון", width=W_HALF)
     covered = [s for s in a.stories if s.coverage == "full"]
@@ -236,19 +244,20 @@ def _charts(a: JourneyAnalysis, facts: list[StoryFacts], tax: Taxonomy) -> dict[
         for s in covered:
             uk.update(s.unit_kinds)
         out["unit_kinds"] = charts.hbars(
-            [{"label": UNIT_KIND_HE.get(k, k), "value": v} for k, v in uk.most_common()],
+            [{"label": UNIT_CLASS_HE.get(k, k), "value": v} for k, v in uk.most_common()],
             label="סיפורים שבהם פעלה כל יחידה", total=len(covered), width=W_HALF)
     return {k: (_journey_markup(v) if v is not None else None) for k, v in out.items()}
 
 
 def _handoffs(a: JourneyAnalysis) -> dict | None:
+    order = list(UNIT_CLASS_HE)
     kinds = sorted({k for k in a.handoffs} | {k for v in a.handoffs.values() for k in v},
-                   key=lambda k: list(UNIT_KIND_HE).index(k) if k in UNIT_KIND_HE else 99)
+                   key=lambda k: order.index(k) if k in order else 99)
     if not kinds:
         return None
-    rows = [{"label": UNIT_KIND_HE.get(src, src),
+    rows = [{"label": UNIT_CLASS_HE.get(src, src),
              "cells": [a.handoffs.get(src, {}).get(dst) for dst in kinds]} for src in kinds]
-    return {"cols": [UNIT_KIND_HE.get(k, k) for k in kinds], "rows": rows}
+    return {"cols": [UNIT_CLASS_HE.get(k, k) for k in kinds], "rows": rows}
 
 
 # -- KPIs ---------------------------------------------------------------------------
@@ -379,9 +388,16 @@ def _metric_table(a: JourneyAnalysis) -> list[dict]:
 
 def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDataset,
                  tax: Taxonomy, units: Units, content: ContentLayer | None, *, with_text: bool,
-                 call_reports: set[str]) -> tuple[list[dict], list[dict]]:
+                 call_reports: set[str], sa: SessionAnalysis | None = None
+                 ) -> tuple[list[dict], list[dict]]:
     """(cards for the template, rows for the explorer's JSON)."""
     summary = {s.story_key: s for s in a.stories}
+    sa_sessions: dict[str, list] = defaultdict(list)
+    sa_contacts: dict[str, object] = {}
+    if sa is not None:
+        for x in sa.sessions:
+            sa_sessions[x.story_key].append(x)
+        sa_contacts = {c.interaction_id: c for c in sa.contacts}
     cards_in = content.cards if content else {}
     order = sorted(facts, key=lambda f: (-summary[f.timeline.story.story_key].returns,
                                          -summary[f.timeline.story.story_key].failures,
@@ -393,6 +409,7 @@ def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDa
         s = summary[tl.story.story_key]
         anchor = f"s{s.story_no}"
         session_contact = {id(x): c.index for c in tl.contacts for x in c.sessions}
+        story_sess = sv.story_sessions(sa_sessions.get(tl.story.story_key, []), anchor)
         promises_by_iid: dict[str, list] = defaultdict(list)
         for p in f.promises:
             promises_by_iid[p.made_in].append(p)
@@ -448,7 +465,8 @@ def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDa
                 "promises": promises,
                 "sessions": (f"{len(sess)} סשנים באטלס · {_fmt(sum(x.minutes for x in sess))} דק'"
                              + (" · בוצעה פעולה" if any(x.has_execute for x in sess) else
-                                " · צפייה בלבד") if sess else ""),
+                                " · בלי פעולת ביצוע") if sess else ""),
+                "atlas": sv.contact_atlas(sa_contacts.get(iid), story_sess),
                 "report": f"calls/{call_id}.html" if call_id and call_id in call_reports else "",
             })
         tl_sessions = []
@@ -459,7 +477,7 @@ def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDa
                 "view_only": x.view_only, "contact_index": session_contact.get(id(x)),
                 "title": (f"{units.label(x.unit_code, tl.story.branch)} · בנקאי "
                           f"{shown_banker(x.banker_code)} · {_fmt(x.minutes)} דק' · "
-                          + ("ביצוע" if x.has_execute else "צפייה בלבד"))})
+                          + SESSION_KIND_HE[x.kind])})
         tl_promises = [{"from_index": index_of.get(p.made_in), "to": p.settled_at or p.due,
                         "outcome": p.outcome} for p in f.promises]
         verdict = f.verdict
@@ -486,7 +504,8 @@ def _story_views(a: JourneyAnalysis, facts: list[StoryFacts], dataset: JourneyDa
             "minutes": _fmt(s.banker_minutes), "sessions": s.sessions,
             "cats": [{"label": _cat_label(tax, c), "n": n, "cls": _cat_cls(c)}
                      for c in _categories(tax, True) if (n := cat_counts.get(c))],
-            "rows": contact_rows, "svg": svg,
+            "rows": contact_rows, "svg": svg, "sessions_table": story_sess,
+            "background": sum(1 for x in story_sess if x["contact"] is None),
         })
         rows.append({"no": s.story_no, "a": anchor, "t": s.topic, "tl": tax.topic_label(s.topic),
                      "br": s.branch or "", "st": s.status, "sb": s.status_basis,
@@ -512,7 +531,8 @@ def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFa
                 opinion: Opinion, tax: Taxonomy, units: Units, content: ContentLayer | None, *,
                 with_text: bool = True, title: str | None = None,
                 call_reports: set[str] | None = None, generated_at: datetime | None = None,
-                quality=None, min_rate_n: int = 10) -> str:  # noqa: ANN001
+                quality=None, min_rate_n: int = 10, sa: SessionAnalysis | None = None,
+                level: str = "all") -> str:  # noqa: ANN001
     generated = (generated_at or datetime.now(UTC)).astimezone()
     env = jinja_env()
     env.filters["rich"] = _rich
@@ -522,8 +542,29 @@ def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFa
         demo_key = content.engine
     elif dataset.source.startswith("synthetic"):
         demo_key = "synthetic-demo"
+    if level not in LEVELS:
+        raise ValueError(f"level: one of {', '.join(LEVELS)}")
     cards, rows = _story_views(a, facts, dataset, tax, units, content, with_text=with_text,
-                               call_reports=call_reports or set())
+                               call_reports=call_reports or set(), sa=sa)
+    has_atlas = sa is not None and bool(sa.sessions)
+    show_calls = sa is not None and level in ("all", "call")
+    show_sessions = has_atlas and level in ("all", "session")
+    level_data: dict = {}
+    session_chapter = None
+    if sa is not None:
+        def anchor_of(no: int) -> str:
+            return f"s{no}"
+        if show_calls:
+            category_of = {}
+            for f in facts:
+                for iid, j in f.judgements.items():
+                    cat = shown_category(j)
+                    category_of[iid] = (_cat_label(tax, cat), _cat_cls(cat))
+            level_data["contacts"] = sv.contact_rows(sa, category_of, anchor_of)
+        if show_sessions:
+            level_data["sessions"] = sv.session_rows(sa, anchor_of)
+        if has_atlas:
+            session_chapter = sv.chapter(sa, dataset.atlas_rules, anchor_of)
     sev = opinion.top_findings[0].severity if opinion.top_findings else "info"
     cats = _categories(tax, _has_pending(a))
     context = {
@@ -564,7 +605,14 @@ def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFa
         "empty": Markup('<p class="ch-empty">אין די נתונים.</p>'),
         "footer": _footer(dataset, content, generated),
         "data_json": Markup(script_json({"stories": rows, "cats": {c: _cat_label(tax, c)
-                                                                   for c in cats}})),
+                                                                   for c in cats},
+                                         **level_data})),
+        "show_calls": show_calls, "show_sessions": show_sessions, "has_atlas": has_atlas,
+        "sc": session_chapter, "n_contacts": len(sa.contacts) if sa else 0,
+        "n_sessions": len(sa.sessions) if sa else 0, "max_rows": sv.MAX_ROWS,
+        "int_types": [(k, v) for k, v in sv.INT_TYPE_HE.items()],
+        "session_kinds": list(SESSION_KIND_HE.items()),
+        "unit_classes": list(UNIT_CLASS_HE.items()),
     }
     return env.get_template("journey_report.html.j2").render(**context)
 
@@ -604,10 +652,57 @@ def render_returns_csv(facts: list[StoryFacts]) -> str:
     return "﻿" + out.getvalue()
 
 
-def render_json(a: JourneyAnalysis, opinion: Opinion) -> str:
+def render_contacts_csv(sa: SessionAnalysis) -> str:
+    """One row per contact and what stood behind it in Atlas (ATLR_INT)."""
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\r\n")
+    w.writerow(["story_no", "contact_no", "at", "type", "direction", "talk_seconds", "segments",
+                "atlas_coverage", "sessions", "banker_minutes", "operations", "bankers",
+                "with_execute", "with_branch", "with_center", "hours_to_next_session",
+                "after_abandon"])
+    for c in sa.contacts:
+        w.writerow([_csv_cell(v) for v in (
+            c.story_no, c.n, c.at.isoformat(" "), c.int_type, c.direction,
+            "" if c.talk_seconds is None else round(c.talk_seconds),
+            c.segments, "full" if c.covered else "partial", c.n_sess, c.banker_min, c.n_ops,
+            c.n_bankers, int(c.has_execute), int(c.has_branch), int(c.has_center),
+            "" if c.resp_hours is None else round(c.resp_hours, 2), c.first_move or "")])
+    return "\ufeff" + out.getvalue()
+
+
+def render_sessions_csv(sa: SessionAnalysis) -> str:
+    """One row per banker session (ATLR_SESS2)."""
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\r\n")
+    w.writerow(["story_no", "session_no", "start", "end", "minutes", "banker", "unit",
+                "unit_class", "kind", "peek", "operations", "contact_no", "after_last_contact",
+                "atlas_coverage", "operations_text"])
+    for x in sa.sessions:
+        w.writerow([_csv_cell(v) for v in (
+            x.story_no, x.no, x.start.isoformat(" "), x.end.isoformat(" "), x.minutes, x.banker,
+            x.unit_code, x.unit_class, x.kind, int(x.peek), x.n_ops,
+            "" if x.contact_n is None else x.contact_n, int(x.after_last_contact),
+            "full" if x.covered else "partial", x.ops_txt)])
+    return "\ufeff" + out.getvalue()
+
+
+def render_codes_csv(sa: SessionAnalysis) -> str:
+    """Every operation code seen, with its category (ATLR_CODECAT)."""
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\r\n")
+    w.writerow(["category", "code", "description", "rows", "stories"])
+    for r in sa.codecat:
+        w.writerow([_csv_cell(v) for v in (r["category"], r["code"], r["description"],
+                                           r["rows"], r["stories"])])
+    return "\ufeff" + out.getvalue()
+
+
+def render_json(a: JourneyAnalysis, opinion: Opinion, sa: SessionAnalysis | None = None) -> str:
     data = a.model_dump(mode="json", exclude={"stories"})
     data["version"] = __version__
     data["findings"] = [{"key": f.key, "severity": f.severity} for f in opinion.findings]
+    if sa is not None:
+        data["sessions"] = sa.model_dump(mode="json", exclude={"contacts", "sessions", "stories"})
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
@@ -642,11 +737,17 @@ def _journey_quality(config: Config, facts: list[StoryFacts], tax: Taxonomy):  #
     return journey_quality(facts, config.paths.output_dir, tax, names)
 
 
-def build_journey_report(config: Config, dataset_id: str | None = None, *,
-                         with_text: bool = True, name: str | None = None,
-                         title: str | None = None) -> JourneyReport:
-    stem = report_name(name)
-    ds_id = resolve_dataset_id(config, dataset_id)
+def session_analysis_of(config: Config, dataset: JourneyDataset, a: JourneyAnalysis,
+                        facts: list[StoryFacts], tax: Taxonomy, units: Units) -> SessionAnalysis:
+    return analyse_sessions(
+        dataset, [f.timeline for f in facts], units,
+        status_of={s.story_key: s.status for s in a.stories},
+        topic_of={s.story_key: s.topic for s in a.stories}, topic_label=tax.topic_label,
+        min_rate_n=config.journey.min_rate_n, min_firm_n=config.journey.min_firm_n,
+        top_units=config.journey.atlas.top_units, cases=config.journey.atlas.cases)
+
+
+def _analyse(config: Config, ds_id: str):  # noqa: ANN202
     dataset = load_dataset(config, ds_id)
     content = load_content(config, ds_id)
     tax = load_taxonomy(config.journey.taxonomy)
@@ -658,6 +759,18 @@ def build_journey_report(config: Config, dataset_id: str | None = None, *,
         verdicts=content.verdicts if content else None,
         settings=settings_of(config), min_rate_n=config.journey.min_rate_n,
         min_firm_n=config.journey.min_firm_n)
+    return dataset, content, tax, units, analysis, facts
+
+
+def build_journey_report(config: Config, dataset_id: str | None = None, *,
+                         with_text: bool = True, name: str | None = None,
+                         title: str | None = None, level: str = "all") -> JourneyReport:
+    if level not in LEVELS:
+        raise ValueError(f"level: one of {', '.join(LEVELS)}")
+    stem = report_name(name)
+    ds_id = resolve_dataset_id(config, dataset_id)
+    dataset, content, tax, units, analysis, facts = _analyse(config, ds_id)
+    sa = session_analysis_of(config, dataset, analysis, facts, tax, units)
     quality = _journey_quality(config, facts, tax)
     opinion = build_opinion(analysis, tax, quality)
     reports = config.paths.output_dir / "reports"
@@ -665,15 +778,25 @@ def build_journey_report(config: Config, dataset_id: str | None = None, *,
     call_reports = {p.stem for p in calls_dir.glob("*.html")} if calls_dir.is_dir() else set()
     html = render_html(dataset, analysis, facts, opinion, tax, units, content,
                        with_text=with_text, title=title, call_reports=call_reports,
-                       quality=quality, min_rate_n=config.journey.min_rate_n)
+                       quality=quality, min_rate_n=config.journey.min_rate_n, sa=sa,
+                       level=level)
     paths = JourneyReport(html=reports / f"{stem}.html",
                           stories_csv=reports / f"{stem}_stories.csv",
                           returns_csv=reports / f"{stem}_returns.csv",
-                          json=reports / f"{stem}.json", analysis=analysis, opinion=opinion)
+                          json=reports / f"{stem}.json", analysis=analysis, opinion=opinion,
+                          contacts_csv=reports / f"{stem}_contacts.csv",
+                          sessions_csv=reports / f"{stem}_sessions.csv" if sa.sessions else None,
+                          codes_csv=reports / f"{stem}_codes.csv" if sa.sessions else None,
+                          sessions=sa)
     atomic_write_text(paths.html, html)
-    for path, text in ((paths.stories_csv, render_stories_csv(analysis, tax)),
-                       (paths.returns_csv, render_returns_csv(facts)),
-                       (paths.json, render_json(analysis, opinion))):
+    exports = [(paths.stories_csv, render_stories_csv(analysis, tax)),
+               (paths.returns_csv, render_returns_csv(facts)),
+               (paths.contacts_csv, render_contacts_csv(sa)),
+               (paths.json, render_json(analysis, opinion, sa))]
+    if paths.sessions_csv and paths.codes_csv:
+        exports += [(paths.sessions_csv, render_sessions_csv(sa)),
+                    (paths.codes_csv, render_codes_csv(sa))]
+    for path, text in exports:
         try:
             atomic_write_text(path, text)
         except PermissionError:
@@ -685,3 +808,89 @@ def build_journey_report(config: Config, dataset_id: str | None = None, *,
     logger.info("journey report: %d stories, %d contacts -> %s", len(analysis.stories),
                 sum(s.contacts for s in analysis.stories), paths.html.name)
     return paths
+
+
+# -- one contact ----------------------------------------------------------------------
+
+OUTCOME_CARD_HE = {"resolved": "נפתר", "partially_resolved": "נפתר חלקית",
+                   "not_resolved": "לא נפתר", "info_only": "מסירת מידע בלבד", "unknown": "לא ידוע"}
+RETOLD_HE = {"yes": "כן", "partial": "חלקית", "no": "לא", "first_contact": "פנייה ראשונה",
+             "unknown": "לא ידוע"}
+
+
+def contact_report_name(story_no: int, n: int) -> str:
+    return f"{DEFAULT_NAME}-call-{story_no:03d}-{n}"
+
+
+def render_contact_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFacts],
+                        sa: SessionAnalysis, tax: Taxonomy, content: ContentLayer | None,
+                        story_no: int, n: int, *, with_text: bool = True,
+                        call_reports: set[str] | None = None,
+                        generated_at: datetime | None = None) -> str:
+    """One contact in three layers (ATL_R04): the contact table, what was said,
+    and what the bankers did in Atlas - with the story around it."""
+    contact = next((c for c in sa.contacts if c.story_no == story_no and c.n == n), None)
+    if contact is None:
+        raise ValueError(f"no contact {n} in story {story_no}")
+    fact = next(f for f in facts if f.timeline.story.story_no == story_no)
+    tl_contact = fact.timeline.contacts[n - 1]
+    iid = contact.interaction_id
+    j = fact.judgements.get(iid)
+    card = content.cards.get(iid) if content else None
+    ops_of = {s.session_id: s.ops for s in fact.timeline.sessions}
+    view = sv.contact_page(sa, dataset, contact, ops_of=ops_of)
+    cat = shown_category(j) if j else None
+    quote = ""
+    if with_text and j is not None and j.quotes:
+        quote = _prose(j.quotes[0].quote, MAX_QUOTE)
+    elif with_text and card is not None:
+        ev = card.retold_ev or card.outcome_ev or card.prior_ev
+        quote = _prose(ev.quote, MAX_QUOTE) if ev else ""
+    said = {
+        "category": _cat_label(tax, cat) if cat else "פנייה ראשונה",
+        "category_cls": _cat_cls(cat),
+        "objective": OBJECTIVE_HE.get(j.objective_class, "") if j else "",
+        "decided": DECIDED_HE.get(j.decided_by, "") if j else "",
+        "basis": BASIS_HE.get(j.basis, "") if j else "",
+        "reason": _prose(j.reason_he) if (j and with_text) else "",
+        "quote": quote,
+        "topic": tax.topic_label(card.topic) if card else "",
+        "issue": _prose(card.issue_he) if (card and with_text) else "",
+        "request": _prose(card.customer_request_he) if (card and with_text) else "",
+        "outcome": OUTCOME_CARD_HE.get(card.outcome, "") if card else "",
+        "retold": RETOLD_HE.get(card.retold, "") if card else "",
+        "promises": [{"text": f"הבטחה {PROMISE_HE.get(p.kind, p.kind)}: {OUTCOME_HE[p.outcome]}",
+                      "cls": {"kept": "ok", "broken": "bad"}.get(p.outcome, "muted")}
+                     for p in fact.promises if p.made_in == iid],
+        "read": card is not None,
+    }
+    call_id = tl_contact.interaction.call_id
+    generated = (generated_at or datetime.now(UTC)).astimezone()
+    env = jinja_env()
+    env.filters["rich"] = _rich
+    return env.get_template("journey_contact.html.j2").render(
+        version=__version__, title=f"{_story_label(story_no)} · פנייה {n}",
+        story_label=_story_label(story_no), n=n, n_contacts=len(fact.timeline.contacts),
+        at=_dt(contact.at), ref=iid[:16], said=said, atlas=view,
+        has_atlas=bool(dataset.atlas_sessions),
+        coverage=COVERAGE_HE.get(fact.timeline.story.atlas_coverage, ""),
+        report=(f"calls/{call_id}.html" if call_id and call_id in (call_reports or set())
+                else ""),
+        with_text=with_text, generated_at=generated.strftime("%d.%m.%Y %H:%M"),
+        footer=_footer(dataset, content, generated),
+        demo=dataset.source.startswith("synthetic"))
+
+
+def build_contact_report(config: Config, dataset_id: str | None, story_no: int, n: int, *,
+                         with_text: bool = True) -> Path:
+    ds_id = resolve_dataset_id(config, dataset_id)
+    dataset, content, tax, units, analysis, facts = _analyse(config, ds_id)
+    sa = session_analysis_of(config, dataset, analysis, facts, tax, units)
+    reports = config.paths.output_dir / "reports"
+    calls_dir = reports / "calls"
+    call_reports = {p.stem for p in calls_dir.glob("*.html")} if calls_dir.is_dir() else set()
+    html = render_contact_html(dataset, analysis, facts, sa, tax, content, story_no, n,
+                               with_text=with_text, call_reports=call_reports)
+    path = reports / f"{contact_report_name(story_no, n)}.html"
+    atomic_write_text(path, html)
+    return path
