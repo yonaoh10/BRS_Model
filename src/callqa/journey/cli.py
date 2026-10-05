@@ -63,14 +63,24 @@ def cmd_journey_import(args: argparse.Namespace) -> int:
 
     config = _config(args)
     redact = config.journey.redact_messages
+    if not (args.xlsx or args.contract or args.audio):
+        print("import: give --xlsx, --contract, or --audio (recordings alone)", file=sys.stderr)
+        return EXIT_FAILED
     try:
         if args.xlsx:
             from callqa.journey.importers.workbook import import_workbook
             built = import_workbook(args.xlsx, audio=args.audio, redact_messages=redact)
-        else:
+        elif args.contract:
             from callqa.journey.importers.contract import import_contract
             built = import_contract(args.contract, audio=args.audio, redact_messages=redact,
                                     atlas=bool(args.atlas))
+        else:
+            from callqa.journey.importers.audio_only import import_audio_only
+            built = import_audio_only(args.audio)
+            if args.atlas:
+                print("import: a recordings-only batch has no accounts to tie Atlas rows to; "
+                      "--atlas is ignored", file=sys.stderr)
+                args.atlas = None
         if args.atlas:
             from callqa.journey.importers.manifest import rules_from_manifest
             from callqa.journey.sessions import rules_from_config
@@ -474,12 +484,15 @@ def register(sub: argparse._SubParsersAction, add_common) -> None:
                                              "messages and banker actions")
     jsub = journey.add_subparsers(dest="journey_command", required=True)
 
-    p = jsub.add_parser("import", help="read a batch into a journey dataset")
-    src = p.add_mutually_exclusive_group(required=True)
+    p = jsub.add_parser("import", help="read a batch into a journey dataset: a handoff "
+                                       "workbook, a contract folder, or recordings alone")
+    src = p.add_mutually_exclusive_group(required=False)
     src.add_argument("--xlsx", type=Path, help="the bank's handoff workbook (three sheets)")
     src.add_argument("--contract", type=Path,
                      help="a folder in the journey contract (interactions.csv, ...)")
-    p.add_argument("--audio", type=Path, default=None, help="a folder or ZIP of the recordings")
+    p.add_argument("--audio", type=Path, default=None,
+                   help="a folder or ZIP of the recordings; alone (no --xlsx / --contract) it "
+                        "is a recordings-only batch: one single-contact story per call")
     p.add_argument("--atlas", type=Path, default=None,
                    help="the Atlas tables: a folder of CSV exports or one workbook")
     p.add_argument("--dry-run", action="store_true", help="count and check only; write nothing")

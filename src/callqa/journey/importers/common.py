@@ -6,6 +6,7 @@ import hashlib
 import re
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from callqa.ingestion import CALL_ID_RE, _digest, _looks_like_an_identifier, sanitize_call_id
@@ -96,6 +97,19 @@ class AudioSource:
             with zipfile.ZipFile(self.path) as zf:
                 return zf.read(member)
         return (self.path / member).read_bytes()
+
+    def modified_at(self, member: str) -> datetime | None:
+        """When the file was last written, as the file system or the ZIP
+        records it (local time, no zone). The only clock a bare recording
+        carries - the NICE file holds no absolute time - so an audio-only
+        batch dates its calls by it, and says so."""
+        try:
+            if self.is_zip:
+                with zipfile.ZipFile(self.path) as zf:
+                    return datetime(*zf.getinfo(member).date_time)
+            return datetime.fromtimestamp((self.path / member).stat().st_mtime)
+        except (KeyError, OSError, ValueError):
+            return None
 
 
 def dataset_id(created: str, parts: list[str]) -> str:

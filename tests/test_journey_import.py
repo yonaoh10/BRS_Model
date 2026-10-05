@@ -438,6 +438,32 @@ def test_contract_v2_carries_the_centre_facts_chats_message_details_and_units(tm
     assert units.kind("555", None) == "unknown"            # listed nowhere: not a branch
 
 
+def test_recordings_alone_are_a_batch_of_single_contact_stories(tmp_path, monkeypatch):
+    from callqa.journey.analysis import analyse
+    from callqa.journey.importers.audio_only import import_audio_only
+    from callqa.journey.vocab import load_taxonomy, load_units
+    _xlsx, zip_path = build_workbook(tmp_path / "in", audio=True)
+    ds = import_audio_only(zip_path).dataset
+    assert ds.report.ok and ds.manifest.tier == "T0" and ds.manifest.time_basis == "file_mtime"
+    assert ds.contract_version == 2
+    # every distinct call key in the ZIP is one story of one contact
+    from callqa.journey.importers.common import segment_parts
+    with zipfile.ZipFile(zip_path) as zf:
+        keys = {segment_parts(n.rsplit("/", 1)[-1])[0] for n in zf.namelist()}
+    assert ds.report.counts.stories == len(keys) and ds.report.counts.returns == 0
+    assert all(i.channel == "call" and i.recorded for i in ds.interactions)
+    assert all(c.complete for c in ds.calls.values())
+    for raw in RAW_ACCOUNT_NUMBERS:
+        assert raw not in ds.model_dump_json()
+    analysis, _facts = analyse(ds, taxonomy=load_taxonomy(), units=load_units())
+    assert analysis.metrics["returns"].value == 0
+    # the CLI accepts it without a workbook, and refuses an import with no source at all
+    monkeypatch.setenv("CALLQA_PATHS__OUTPUT_DIR", str(tmp_path / "out"))
+    from callqa.cli import main
+    assert main(["journey", "import", "--audio", str(zip_path), "--dry-run"]) == 0
+    assert main(["journey", "import", "--dry-run"]) != 0
+
+
 def test_contract_missing_required_column_is_an_error(tmp_path):
     folder = tmp_path / "c"
     folder.mkdir()
