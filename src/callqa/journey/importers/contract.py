@@ -33,7 +33,14 @@ from callqa.journey.importers.build import (
 )
 from callqa.journey.importers.common import AudioSource
 from callqa.journey.models import ImportReport
-from callqa.journey.timeparse import TimeParseError, parse_dt, try_parse_dt
+from callqa.journey.timeparse import (
+    TimeParseError,
+    detect_day_first,
+    has_slashed_dates,
+    parse_dt,
+    try_parse_dt,
+    tz_suffix,
+)
 from callqa.resources import load_yaml
 
 SOURCE = "journey-contract-v1"
@@ -89,14 +96,39 @@ def _split_ref(ref: str) -> tuple[str, str]:
     return "", ref.strip()
 
 
-def read_contract_rows(folder: Path, report: ImportReport
+def _date_order(rows: list[dict[str, str]], column: str, name: str, report: ImportReport,
+                declared: bool | None) -> bool:
+    """Day-first or month-first for one column of one file. The batch may
+    declare it (manifest date_order); otherwise the column decides when any
+    value has a day above 12, and a column of slashed dates that nothing
+    decides is refused - a US file read day-first swaps months and days
+    silently, which is worse than stopping."""
+    values = [r.get(column, "") for r in rows]
+    if declared is not None:
+        return declared
+    detected = detect_day_first(values)
+    if detected is None and has_slashed_dates(values):
+        report.add("date_order_ambiguous", "error",
+                   f"{name}.{column}: dd/mm or mm/dd cannot be told from the values; "
+                   "set date_order in manifest.yaml (day_first | month_first)")
+    return True if detected is None else detected
+
+
+def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | None = None
                        ) -> tuple[list[RawInteraction], list[RawSegment], list[RawMessage]]:
     interactions: list[RawInteraction] = []
     bad = 0
-    for n, row in enumerate(_rows(folder, "interactions.csv", report), start=2):
+    ambiguous: list[str] = []
+    tz = 0
+    rows = _rows(folder, "interactions.csv", report)
+    order = _date_order(rows, "started_at", "interactions.csv", report, day_first)
+    for n, row in enumerate(rows, start=2):
+        tz += tz_suffix(row.get("started_at"))
         try:
-            at = parse_dt(row["started_at"])
-        except TimeParseError:
+            at = parse_dt(row["started_at"], day_first=order)
+        except TimeParseError as exc:
+            if str(exc).startswith("ambiguous_numeric_date"):
+                ambiguous.append(row["started_at"][:20])
             bad += 1
             continue
         channel = row.get("channel", "").lower()
@@ -118,32 +150,53 @@ def read_contract_rows(folder: Path, report: ImportReport
             talk_seconds=talk, banker_code=row.get("banker_code") or None,
             unit_code=row.get("unit_code") or None,
             recorded=row.get("recorded", "").lower() in _TRUE if row.get("recorded") else None))
+    if ambiguous:
+        report.add("ambiguous_numeric_date", "error",
+                   "interactions.csv: started_at holds a number that could be an Excel day "
+                   "count or SAS days since 1960; export a date, or SAS seconds",
+                   count=len(ambiguous), examples=ambiguous[:5])
     if bad:
         report.add("bad_time", "error", "interactions whose started_at could not be read",
                    count=bad)
+    if tz:
+        report.add("tz_stripped", "info",
+                   "timestamps carried a zone suffix; the clock reading was kept as the "
+                   "bank's local time and the zone dropped", count=tz)
     for i in interactions:
         if i.direction not in ("inbound", "outbound"):
             i.direction = {"i": "inbound", "o": "outbound"}.get(i.direction, "unknown")
 
     segments: list[RawSegment] = []
-    for row in _rows(folder, "call_segments.csv", report):
+    rows = _rows(folder, "call_segments.csv", report)
+    order = _date_order(rows, "recorded_at", "call_segments.csv", report, day_first)
+    for row in rows:
         seq = None
         try:
             seq = int(float(row["seq"])) if row.get("seq") else None
         except ValueError:
             pass
         segments.append(RawSegment(call_key=row["call_key"].lower(), file_name=row["file_name"],
-                                   seq=seq, recorded_at=try_parse_dt(row.get("recorded_at"))))
+                                   seq=seq,
+                                   recorded_at=try_parse_dt(row.get("recorded_at"),
+                                                            day_first=order)))
 
     messages: list[RawMessage] = []
-    for row in _rows(folder, "messages.csv", report):
-        at = try_parse_dt(row.get("sent_at"))
+    rows = _rows(folder, "messages.csv", report)
+    order = _date_order(rows, "sent_at", "messages.csv", report, day_first)
+    bad_msg = 0
+    for row in rows:
+        at = try_parse_dt(row.get("sent_at"), day_first=order)
         if at is None:
+            bad_msg += 1
             continue
         messages.append(RawMessage(correspondence_id=row["correspondence_id"].upper(),
                                    message_id=row["message_id"], at=at,
                                    direction=row.get("direction", ""),
                                    subject=row.get("subject", ""), body=row.get("body", "")))
+    if bad_msg:
+        report.add("bad_message_time", "warning",
+                   "messages whose sent_at could not be read (left out of the threads)",
+                   count=bad_msg)
     return interactions, segments, messages
 
 

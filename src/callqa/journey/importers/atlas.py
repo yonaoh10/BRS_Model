@@ -216,6 +216,22 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
         report.add("atlas_rows_unmapped", "warning",
                    "Atlas log rows of accounts that could not be tied to a story, "
                    "or with no time", count=orphan_rows)
+    # The export is in time order within a banker's run on one account; a row
+    # earlier than the one before it (the clock-change night, or a re-sorted
+    # export) is sorted into place by the session rules, but said out loud
+    # rather than hidden - it moves a row between sessions.
+    last_at: dict[tuple[str, str], datetime] = {}
+    backwards = 0
+    for r in rows:
+        key = (r.account, r.banker)
+        if key in last_at and r.at < last_at[key]:
+            backwards += 1
+        last_at[key] = r.at
+    if backwards:
+        report.add("atlas_rows_non_monotonic", "warning",
+                   "Atlas log rows earlier than the row before them in the export (same "
+                   "account and banker); sorted by time before the sessions were cut",
+                   count=backwards)
     built = build_sessions(rows, gap_min=rules.gap_min, start_op=rules.start_op)
 
     def op_of(r: AtlasRow) -> AtlasOp:

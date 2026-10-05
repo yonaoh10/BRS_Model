@@ -17,7 +17,9 @@ from callqa.journey.pseudo import account_key, normalise_account
 from callqa.journey.timeparse import (
     TimeParseError,
     add_business_days,
+    detect_day_first,
     parse_dt,
+    tz_suffix,
 )
 from callqa.journey.xlsx import XlsxError, column_index, read_xlsx, write_xlsx
 from tests.journey_fixtures import RAW_ACCOUNT_NUMBERS, build_atlas, build_workbook
@@ -52,6 +54,35 @@ def test_parse_dt_does_not_depend_on_the_locale(monkeypatch):
 def test_parse_dt_rejects(bad):
     with pytest.raises(TimeParseError):
         parse_dt(bad)
+
+
+def test_eight_digits_are_a_date_not_sas_seconds():
+    assert parse_dt("20260802") == datetime(2026, 8, 2)
+    with pytest.raises(TimeParseError, match="bad_date"):
+        parse_dt("20261340")
+
+
+def test_a_small_numeric_string_is_refused_as_ambiguous_but_a_typed_cell_is_not():
+    # 24300 is 1966-07-12 as an Excel day count and 2026-07-12 as SAS days
+    with pytest.raises(TimeParseError, match="ambiguous_numeric_date"):
+        parse_dt("24300")
+    assert parse_dt(24300) == datetime(1966, 7, 12)     # a typed xlsx cell: Excel
+    assert parse_dt("2101305874").year == 2026          # SAS seconds as text
+
+
+def test_a_zone_suffix_is_dropped_and_the_clock_kept():
+    assert parse_dt("2026-08-03T10:00:00+03:00") == datetime(2026, 8, 3, 10, 0)
+    assert parse_dt("2026-08-03T10:00:00Z") == datetime(2026, 8, 3, 10, 0)
+    assert tz_suffix("2026-08-03T10:00:00+03:00") and not tz_suffix("2026-08-03 10:00:00")
+
+
+def test_month_first_dates_are_read_when_the_column_says_so():
+    assert parse_dt("08/02/2026 16:04", day_first=False) == datetime(2026, 8, 2, 16, 4)
+    assert detect_day_first(["08/02/2026", "08/15/2026"]) is False
+    assert detect_day_first(["02/08/2026", "15/08/2026"]) is True
+    assert detect_day_first(["02/08/2026", "03/09/2026"]) is None      # nothing decides
+    assert detect_day_first(["2026-08-02", datetime(2026, 8, 2)]) is None
+    assert detect_day_first(["15/08/2026", "08/15/2026"]) is None     # inconsistent
 
 
 def test_business_days_skip_friday_and_saturday():
@@ -217,6 +248,48 @@ def test_contract_import_drops_unknown_columns(tmp_path):
     assert "123456782" not in ds.model_dump_json()
     assert [s.file_name for s in ds.calls["abc123abc123"].segments] == ["a.wav", "b.wav"]
     assert sum(i.answer == "abandoned" for i in ds.interactions) == 1
+
+
+def _contract(tmp_path, interactions: str, messages: str | None = None):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "interactions.csv").write_text(
+        "interaction_id,account_ref,started_at,channel,direction\n" + interactions,
+        encoding="utf-8")
+    if messages is not None:
+        (folder / "messages.csv").write_text(
+            "correspondence_id,message_id,sent_at,direction,body\n" + messages, encoding="utf-8")
+    return import_contract(folder).dataset
+
+
+def _codes(ds) -> dict[str, int]:
+    return {i.code: i.count for i in ds.report.issues}
+
+
+def test_contract_month_first_dates_are_read_when_the_file_shows_it(tmp_path):
+    ds = _contract(tmp_path, "i1,17/335145,08/15/2026 10:00,call,inbound\n"
+                             "i2,17/335145,08/02/2026 12:00,call,inbound\n")
+    assert ds.report.ok and sorted(i.at.month for i in ds.interactions) == [8, 8]
+    assert {i.at.day for i in ds.interactions} == {2, 15}
+
+
+def test_contract_refuses_slashed_dates_nothing_decides(tmp_path):
+    ds = _contract(tmp_path, "i1,17/335145,02/08/2026 10:00,call,inbound\n"
+                             "i2,17/335145,03/09/2026 12:00,call,inbound\n")
+    assert not ds.report.ok and "date_order_ambiguous" in _codes(ds)
+
+
+def test_contract_counts_zone_suffixes_ambiguous_numbers_and_bad_message_times(tmp_path):
+    ds = _contract(tmp_path,
+                   "i1,17/335145,2026-08-03T10:00:00+03:00,call,inbound\n"
+                   "i2,17/335145,24300,call,inbound\n",
+                   "COR-1,UM-1,2026-08-03T11:00:00Z,inbound,hello\n"
+                   "COR-1,UM-2,not a time,outbound,world\n")
+    codes = _codes(ds)
+    assert codes["tz_stripped"] == 1 and codes["ambiguous_numeric_date"] == 1
+    assert codes["bad_time"] == 1 and codes["bad_message_time"] == 1
+    assert not ds.report.ok                          # the ambiguous number is an error
+    assert [i.at for i in ds.interactions] == [datetime(2026, 8, 3, 10, 0)]
 
 
 def test_contract_missing_required_column_is_an_error(tmp_path):
