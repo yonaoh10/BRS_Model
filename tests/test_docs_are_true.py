@@ -35,6 +35,11 @@ _ROOTS = ("", "src/callqa", "scripts", "tests", "dashboard", "config", "docs", "
 _RUNTIME_ARTIFACTS = {
     "metadata.csv", "human_ratings.csv", "MODELS_MANIFEST.json",
     "index.html", "calibration.html", "calibration.json", "licences.md",
+    # the files of a journey batch folder (the contract the bank exports)
+    # and of the private folder beside a dataset: inputs and outputs, not
+    # repository files
+    "manifest.yaml", "holidays.yaml", "units.csv", "export_manifest.csv", "checks.csv",
+    "interactions.csv", "call_segments.csv", "messages.csv", "bankers.csv", "accounts.csv",
 }
 
 _CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")

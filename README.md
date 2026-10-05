@@ -292,7 +292,7 @@ C0001,B17,C0001.wav,L,דנה כהן
 .venv\Scripts\python -m callqa journey process --until 07:00
 ```
 
-- **`import`** קורא את קובץ המסירה, את ההקלטות (כולל קובצי NICE ‏`.nmf`) ואת ייצוא האטלס, ומדפיס ספירות לבדיקה. `--dry-run` רק בודק.
+- **`import`** קורא את קובץ המסירה, את ההקלטות (כולל קובצי NICE ‏`.nmf`) ואת ייצוא האטלס, ומדפיס ספירות לבדיקה. `--dry-run` רק בודק. אפשר גם `--audio` לבדו (הקלטות בלבד: כל שיחה סיפור של פנייה אחת), או `--contract <תיקייה>` עם `manifest.yaml` שאומר אילו שכבות יש באצווה; הדוח נפתח בטבלת המקורות שלו ואומר מה שכבה חסרה לוקחת ממנו. הפירוט ב־`docs/journey_report_he.md`.
 - **`estimate`** מודד על המחשב הזה וחוזה כמה זמן תיקח ההרצה.
 - **`process`** מתמלל את מה שעוד לא תומלל, קורא את השיחות וההתכתבויות, ומפיק את הדוח. הוא עוצר בצורה מסודרת בשעה שנקבעה, וההרצה הבאה ממשיכה מאותה נקודה.
 
@@ -693,7 +693,7 @@ A tool for **why customers come back to the bank**. It takes a batch of customer
 .venv\Scripts\python -m callqa journey process --until 07:00
 ```
 
-- **`import`** reads the handoff workbook, the recordings (NICE `.nmf` included) and the Atlas exports, and prints counts to check. `--dry-run` only checks.
+- **`import`** reads the handoff workbook, the recordings (NICE `.nmf` included) and the Atlas exports, and prints counts to check. `--dry-run` only checks. `--audio` alone is a recordings-only batch (every call a single-contact story); `--contract <folder>` takes a `manifest.yaml` that declares which layers the batch carries, and the report opens with its sources table and says what a missing layer takes away. Details (Hebrew) in `docs/journey_report_he.md`.
 - **`estimate`** measures on this machine and predicts how long the run will take.
 - **`process`** transcribes what is not transcribed yet, reads the calls and messages, and writes the report. It stops cleanly at the set time, and the next run continues from there.
 

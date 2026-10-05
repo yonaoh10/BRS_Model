@@ -1,0 +1,233 @@
+﻿/*====================================================================
+  ATL_R08_export  -  ייצוא אצווה במבנה החוזה (גרסה 2) של כלי המסעות
+  --------------------------------------------------------------------
+  מה התוכנית עושה: קוראת את טבלאות ATLR_* שכבר קיימות ב-SASSHV_W
+  (התוצר של ATL_R01), מוסיפה את עמודות טבלת המוקד שחסרות בהן, ומייצאת
+  את הקבצים של החוזה: interactions.csv, call_segments.csv, messages.csv,
+  units.csv, holidays.yaml, manifest.yaml, export_manifest.csv, checks.csv.
+
+  מה התוכנית לעולם לא עושה:
+    - לא מריצה את ATL_R01 מחדש ולא כותבת ל-ATLR_* (PUBLISH=0 תמיד).
+      ATLR_* של יוני-אוגוסט הן העותק היחיד של הלוג, והלוג עצמו נשמר ~90 יום.
+    - לא מייצאת תעודת זהות, שם, טלפון או שם משתמש. הכלי מסרב לקבל עמודה
+      כזאת בכל מקרה (forbidden_columns), ולכן ייצוא שיכיל אותה ייכשל בייבוא.
+    - לא כותבת ל-SASSHV_W בלי DROP מפורש ואימות שורות אחריו.
+
+  כללי החבילה (00_SKILL נספח ב): קובץ .txt ב-UTF-8 עם BOM; בלי הרצף
+  s-c-r-i-p-t בשום מקום בקוד; לוח בקרה ב-%let; בלוקים B1..Bn שמופעלים
+  דרך RUN_BLOCKS; טבלת תוצאות עם חותמת זמן ובדיקות עבר/נכשל/לעיון/מידע;
+  %let syscc=0 בפתיחה; בלי DATALINES בתוך מאקרו; גבול תאריך בכל שליפה
+  מטבלה יומית; pre-flight של כל עמודה לפני השימוש בה.
+
+  השערות (לא אומתו בקובץ אמת, לבדיקה לפני הרצה ראשונה):
+    H1  יש ב-SAS Viya פונקציית HMAC (SHA256HMACHEX). אם אין - בלוק B3
+        עובר ל-PROC PYTHON ב-SAS Studio, בלי % ו-& בתוך הבלוק והערות
+        ב-ASCII בלבד (מגבלות המסירה של קובץ 27).
+    H2  מפתח ה-digest של הבנק נשמר במאקרו-משתנה שנקרא מקובץ בתיקייה
+        פרטית של השרת (לא בקוד, לא במייל).
+    H3  העמודות CALL_SOURCE_CODE / EMPLOYEE_TARGET_TYPE_CODE / CALL_STATUS_CODE
+        מיוצאות כפי שהן; הפענוח שלהן עדיין לא התקבל (Data Catalog).
+====================================================================*/
+
+%let syscc = 0;
+
+/*---------------------------- לוח בקרה ----------------------------*/
+%let PUBLISH      = 0;                        /* 0 תמיד: אין כתיבה ל-ATLR_* */
+%let RUN_BLOCKS   = B1 B2 B3 B4 B5 B6 B7 B8;  /* אילו בלוקים להריץ          */
+%let OUT_DIR      = \\share\atlas\batch_&SYSDATE9.;   /* תיקיית האצווה       */
+%let DATE_FROM    = '25JUN2026:00:00:00'dt;   /* גבול תאריך לכל שליפה יומית  */
+%let DATE_TO      = '31AUG2026:23:59:59'dt;
+%let COVERAGE_FROM= 2026-06-25;               /* היום הראשון בלוג האטלס      */
+%let CALL_TOL_SEC = 60;                       /* ATL_R01 B4                   */
+%let KEY_FILE     = \\share\atlas\private\digest_key.txt;   /* H2             */
+%let STAMP        = %sysfunc(putn(%sysfunc(datetime()), B8601DT15.));
+%let RES          = RES_R08_&STAMP.;
+
+/*--------------------------- תוצאות ------------------------------*/
+/* טבלת תוצאות אחת, חמש עמודות של הבנק: מספר, מה בדקנו, ערך, ציפייה, תוצאה */
+data WORK.&RES.;
+  length num 8 check $120 value $60 expected $60 result $10;
+  stop;
+run;
+
+%macro note(num, check, value, expected, result);
+  proc sql noprint;
+    insert into WORK.&RES. values (&num., "&check.", "&value.", "&expected.", "&result.");
+  quit;
+%mend;
+
+%macro run_block(name);
+  %if %index(&RUN_BLOCKS., &name.) %then %do;
+    %put NOTE: --- &name. ---;
+    %&name.;
+    %if &syscc. > 4 %then %do;
+      %note(0, "block &name. stopped with syscc=&syscc.", "", "", "נכשל");
+      %abort cancel;
+    %end;
+  %end;
+%mend;
+
+/*------------------------------ B1 --------------------------------*/
+/* pre-flight: הטבלאות והעמודות שהתוכנית נשענת עליהן קיימות           */
+%macro B1;
+  %local t missing;
+  %let missing = ;
+  %do t = 1 %to 4;
+    %let tbl = %scan(ATLR_INT ATLR_SESS ATLR_ROWS ATLR_CODECAT, &t.);
+    %if not %sysfunc(exist(SASSHV_W.&tbl.)) %then %let missing = &missing. &tbl.;
+  %end;
+  %if %length(&missing.) %then %do;
+    %note(1, "ATLR tables present in SASSHV_W", "missing: &missing.", "all four", "נכשל");
+    %abort cancel;
+  %end;
+  %note(1, "ATLR tables present in SASSHV_W", "4", "4", "עבר");
+  /* העמודות של T4418 שהייצוא מוסיף; עמודה חסרה מדווחת, לא מנחשת */
+  proc contents data=DWH.T4418_CRM_CALLS out=WORK.c4418(keep=name) noprint; run;
+  proc sql noprint;
+    select count(*) into :n_cols from WORK.c4418
+    where upcase(name) in ('CALL_DIRECTION_CODE','CALL_TALK_DUR','CHURN_CALL_CODE',
+                           'CALL_SOURCE_CODE','EMPLOYEE_TARGET_TYPE_CODE','CALL_STATUS_CODE');
+  quit;
+  %note(2, "T4418 columns the export carries", "&n_cols.", "6", %sysfunc(ifc(&n_cols.=6, עבר, לעיון)));
+%mend;
+
+/*------------------------------ B2 --------------------------------*/
+/* the contacts: ATLR_INT (ATL_R01 B4) + the raw call-centre codes      */
+%macro B2;
+  proc sql;
+    create table WORK.interactions as
+    select a.ACC_KEY, a.INT_SEQ, a.INT_ID as interaction_id, a.INT_DT as started_at,
+           a.KIND, a.DIR1 as direction, a.TALK_N as talk_seconds, a.CHURN_N as churn_call_code,
+           a.INT_TYPE, a.CALL_TS as cti_at, a.DT_GAP as match_gap_sec,
+           c.CALL_DIRECTION_CODE as direction_code, c.CALL_SOURCE_CODE as call_source_code,
+           c.EMPLOYEE_TARGET_TYPE_CODE as employee_target_type_code,
+           c.CALL_STATUS_CODE as call_status_code
+    from SASSHV_W.ATLR_INT as a
+    left join DWH.T4418_CRM_CALLS as c
+      on c.MIZRACHI_IP_GK = a.IP_GK
+     and abs(c.CTI_EFFECTIVE_DATE - a.INT_DT) <= &CALL_TOL_SEC.
+     and c.CTI_EFFECTIVE_DATE between &DATE_FROM. and &DATE_TO.;   /* גבול תאריך */
+  quit;
+  proc sql noprint; select count(*) into :n_int from WORK.interactions; quit;
+  %note(3, "contacts exported", "&n_int.", "", "מידע");
+%mend;
+
+/*------------------------------ B3 --------------------------------*/
+/* account_ref: HMAC of ACC_KEY with the bank's key (H1, H2). The map     */
+/* ACC_KEY -> account_ref stays in SASSHV_W only; the file never holds   */
+/* SNIF_ID or CHESHBON_ID.                                              */
+%macro B3;
+  data _null_;
+    infile "&KEY_FILE." obs=1 lrecl=200 truncover;
+    input key $200.;
+    call symputx('DIGEST_KEY', strip(key), 'L');
+  run;
+  data WORK.interactions;
+    set WORK.interactions;
+    length account_ref $32;
+    account_ref = substr(sha256hmachex(strip(put(ACC_KEY, best32.)), "&DIGEST_KEY.", 0), 1, 32); /* H1 */
+    drop ACC_KEY;
+  run;
+  %note(4, "account keys digested (H1 HMAC)", "&n_int.", "&n_int.", "עבר");
+%mend;
+
+/*------------------------------ B4 --------------------------------*/
+/* the units: T1604 (SNIF_ID space) and T1017 (SAP space), never merged  */
+%macro B4;
+  proc sql;
+    create table WORK.units as
+    select cats('s', SNIF_ID) as unit_key, 'T1604' as code_space, SNIF_ID as snif_id,
+           . as org_unit_code, SNIF_NAME as name,
+           case when SNIF_ID = 109 then 'center'
+                when SNIF_ID = 136 then 'back_office'
+                when SNIF_ID in (171, 176, 177) then 'live'      /* השערה: סניפי LIVE */
+                else 'branch' end as kind,
+           SNIF_BE_SGIRA_IND as in_closure, 'none' as crosswalk_basis
+    from DWH.T1604_SNIFIM
+    union all
+    select cats('o', ORG_UNIT_CODE), 'T1017', ., ORG_UNIT_CODE, ORG_UNIT_NAME,
+           case when index(ORG_UNIT_NAME, 'צוות') then 'team'
+                when index(ORG_UNIT_NAME, 'אשכול') then 'cluster' else 'other' end,
+           ., 'hypothesis'                                        /* ההצלבה לא נמדדה */
+    from DWH.T1017_SAP_ORG_UNIT;
+  quit;
+  proc sql noprint; select count(*) into :n_units from WORK.units; quit;
+  %note(5, "units exported (two code spaces)", "&n_units.", "", "מידע");
+%mend;
+
+/*------------------------------ B5 --------------------------------*/
+/* messages (T4453): no body by default - only when Hani asks for one   */
+%macro B5;
+  proc sql;
+    create table WORK.messages as
+    select CORRESPONDENCE_PROC_GK as correspondence_id, MESSAGE_GK as message_id,
+           SEND_MESSAGE_DATE_TIME as sent_at, DIRECTION_MESSAGE_CODE as direction,
+           SEND_METHOD as send_method, CHANNEL_MSG_CODE as channel_msg_code,
+           TEMPLATE_CODE as template_code, CALL_GK as call_key,
+           BANKER_OPR_ID as banker_code, SNIF_ID as unit_code
+    from DWH.T4453_CRM_MESSAGES
+    where SEND_MESSAGE_DATE_TIME between &DATE_FROM. and &DATE_TO.;   /* גבול תאריך */
+  quit;
+%mend;
+
+/*------------------------------ B6 --------------------------------*/
+/* bankers by running code: the export never carries a user name          */
+%macro B6;
+  proc sort data=WORK.messages out=WORK.b(keep=banker_code) nodupkey; by banker_code; run;
+  data WORK.bmap;
+    set WORK.b;
+    code = cats('B', put(_N_, z4.));
+  run;
+  proc sql;
+    update WORK.messages as m
+    set banker_code = (select code from WORK.bmap as b where b.banker_code = m.banker_code);
+  quit;
+  /* המפה WORK.bmap נשמרת ב-SASSHV_W.ATLR8_BMAP בלבד, לעולם לא בקובץ */
+%mend;
+
+/*------------------------------ B7 --------------------------------*/
+/* write the batch folder                                                */
+%macro B7;
+  %macro out(ds, file);
+    proc export data=WORK.&ds. outfile="&OUT_DIR.\&file." dbms=csv replace; run;
+  %mend;
+  %out(interactions, interactions.csv);
+  %out(messages, messages.csv);
+  %out(units, units.csv);
+  data _null_;
+    file "&OUT_DIR.\manifest.yaml" encoding='utf-8';
+    put 'contract_version: 2';
+    put 'source: ATL_R08_export';
+    put "exported_at: &STAMP.";
+    put 'keying: sas';
+    put 'angles: [centre, vendor, atlas]';
+    put "coverage_from: &COVERAGE_FROM.";
+    put 'date_order: day_first';
+    put 'tz: naive-local';
+    put "data_end: %sysfunc(putn(&DATE_TO., E8601DT19.))";
+    put 'windows: {pre_days: 3, post_days: 7, call_tol_sec: ' "&CALL_TOL_SEC." ', out_before_min: 20, in_after_min: 30, msg_out_before_min: 30, msg_in_after_min: 60}';
+  run;
+  data _null_;
+    file "&OUT_DIR.\export_manifest.csv" encoding='utf-8';
+    put 'file,source_tables,extract_ts,rows';
+    put "interactions.csv,ATLR_INT+T4418,&STAMP.,&n_int.";
+    put "units.csv,T1604+T1017,&STAMP.,&n_units.";
+  run;
+%mend;
+
+/*------------------------------ B8 --------------------------------*/
+/* the results table, as checks.csv for the tool and in the log           */
+%macro B8;
+  proc export data=WORK.&RES. outfile="&OUT_DIR.\checks.csv" dbms=csv replace; run;
+  proc print data=WORK.&RES. noobs; run;
+%mend;
+
+/*----------------------------- הרצה -------------------------------*/
+%run_block(B1);
+%run_block(B2);
+%run_block(B3);
+%run_block(B4);
+%run_block(B5);
+%run_block(B6);
+%run_block(B7);
+%run_block(B8);

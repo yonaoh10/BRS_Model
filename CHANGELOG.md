@@ -5,6 +5,68 @@ All notable changes to callqa are recorded here. The format follows
 semantic versioning: the CLI commands, exit codes, and on-disk artifact schemas
 are the public contract.
 
+## [2.0.0a1] — 2026-10-05
+
+The foundations of version 2 (milestone M0 of `docs/plans/v2_plan_he.md`):
+a batch that says what it carries, an import that checks it and refuses
+what must not be here, every share through one gate, and a report that
+states which of the bank's four angles it stands on.
+
+### Added
+- Contract v2: `manifest.yaml` (the layers the batch claims, its date
+  order, the first day its Atlas log holds, the bank's matching windows,
+  the last moment its sources cover), `holidays.yaml`, `units.csv` (units
+  in two code spaces, SNIF_ID and SAP ORG_UNIT_CODE, never merged),
+  `export_manifest.csv` (the exporter's row counts). `interactions.csv` may
+  carry the call-centre table's own columns raw; `channel` may be `chat`
+  or `whatsapp`; `messages.csv` may carry send method, channel code,
+  template and call key.
+- Tier T0: `journey import --audio <folder|zip>` with no contact list -
+  every call a single-contact story, dated by its file's modification
+  time, and said so.
+- Import gates with a code, a count and safe examples: `forbidden_columns`
+  (a column naming a person's identity fails the import),
+  `duplicate_contacts`, `declared_layer_missing`, `row_count_mismatch`,
+  `unknown_files`, `date_order_ambiguous`, `ambiguous_numeric_date`,
+  `tz_stripped`, `bad_message_time`, `atlas_join_beyond_tolerance`,
+  `atlas_boundary_rows`, `atlas_n_ops_differ`, `atlas_rows_non_monotonic`,
+  `atlas_units_unknown`, `banker_names_rejected`.
+- Bankers by running code at import: a value that already is one (B0001..)
+  is kept; any other value gets a code of its own series (B10001..), the
+  same across contacts, messages and Atlas, with the mapping only in
+  `private/bankers.csv`.
+- `Rate`: one object for every share (k of n, Wilson or cluster bootstrap,
+  the n >= 10 / < 30 gate), with the bank's "k מתוך n" wording.
+- The report opens with table 0.1, the sources of the batch, and prints
+  "cannot be computed: no Atlas export / the content stage did not run /
+  no call-centre table / no contact list" where a figure would be, never a
+  dash. Atlas figures appear as placeholder rows when the batch has none.
+- `RuleSettings.holidays` (config `journey.holidays` plus the batch's own
+  list): a promise due date skips bank holidays.
+- `scripts/tiers_demo.py`: the synthetic demo imported at tiers T0, T1, T3
+  and T5, each report's sources table checked. `docs/sas/ATL_R08_export.txt`:
+  the template of the SAS package that writes a contract-v2 batch from the
+  bank's tables (hypotheses marked).
+
+### Changed
+- An exported Atlas session whose log rows were not supplied is of kind
+  "unknown", not "open"; FIRST_OP and PEEK are read from the export.
+- Dates: a slashed-date column is read in the order its values show, and
+  refused when nothing decides it; a zone suffix is accepted and dropped;
+  eight digits are yyyymmdd; a small numeric string is refused as ambiguous.
+- `analyse()` no longer writes into the caller's settings; response time to
+  the next session is measured strictly after the contact's second.
+- A covered call with an unknown answer and no trace, and a branch visit,
+  have objective classes of their own instead of "no Atlas cover".
+- An empty Atlas folder is a warning (the batch is analysed without that
+  layer), no longer an error.
+- The CLI never prints a traceback: one sentence, exit code 2, the trace in
+  the log; a wrong dataset id is answered with what an id looks like;
+  `executive-report` checks its dates before creating anything.
+- With a units table, an Atlas unit code no table lists is "unit not
+  identified", not a branch; without one, the import says which codes it
+  assumed to be branches.
+
 ## [1.5.0] — 2026-09-24
 
 Two levels of analysis - the single contact and the banker session - built
