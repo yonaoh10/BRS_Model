@@ -2,6 +2,12 @@
 # Installed on top of requirements.txt by `scripts/install.py --server`.
 # All of these are imported lazily; the callqa package imports cleanly without them.
 faster-whisper==1.1.1
+# faster-whisper 1.1.1 declares av>=11 and still calls av.open(...,
+# metadata_errors="ignore"); PyAV 19.0.0 (2026-09-29) removed that argument,
+# so an unpinned install fails on every call at the ASR stage with
+# "open() got an unexpected keyword argument 'metadata_errors'". 18.1.0 is the
+# last release that accepts it and still ships Python 3.11 wheels.
+av==18.1.0
 silero-vad==6.2.1
 # 4.6.2, not 4.5.0: on Windows 4.5.0 imports pkg_resources at startup, which
 # current setuptools no longer ships - ASR failed on every call. 4.6.2 keeps
