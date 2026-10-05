@@ -398,6 +398,7 @@ TRANSFORMERS_OFFLINE=1
 - `docs/executive_report_he.md` — דוח המנהלים: מה כל חלק מראה, איך כל מספר מחושב ואיך לקרוא אותו.
 - `docs/journey_report_he.md` — מסעות לקוח ופניות חוזרות: ההרצה, הדוח, המתודולוגיה ובדיקת הדיוק.
 - `docs/MLOPS.md` — תפעול לאורך זמן: הערכה, ניטור שינויים, שחזור תוצאות.
+- `docs/plans/v2_plan_he.md` — תוכנית העבודה לגרסה 2: ארבע הזוויות (פניות, המוקד, אטלס, CRM), מדרגות הקלט, חוזה הנתונים, התיקונים ואבני הדרך.
 - `CHANGELOG.md` — מה השתנה בכל גרסה.
 
 </div>
@@ -798,4 +799,5 @@ and run `.venv\Scripts\python -m callqa preflight`.
 - `docs/executive_report_he.md` — the management report (Hebrew): what each part shows, how each number is computed and how to read it.
 - `docs/journey_report_he.md` — customer journeys and repeat contacts (Hebrew): running it, the report, the method and the accuracy check.
 - `docs/MLOPS.md` — running it over time: evaluation, drift monitoring, reproducing results.
+- `docs/plans/v2_plan_he.md` — the version 2 work plan (Hebrew): the four angles (contacts, call centre, Atlas, CRM), input tiers, data contract, fixes and milestones.
 - `CHANGELOG.md` — what changed in each version.

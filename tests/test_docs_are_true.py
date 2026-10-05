@@ -47,6 +47,13 @@ _ENV_RE = re.compile(r"\b(CALLQA_[A-Z0-9_]+)\b")
 _DOCUMENTED_PLACEHOLDERS = {"CALLQA_SECTION__FIELD"}
 
 
+def _is_plan(path: Path) -> bool:
+    """A work plan under docs/plans/ names the files, columns and commands it
+    proposes to build; that they do not exist yet is the point of the document,
+    not a broken reference. Everything else under docs/ describes what ships."""
+    return "plans" in path.relative_to(REPO).parts
+
+
 def _tracked_docs() -> list[Path]:
     """Only documents that ship. An untracked working note is not a deliverable
     and must not be able to fail the build.
@@ -60,12 +67,14 @@ def _tracked_docs() -> list[Path]:
     try:
         listed = subprocess.run(["git", "-C", str(REPO), "ls-files", "*.md"],
                                 capture_output=True, text=True, check=True).stdout.split()
-        docs = [REPO / rel for rel in listed if (REPO / rel).exists()]
+        docs = [REPO / rel for rel in listed
+                if (REPO / rel).exists() and not _is_plan(REPO / rel)]
     except (OSError, subprocess.SubprocessError):
         docs = []
     if not docs:
         docs = sorted([*REPO.glob("*.md"), *REPO.glob("docs/*.md"),
                        *REPO.glob("dashboard/*.md")])
+        docs = [d for d in docs if not _is_plan(d)]
     assert docs, "no documentation found to check"
     return docs
 
