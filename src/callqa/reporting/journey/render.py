@@ -38,6 +38,7 @@ from callqa.journey.models import ContentLayer, JourneyDataset
 from callqa.journey.rules import RuleSettings, StoryFacts, settings_for
 from callqa.journey.session_analysis import SessionAnalysis, analyse_sessions
 from callqa.journey.sessions import SESSION_KIND_HE, UNIT_CLASS_HE
+from callqa.journey.sources import sources_table
 from callqa.journey.store import dataset_dir, load_content, load_dataset, resolve_dataset_id
 from callqa.journey.vocab import Taxonomy, Units, load_taxonomy, units_of
 from callqa.reporting.common import jinja_env
@@ -263,6 +264,13 @@ def _handoffs(a: JourneyAnalysis) -> dict | None:
 # -- KPIs ---------------------------------------------------------------------------
 
 def _metric_value(m) -> str:  # noqa: ANN001 - Metric
+    """The figure as printed: the value when it may be shown; the count
+    ("k מתוך n") when the base is too small for a rate; and the reason when
+    a layer the figure needs is missing - never a bare dash."""
+    if m.unavailable_because_he:
+        return m.unavailable_because_he
+    if m.unit == "share" and m.rate is not None:
+        return m.rate.text_he
     if m.value is None or not m.shown:
         return "—"
     if m.unit == "share":
@@ -281,7 +289,10 @@ def _metric_help(m) -> dict:  # noqa: ANN001
 def _kpi(m, href: str, sub: str = "", unit: str = "", cls: str = "", badge: str | None = None,  # noqa: ANN001
          badge_cls: str = "muted") -> dict:
     value = _metric_value(m)
-    if m.unit == "share" and m.n is not None and not m.shown:
+    if m.unavailable_because_he:
+        value, sub = "—", m.unavailable_because_he
+    elif m.unit == "share" and m.n is not None and not m.shown:
+        value = "—"
         sub = (f"בסיס קטן מדי להצגת שיעור (⟦{m.k or 0:,}⟧ מתוך ⟦{m.n:,}⟧)" if m.n
                else "אין עדיין נתונים לחישוב")
     elif m.unit == "share" and m.k is not None and not sub:
@@ -374,13 +385,17 @@ def _quality_view(q) -> dict | None:  # noqa: ANN001 - JourneyQuality
 def _metric_table(a: JourneyAnalysis) -> list[dict]:
     rows = []
     for m in a.metrics.values():
+        ci = ""
+        if m.unit == "share" and m.shown:
+            ci = (m.rate.interval_he or m.rate.why_no_interval_he) if m.rate else (
+                f"{_pct1(max(0, m.low))}–{_pct1(min(1, m.high))}"
+                if m.low is not None and m.high is not None else "")
         rows.append({"label": m.label_he, "value": _metric_value(m),
+                     "unavailable": bool(m.unavailable_because_he),
                      "base": f"{m.k:,} / {m.n:,}" if m.k is not None and m.n is not None else "",
-                     "ci": (f"{_pct1(max(0, m.low))}–{_pct1(min(1, m.high))}"
-                            if m.unit == "share" and m.low is not None and m.high is not None
-                            and m.shown else ""),
-                     "basis": BASIS_HE.get(m.basis, m.basis), "definition": m.definition_he,
-                     "wrong_if": m.wrong_if_he, "prelim": m.preliminary and m.shown})
+                     "ci": ci, "basis": BASIS_HE.get(m.basis, m.basis),
+                     "definition": m.definition_he, "wrong_if": m.wrong_if_he,
+                     "prelim": m.preliminary and m.shown})
     return rows
 
 
@@ -601,6 +616,7 @@ def render_html(dataset: JourneyDataset, a: JourneyAnalysis, facts: list[StoryFa
         "demo_text": DEMO_TEXT.get(demo_key, ("", ""))[1] if demo_key else "",
         "import_counts": dataset.report.counts,
         "import_issues": [i for i in dataset.report.issues if i.severity != "info"],
+        "sources": sources_table(dataset, a.layers),
         "coverage_he": COVERAGE_HE,
         "empty": Markup('<p class="ch-empty">אין די נתונים.</p>'),
         "footer": _footer(dataset, content, generated),

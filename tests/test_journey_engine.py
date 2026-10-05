@@ -228,6 +228,52 @@ def test_analysis_over_the_fixture_workbook(tmp_path):
     assert analysis.coverage == {"full": 3}
 
 
+def test_a_rate_carries_its_gate_its_interval_and_the_banks_wording():
+    from callqa.journey.rate import rate_of
+    small = rate_of(3, 7)
+    assert not small.shown and small.preliminary and small.text_he == "3 מתוך 7"
+    assert small.method == "wilson" and small.interval_he == ""
+    firm = rate_of(20, 40, firm_n=30)
+    assert firm.shown and not firm.preliminary and firm.text_he == "50.0%"
+    assert firm.interval_he.endswith("%") and firm.low < 0.5 < firm.high
+    none = rate_of(0, 0)
+    assert none.value is None and none.text_he == "אין מקרים"
+    clustered = rate_of(4, 20, clusters=[(1, 5), (1, 5), (2, 10)])
+    assert clustered.method == "cluster_bootstrap" and clustered.clusters == 3
+    assert clustered.low is None and "פחות מחמישה" in clustered.why_no_interval_he
+
+
+def test_a_missing_layer_is_said_in_place_of_the_figure(tmp_path):
+    from callqa.journey.sources import sources_table
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset        # no Atlas, no content
+    analysis, _ = analyse(ds, taxonomy=load_taxonomy(), units=load_units())
+    m = analysis.metrics
+    assert analysis.layers["atlas"] is False and analysis.layers["content"] is False
+    assert "אין ייצוא אטלס" in m["three_bankers"].unavailable_because_he
+    assert "שלב התוכן" in m["failure_rate"].unavailable_because_he
+    assert m["abandoned"].unavailable_because_he is None       # the workbook knows abandonment
+    rows = {r.key: r for r in sources_table(ds, analysis.layers)}
+    assert rows["atlas"].status == "absent" and rows["crm"].status == "absent"
+    assert rows["contact_list"].status == "present" and "חשבונות" in rows["contact_list"].count_he
+    # with Atlas attached the sentence goes away and the figure is on its base
+    attach_atlas(ds, build_atlas(tmp_path / "atlas"))
+    analysis, _ = analyse(ds, taxonomy=load_taxonomy(), units=load_units())
+    tb = analysis.metrics["three_bankers"]
+    assert tb.unavailable_because_he is None and tb.n == 1 and tb.rate.text_he == "0 מתוך 1"
+
+
+def test_a_recordings_only_batch_says_it_has_no_contact_list(tmp_path):
+    from callqa.journey.importers.audio_only import import_audio_only
+    from callqa.journey.sources import sources_table
+    _xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_audio_only(zip_path).dataset
+    analysis, _ = analyse(ds, taxonomy=load_taxonomy(), units=load_units())
+    assert "אין רשימת פניות" in analysis.metrics["returns"].unavailable_because_he
+    rows = {r.key: r for r in sources_table(ds, analysis.layers)}
+    assert rows["contact_list"].status == "absent" and "T0" in rows["contact_list"].source_he
+
+
 def test_every_metric_says_what_would_make_it_wrong_where_it_matters(tmp_path):
     xlsx, zip_path = build_workbook(tmp_path / "in")
     ds = import_workbook(xlsx, audio=zip_path).dataset

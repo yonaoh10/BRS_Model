@@ -117,6 +117,17 @@
       {% endfor %}
     </div>
 
+    <div class="section" id="sec-sources">
+      <h3>מקורות הדוח</h3>
+      <p class="lead">על אילו שכבות המספרים עומדים, ומה שכבה חסרה לוקחת מהדוח. שכבה שחסרה אינה „לא נמצאה בעיה” — היא לא נבדקה.</p>
+      <div class="card"><div class="bd tbl-wrap">
+        <table class="metrics sources"><thead><tr><th>שכבה</th><th>מצב</th><th>מה נקרא</th><th>מה חסר בגללה</th><th>המקור</th></tr></thead><tbody>
+        {% for s in sources %}
+        <tr class="src-{{ s.status }}"><td><b>{{ s.label_he }}</b></td><td><span class="badge {% if s.status == 'present' %}b-ok{% elif s.status == 'partial' %}b-warn{% else %}b-bad{% endif %}">{{ s.status_he }}</span></td><td class="n">{{ s.count_he | rich }}</td><td class="small{% if s.status != 'present' %} muted{% endif %}">{{ s.effect_he }}</td><td class="small muted">{{ s.source_he }}</td></tr>
+        {% endfor %}
+        </tbody></table></div></div>
+    </div>
+
     <div class="section" id="sec-findings">
       <h3>הממצאים המרכזיים</h3>
       <p class="lead">מדורגים לפי חומרה והיקף. כל ממצא נגזר ממספר מחושב; ממנו אפשר לעבור לניתוח (רמה 2) ולסיפורים עצמם (רמה 3).</p>
@@ -371,7 +382,7 @@
       <div class="card"><div class="bd tbl-wrap">
         <table class="metrics"><thead><tr><th>מדד</th><th class="num">ערך</th><th class="num">בסיס</th><th class="num">רווח סמך 95%</th><th>סוג</th><th>הגדרה</th><th>מתי זה לא נכון</th></tr></thead><tbody>
         {% for r in metric_table %}
-        <tr><td>{{ r.label }}{% if r.prelim %} <span class="badge b-warn">ראשוני</span>{% endif %}</td><td class="num n"><b>{{ r.value }}</b></td><td class="num n">{{ r.base }}</td><td class="num n">{{ r.ci }}</td><td class="small">{{ r.basis }}</td><td class="small">{{ r.definition }}</td><td class="small muted">{{ r.wrong_if }}</td></tr>
+        <tr{% if r.unavailable %} class="unavailable"{% endif %}><td>{{ r.label }}{% if r.prelim %} <span class="badge b-warn">ראשוני</span>{% endif %}</td><td class="{% if r.unavailable %}small muted{% else %}num n{% endif %}"><b>{{ r.value }}</b></td><td class="num n">{{ r.base }}</td><td class="num n small">{{ r.ci }}</td><td class="small">{{ r.basis }}</td><td class="small">{{ r.definition }}</td><td class="small muted">{{ r.wrong_if }}</td></tr>
         {% endfor %}
         </tbody></table></div></div>
     </div>

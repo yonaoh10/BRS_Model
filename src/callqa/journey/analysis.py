@@ -17,12 +17,13 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from callqa.journey.models import InteractionCard, JourneyDataset, StoryVerdict
+from callqa.journey.rate import Rate, rate_of
 from callqa.journey.rules import RuleSettings, StoryFacts, apply_rules
 from callqa.journey.session_analysis import classes_of, first_move_after, story_sessions
 from callqa.journey.stats import cluster_bootstrap_share, kaplan_meier, km_median
 from callqa.journey.timeline import build_timelines
 from callqa.journey.vocab import Taxonomy, Units
-from callqa.reporting.executive.stats import proportion_ci, quantile
+from callqa.reporting.executive.stats import quantile
 
 GAP_BUCKETS = [(1, "עד שעה"), (4, "1–4 שעות"), (24, "באותה יממה"), (72, "1–3 ימים"),
                (168, "3–7 ימים"), (float("inf"), "יותר משבוע")]
@@ -70,6 +71,11 @@ class Metric(BaseModel):
     basis: str = "fact"              # fact | content | inference
     shown: bool = True               # False when the base is below min_rate_n
     preliminary: bool = False
+    rate: Rate | None = None         # the share with its gate and interval (unit == share)
+    # Why the figure cannot be given at all - a layer the batch lacks ("לא
+    # ניתן לחשב: אין ייצוא מוקד") - printed in place of a dash. Empty when
+    # the figure exists or is merely on a small base.
+    unavailable_because_he: str | None = None
 
 
 class StorySummary(BaseModel):
@@ -125,25 +131,85 @@ class JourneyAnalysis(BaseModel):
     judged_by: dict[str, int]
     coverage: dict[str, int]
     taxonomy_sha: str = ""
+    layers: dict[str, bool] = Field(default_factory=dict)   # which sources the batch carries
 
 
 def _share_metric(key, label, k, n, *, definition, wrong_if, basis="fact", min_n=10, firm_n=30,
                   clusters: list[tuple[int, int]] | None = None) -> Metric:
+    """A share as a Metric: the Rate decides the value, the gate and the
+    interval; the Metric's own k/n/low/high mirror it for older readers."""
+    r = rate_of(k, n, min_n=min_n, firm_n=firm_n, clusters=clusters)
     m = Metric(key=key, label_he=label, k=k, n=n, unit="share", definition_he=definition,
-               wrong_if_he=wrong_if, basis=basis)
-    if not n:
-        m.shown = False
-        return m
-    m.value = k / n
-    if clusters is not None:
-        cs = cluster_bootstrap_share(clusters)
-        m.low, m.high = cs.low, cs.high
-    else:
-        ci = proportion_ci(k, n)
-        m.low, m.high = ci.low, ci.high
-    m.shown = n >= min_n
-    m.preliminary = n < firm_n
+               wrong_if_he=wrong_if, basis=basis, rate=r, value=r.value, low=r.low, high=r.high,
+               shown=r.shown and n > 0, preliminary=r.preliminary if n else False)
     return m
+
+
+# What a batch must carry for a figure to exist at all. The sentence is
+# printed where the figure would be, so a missing layer never reads as "no
+# problem found".
+NEEDS_CONTENT = ("failure_rate", "retold", "promises_broken")
+NEEDS_CENTRE = ("abandoned", "customer_first_after_abandon")
+NEEDS_ATLAS = ("three_bankers", "crossed", "no_execute", "background_share",
+               "customer_first_after_abandon", "bankers_per_story", "banker_minutes_per_story")
+NEEDS_CONTACT_LIST = ("returns", "returns_per_story", "same_day_3", "closed", "unclear",
+                      "median_days_to_resolution", "classifiable")
+ABSENT_HE = {
+    "content": "לא ניתן לחשב: שלב התוכן (קריאת השיחות וההתכתבויות) לא רץ על האצווה",
+    "centre": "לא ניתן לחשב: אין טבלת מוקד (כיוון השיחה ונטישה לא ידועים לשיחות בלי הקלטה)",
+    "atlas": "לא ניתן לחשב: אין ייצוא אטלס (סשנים ופעולות של בנקאים)",
+    "contact_list": "לא ניתן לחשב: אין רשימת פניות (אצווה של הקלטות בלבד - כל שיחה סיפור אחד)",
+}
+_ATLAS_PLACEHOLDERS = {
+    "three_bankers": ("סיפורים עם 3 בנקאים ומעלה", "share"),
+    "crossed": ("סיפורים שעברו בין מרכז הבנקאות לסניפים", "share"),
+    "no_execute": ("סשנים בלי שום פעולת ביצוע", "share"),
+    "bankers_per_story": ("בנקאים שונים לסיפור (ממוצע)", "number"),
+}
+
+
+def layers_of(dataset: JourneyDataset, cards: dict | None) -> dict[str, bool]:
+    """Which layers this batch carries, as the data shows (the manifest may
+    say more; the data decides what can be computed)."""
+    t0 = dataset.manifest is not None and dataset.manifest.tier == "T0"
+    centre = any(i.answer != "unknown" or i.facts is not None
+                 for i in dataset.interactions if i.channel == "call")
+    return {
+        "contact_list": not t0,
+        "content": bool(cards),
+        "centre": centre,
+        "atlas": bool(dataset.atlas_sessions) or dataset.atlas_rules.sessions_from != "none",
+        "messages": bool(dataset.messages),
+        "units": bool(dataset.units),
+    }
+
+
+def mark_unavailable(metrics: dict[str, Metric], layers: dict[str, bool]) -> None:
+    """Say, per figure, which absent layer makes it uncomputable. A figure
+    that exists keeps its value; one on a small base keeps its count; only
+    a figure whose layer is missing gets the sentence (and a placeholder
+    row when the figure was not even built)."""
+    def mark(keys: tuple[str, ...], layer: str, *, force: bool = False) -> None:
+        for key in keys:
+            m = metrics.get(key)
+            if m is None:
+                continue
+            if force or (m.unit == "share" and not m.n) or m.value is None:
+                m.unavailable_because_he = m.unavailable_because_he or ABSENT_HE[layer]
+                m.shown = False
+    if not layers["contact_list"]:
+        # a count of zero returns is not a finding here: nothing could tie
+        # two calls to one account, so the figure is undefined, not zero
+        mark(NEEDS_CONTACT_LIST, "contact_list", force=True)
+    if not layers["content"]:
+        mark(NEEDS_CONTENT, "content")
+    if not layers["centre"]:
+        mark(NEEDS_CENTRE, "centre")
+    if not layers["atlas"]:
+        for key, (label, unit) in _ATLAS_PLACEHOLDERS.items():
+            metrics.setdefault(key, Metric(key=key, label_he=label, unit=unit, shown=False,
+                                           definition_he="מדד של שכבת אטלס."))
+        mark(NEEDS_ATLAS, "atlas")
 
 
 def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
@@ -462,9 +528,11 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
             count("bank_first_hours", "כשהבנק פעל ראשון - חציון שעות", quantile(wait_hours, 0.5),
                   "הזמן מהשיחה שננטשה עד שבנקאי פתח את החשבון.", "", unit="hours")
 
+    layers = layers_of(dataset, cards)
+    mark_unavailable(m, layers)
     analysis = JourneyAnalysis(
         dataset_id=dataset.dataset_id, generated_at=now or datetime.now(),
-        data_start=data_start, data_end=data_end, metrics=m, stories=summaries,
+        data_start=data_start, data_end=data_end, metrics=m, stories=summaries, layers=layers,
         objective_classes=dict(objective), categories_strict=dict(strict),
         categories_extended=dict(extended),
         channel_by_category={k: dict(v) for k, v in channel_cat.items()},
