@@ -84,6 +84,44 @@ def _direction(value: str) -> str:
     return "unknown"
 
 
+DUPLICATE_WINDOW_SEC = 60.0
+
+
+def _merge_duplicates(rows: list[RawInteraction]) -> tuple[list[RawInteraction], int]:
+    """One row per contact. A row with the same account and the same call or
+    correspondence id as an earlier row, within a minute of it, is that
+    contact listed again (a SAS join that fanned out, a call listed once per
+    recorded part): it is folded into the first row - which keeps what it
+    had and takes what it lacked - and counted. Rows without an id are never
+    merged: nothing says they are the same contact."""
+    kept: list[RawInteraction] = []
+    seen: dict[tuple[str, str, str], list[RawInteraction]] = {}
+    merged = 0
+    for raw in rows:
+        if not raw.source_id:
+            kept.append(raw)
+            continue
+        key = (raw.branch, raw.account, raw.source_id.lower())
+        twin = next((k for k in seen.get(key, [])
+                     if abs((k.at - raw.at).total_seconds()) <= DUPLICATE_WINDOW_SEC), None)
+        if twin is None:
+            seen.setdefault(key, []).append(raw)
+            kept.append(raw)
+            continue
+        merged += 1
+        for name in ("file_name", "declared_first_at", "declared_repeat_count", "talk_seconds",
+                     "banker_code", "unit_code"):
+            if getattr(twin, name) in (None, "") and getattr(raw, name) not in (None, ""):
+                setattr(twin, name, getattr(raw, name))
+        if twin.direction == "unknown" and raw.direction != "unknown":
+            twin.direction = raw.direction
+        if twin.answer == "unknown" and raw.answer != "unknown":
+            twin.answer = raw.answer
+        if raw.recorded:
+            twin.recorded = True
+    return kept, merged
+
+
 def build_dataset(source: str, interactions: list[RawInteraction], segments: list[RawSegment],
                   messages: list[RawMessage], report: ImportReport, *,
                   audio: AudioSource | None = None, redact_messages: bool = True,
@@ -120,6 +158,12 @@ def build_dataset(source: str, interactions: list[RawInteraction], segments: lis
                    "in their names; the mapping table was followed", count=mixed_keys)
 
     # --- interactions and stories ------------------------------------------
+    interactions, duplicates = _merge_duplicates(interactions)
+    if duplicates:
+        report.add("duplicate_contacts", "warning",
+                   "rows that repeat a contact already listed (same account, same call or "
+                   "correspondence id, within a minute) - a join that fanned out, or a call "
+                   "listed once per part; counted once", count=duplicates)
     story_of: dict[tuple[str, str], str] = {}
     branch_of: dict[str, str] = {}
     private: dict[str, tuple[str, str]] = {}

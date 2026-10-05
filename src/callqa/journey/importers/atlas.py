@@ -85,8 +85,11 @@ def _code(value: str) -> str:
     return normalise_op_code(text(value))
 
 
-def _read_tables(source: Path) -> dict[str, list[dict[str, str]]]:
+def _read_tables(source: Path) -> tuple[dict[str, list[dict[str, str]]], list[str]]:
+    """The Atlas tables by kind, and the names of the files or sheets that
+    are no Atlas table (said in the report, never silently skipped)."""
     tables: dict[str, list[dict[str, str]]] = {}
+    unknown: list[str] = []
 
     def keep(kind: str, rows: list[dict[str, str]]) -> None:
         tables.setdefault(kind, rows)
@@ -101,16 +104,20 @@ def _read_tables(source: Path) -> dict[str, list[dict[str, str]]]:
     if source.is_file() and source.suffix.lower() == ".xlsx":
         for sheet in read_xlsx(source).sheets:
             kind = kind_of(sheet.name)
-            if not kind or not sheet.rows:
+            if not kind:
+                unknown.append(sheet.name)
+                continue
+            if not sheet.rows:
                 continue
             header = [text(h).lower() for h in sheet.rows[0]]
             rows = [{h: text(v) for h, v in zip(header, r, strict=False) if h}
                     for r in sheet.rows[1:]]
             keep(kind, [r for r in rows if any(r.values())])
     elif source.is_dir():
-        for path in sorted(source.glob("*.csv")):
-            kind = kind_of(path.name)
+        for path in sorted(p for p in source.iterdir() if p.is_file()):
+            kind = kind_of(path.name) if path.suffix.lower() == ".csv" else None
             if not kind:
+                unknown.append(path.name)
                 continue
             reader = _csv_reader(_read_text_any_encoding(path))
             rows = []
@@ -121,7 +128,7 @@ def _read_tables(source: Path) -> dict[str, list[dict[str, str]]]:
             keep(kind, rows)
     else:
         raise FileNotFoundError(f"Atlas source not found: {source}")
-    return tables
+    return tables, unknown
 
 
 def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
@@ -136,13 +143,23 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
     checked against the sessions its log rows make - or are built from the
     log rows (ATLR_ROWS / atlas_ops) by the ATL_R01 rules."""
     report = dataset.report
-    tables = _read_tables(Path(source))
+    tables, unknown_files = _read_tables(Path(source))
     rules = (rules or AtlasRules()).model_copy()
     if coverage_start is not None:
         rules.coverage_from = coverage_start
+    if unknown_files:
+        report.add("atlas_unknown_files", "info",
+                   "files in the Atlas folder that are no Atlas table (ATLR_INT / ATLR_SESS / "
+                   "ATLR_ROWS / ATLR_CODECAT); not read", count=len(unknown_files),
+                   examples=unknown_files[:5])
     if "sessions" not in tables and "ops" not in tables:
-        report.add("atlas_no_sessions", "error",
-                   "no Atlas sessions table and no Atlas log rows were found")
+        # No Atlas at all is a batch without that layer, not a broken batch:
+        # the rest is analysed and every story stays uncovered.
+        report.add("atlas_no_sessions", "warning",
+                   "no Atlas sessions table and no Atlas log rows were found; the batch is "
+                   "analysed without the Atlas layer")
+        rules.sessions_from = "none"
+        dataset.atlas_rules = rules
         return
 
     # 1. which Atlas account is which story: through shared contacts
@@ -154,14 +171,20 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
     acc_votes: dict[str, Counter] = defaultdict(Counter)
     seq_to_iid: dict[tuple[str, str], str] = {}
     matched = 0
+    beyond_tolerance = 0
     for row in tables.get("interactions", []):
         acc = _get(row, "acc")
         ref = _get(row, "int_id").lower()
         at = try_parse_dt(_get(row, "int_at"))
         candidates = by_ref.get(ref, [])
-        if at is not None:
-            candidates = [c for c in candidates
-                          if abs((c.at - at).total_seconds()) <= join_tolerance_sec] or candidates
+        if at is not None and candidates:
+            within = [c for c in candidates
+                      if abs((c.at - at).total_seconds()) <= join_tolerance_sec]
+            if not within:
+                # the same id at another time is another contact, or a wrong
+                # row: it is not matched, and the count says so
+                beyond_tolerance += 1
+            candidates = within
         if not candidates:
             continue
         target = min(candidates, key=lambda c: abs((c.at - at).total_seconds()) if at else 0)
@@ -189,6 +212,11 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
                 pass
     story_of_acc = {acc: votes.most_common(1)[0][0] for acc, votes in acc_votes.items()}
     total_int = len(tables.get("interactions", []))
+    if beyond_tolerance:
+        report.add("atlas_join_beyond_tolerance", "warning",
+                   "Atlas contact rows whose id is in the dataset but whose time is more "
+                   f"than {join_tolerance_sec:.0f} s from every contact with that id; "
+                   "not matched", count=beyond_tolerance)
     if total_int and matched < total_int:
         report.add("atlas_contacts_unmatched", "warning",
                    "Atlas contact rows with no matching contact in the dataset "

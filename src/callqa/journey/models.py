@@ -153,6 +153,51 @@ class AtlasRules(BaseModel):
     sessions_from: Literal["export", "rows", "none"] = "none"
 
 
+Angle = Literal["centre", "vendor", "atlas", "crm"]
+
+
+class ManifestWindows(BaseModel):
+    """The bank's matching constants (ATL_R01 / ATL_R05), as the batch
+    declares them. Minutes unless named otherwise."""
+    model_config = {"extra": "forbid"}
+
+    pre_days: int = 3                # CRM processes opened this long before the first contact
+    post_days: int = 7               # ... and after the last
+    call_tol_sec: float = 60.0       # a call-centre row is the same call within this
+    out_before_min: float = 20.0
+    in_after_min: float = 30.0
+    msg_out_before_min: float = 30.0
+    msg_in_after_min: float = 60.0
+    unk_before_min: float = 20.0
+    unk_after_min: float = 30.0
+    crm_before_min: float = 20.0     # a CRM record belongs to a contact from this long before
+    crm_after_min: float = 120.0     # ... to this long after
+
+
+class Manifest(BaseModel):
+    """What a batch says about itself (manifest.yaml, contract v2). Every
+    field is optional: an older batch without one is contract v1 with
+    nothing declared, and the analysis falls back to what the data shows."""
+    model_config = {"extra": "forbid"}
+
+    contract_version: int = 1
+    source: str = ""
+    exported_at: datetime | None = None
+    keying: Literal["sas", "tool"] = "tool"      # who digested the account keys
+    tier: str | None = None                       # T0..T5, the batch's own word
+    angles: list[Angle] = Field(default_factory=list)   # the layers it claims to carry
+    coverage_from: date | None = None             # the first day the Atlas log holds
+    windows: ManifestWindows | None = None
+    identity_scope: Literal["account", "owner", "caller"] = "account"
+    crm_type_field: str | None = None             # the column summaries/callbacks are told by
+    date_order: Literal["day_first", "month_first"] | None = None
+    tz: str = "naive-local"
+    time_basis: str | None = None                 # e.g. file_mtime for an audio-only batch
+    data_start: datetime | None = None
+    data_end: datetime | None = None
+    distribution_profile: str | None = None
+
+
 class Story(BaseModel):
     story_key: str
     story_no: int
@@ -219,6 +264,7 @@ class JourneyDataset(BaseModel):
     # What the batch declared about itself (manifest.yaml / holidays.yaml):
     # the last moment its sources cover, and the bank holidays in its window.
     # Empty = not declared, and the analysis falls back to what the data shows.
+    manifest: Manifest | None = None
     data_end: datetime | None = None
     holidays: list[date] = Field(default_factory=list)
 

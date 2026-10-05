@@ -285,6 +285,33 @@ def test_a_row_on_the_second_two_sessions_share_stays_in_the_earlier_one(tmp_pat
     assert next(i for i in ds.report.issues if i.code == "atlas_n_ops_differ").count == 2
 
 
+def test_the_join_tolerance_excludes_and_the_count_says_so(tmp_path):
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    atlas = build_atlas(tmp_path / "atlas")
+    text = (atlas / "ATLR_INT.csv").read_text(encoding="utf-8")
+    # the recorded call's row carries a time 3 hours off the workbook's
+    (atlas / "ATLR_INT.csv").write_text(text.replace("02JUL2026:10:08:00", "02JUL2026:13:08:00"),
+                                        encoding="utf-8")
+    attach_atlas(ds, atlas)
+    codes = {i.code: i.count for i in ds.report.issues}
+    assert codes["atlas_join_beyond_tolerance"] == 1 and codes["atlas_contacts_unmatched"] == 1
+
+
+def test_an_empty_atlas_folder_is_a_warning_not_a_failure(tmp_path):
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    folder = tmp_path / "atlas"
+    folder.mkdir()
+    (folder / "notes.txt").write_text("x", encoding="utf-8")
+    attach_atlas(ds, folder)
+    codes = {i.code: (i.severity, i.count) for i in ds.report.issues}
+    assert ds.report.ok and codes["atlas_no_sessions"][0] == "warning"
+    assert codes["atlas_unknown_files"] == ("info", 1)
+    assert ds.atlas_rules.sessions_from == "none"
+    assert {s.atlas_coverage for s in ds.stories} == {"none"}
+
+
 def test_coverage_from_is_a_day(tmp_path):
     xlsx, zip_path = build_workbook(tmp_path / "in")
     ds = import_workbook(xlsx, audio=zip_path).dataset

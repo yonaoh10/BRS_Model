@@ -235,19 +235,33 @@ def test_contract_import_drops_unknown_columns(tmp_path):
     folder = tmp_path / "contract"
     folder.mkdir()
     (folder / "interactions.csv").write_text(
-        "interaction_id,account_ref,started_at,channel,direction,status,call_key,national_id\n"
-        "i1,17/335145,2026-08-01 10:00:00,call,inbound,answered,abc123abc123,123456782\n"
-        "i2,17/335145,2026-08-01 12:00:00,call,inbound,abandoned,,123456782\n"
-        "i3,17/335145,2026-08-02 09:00:00,message,outbound,,,123456782\n",
+        "interaction_id,account_ref,started_at,channel,direction,status,call_key,notes\n"
+        "i1,17/335145,2026-08-01 10:00:00,call,inbound,answered,abc123abc123,x123456782\n"
+        "i2,17/335145,2026-08-01 12:00:00,call,inbound,abandoned,,x123456782\n"
+        "i3,17/335145,2026-08-02 09:00:00,message,outbound,,,x123456782\n",
         encoding="utf-8")
     (folder / "call_segments.csv").write_text(
         "call_key,seq,file_name\nabc123abc123,2,b.wav\nabc123abc123,1,a.wav\n", encoding="utf-8")
     built = import_contract(folder)
     ds = built.dataset
-    assert ds.report.dropped_columns["interactions.csv"] == ["national_id"]
+    assert ds.report.dropped_columns["interactions.csv"] == ["notes"]
     assert "123456782" not in ds.model_dump_json()
     assert [s.file_name for s in ds.calls["abc123abc123"].segments] == ["a.wav", "b.wav"]
     assert sum(i.answer == "abandoned" for i in ds.interactions) == 1
+
+
+@pytest.mark.parametrize("column", ["national_id", "National ID", "phone", "שם לקוח", "ת\"ז"])
+def test_a_column_naming_a_persons_identity_fails_the_import(tmp_path, column):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "interactions.csv").write_text(
+        f"interaction_id,account_ref,started_at,channel,{column}\n"
+        "i1,17/335145,2026-08-01 10:00:00,call,123456782\n", encoding="utf-8")
+    ds = import_contract(folder).dataset
+    issue = next(i for i in ds.report.issues if i.code == "forbidden_columns")
+    assert not ds.report.ok and column.lower() in issue.message
+    assert "123456782" not in issue.message
+    assert not ds.interactions
 
 
 def _contract(tmp_path, interactions: str, messages: str | None = None):
@@ -290,6 +304,86 @@ def test_contract_counts_zone_suffixes_ambiguous_numbers_and_bad_message_times(t
     assert codes["bad_time"] == 1 and codes["bad_message_time"] == 1
     assert not ds.report.ok                          # the ambiguous number is an error
     assert [i.at for i in ds.interactions] == [datetime(2026, 8, 3, 10, 0)]
+
+
+def test_duplicate_rows_of_one_contact_are_folded_and_counted(tmp_path):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "interactions.csv").write_text(
+        "interaction_id,account_ref,started_at,channel,direction,call_key,talk_seconds\n"
+        "i1,17/335145,2026-08-01 10:00:00,call,,abc123abc123,\n"
+        "i1,17/335145,2026-08-01 10:00:30,call,inbound,abc123abc123,240\n"   # the same call
+        "i2,17/335145,2026-08-01 12:00:00,call,inbound,abc123abc124,\n"
+        "i3,17/335145,2026-08-01 12:00:10,call,inbound,,\n",                 # no id: kept
+        encoding="utf-8")
+    ds = import_contract(folder).dataset
+    assert _codes(ds).get("duplicate_contacts") == 1
+    assert len(ds.interactions) == 3 and ds.report.counts.returns == 2
+    first = min(ds.interactions, key=lambda i: i.at)
+    assert first.direction == "inbound" and first.talk_seconds == 240   # taken from the twin
+
+
+def test_a_manifest_declares_date_order_data_end_and_holidays(tmp_path):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "manifest.yaml").write_text(
+        "contract_version: 2\nangles: [vendor]\ndate_order: month_first\n"
+        "data_end: 2026-08-31 23:59:59\ncoverage_from: 2026-06-25\n"
+        "windows: {call_tol_sec: 30, in_after_min: 45}\n", encoding="utf-8")
+    (folder / "holidays.yaml").write_text("2026: [2026-09-23, 2026-09-24]\n", encoding="utf-8")
+    (folder / "interactions.csv").write_text(
+        "interaction_id,account_ref,started_at,channel\n"
+        "i1,17/335145,08/02/2026 10:00,call\n", encoding="utf-8")
+    ds = import_contract(folder).dataset
+    assert ds.report.ok and ds.contract_version == 2 and ds.source == "journey-contract-v2"
+    assert ds.interactions[0].at == datetime(2026, 8, 2, 10, 0)      # month first, as declared
+    assert ds.data_end == datetime(2026, 8, 31, 23, 59, 59)
+    assert ds.holidays == [date(2026, 9, 23), date(2026, 9, 24)]
+    from callqa.journey.importers.manifest import rules_from_manifest
+    from callqa.journey.models import AtlasRules
+    rules = rules_from_manifest(ds.manifest, AtlasRules())
+    assert rules.coverage_from == datetime(2026, 6, 25) and rules.call_in_after == 45
+
+
+def test_a_declared_layer_the_batch_lacks_is_an_error(tmp_path):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "manifest.yaml").write_text("contract_version: 2\nangles: [vendor, atlas]\n",
+                                          encoding="utf-8")
+    (folder / "interactions.csv").write_text(
+        "interaction_id,account_ref,started_at,channel\ni1,17/335145,2026-08-01,call\n",
+        encoding="utf-8")
+    ds = import_contract(folder).dataset
+    assert not ds.report.ok and "declared_layer_missing" in _codes(ds)
+    assert import_contract(folder, atlas=True).dataset.report.ok
+
+
+def test_unknown_manifest_fields_and_versions_are_errors(tmp_path):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "interactions.csv").write_text(
+        "interaction_id,account_ref,started_at,channel\ni1,17/335145,2026-08-01,call\n",
+        encoding="utf-8")
+    (folder / "manifest.yaml").write_text("contract_version: 2\ncolour: blue\n", encoding="utf-8")
+    assert "manifest_invalid" in _codes(import_contract(folder).dataset)
+    (folder / "manifest.yaml").write_text("contract_version: 3\n", encoding="utf-8")
+    assert "contract_version" in _codes(import_contract(folder).dataset)
+
+
+def test_exporter_row_counts_and_stray_files_are_checked(tmp_path):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "interactions.csv").write_text(
+        "interaction_id,account_ref,started_at,channel\ni1,17/335145,2026-08-01,call\n"
+        "i2,17/335145,2026-08-02,call\n", encoding="utf-8")
+    (folder / "export_manifest.csv").write_text(
+        "file,source_tables,rows\ninteractions.csv,T4418,3\n", encoding="utf-8")
+    (folder / "ATLR_INT.csv").write_text("x\n", encoding="utf-8")
+    ds = import_contract(folder).dataset
+    codes = _codes(ds)
+    assert codes["row_count_mismatch"] == 1 and not ds.report.ok
+    assert codes["unknown_files"] == 1
+    assert next(i for i in ds.report.issues if i.code == "unknown_files").examples == ["ATLR_INT.csv"]
 
 
 def test_contract_missing_required_column_is_an_error(tmp_path):

@@ -64,13 +64,19 @@ def cmd_journey_import(args: argparse.Namespace) -> int:
             built = import_workbook(args.xlsx, audio=args.audio, redact_messages=redact)
         else:
             from callqa.journey.importers.contract import import_contract
-            built = import_contract(args.contract, audio=args.audio, redact_messages=redact)
+            built = import_contract(args.contract, audio=args.audio, redact_messages=redact,
+                                    atlas=bool(args.atlas))
         if args.atlas:
+            from callqa.journey.importers.manifest import rules_from_manifest
             from callqa.journey.sessions import rules_from_config
             from callqa.journey.vocab import load_atlas_codes
+            manifest = built.dataset.manifest
+            w = manifest.windows if manifest else None
             attach_atlas(built.dataset, args.atlas,
-                         join_tolerance_sec=config.journey.atlas.join_tolerance_sec,
-                         rules=rules_from_config(config.journey.atlas),
+                         join_tolerance_sec=(w.call_tol_sec if w
+                                             else config.journey.atlas.join_tolerance_sec),
+                         rules=rules_from_manifest(manifest,
+                                                   rules_from_config(config.journey.atlas)),
                          codes=load_atlas_codes(config.journey.atlas.codes))
     except (XlsxError, FileNotFoundError, OSError, ValueError) as exc:
         print(f"import failed: {exc}", file=sys.stderr)

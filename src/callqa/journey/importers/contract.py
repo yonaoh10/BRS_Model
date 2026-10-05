@@ -1,17 +1,22 @@
-"""The journey dataset contract (v1): a folder of CSV files anyone can export.
+"""The journey dataset contract: a folder of CSV files anyone can export.
 
-    manifest.yaml       optional: {contract_version: 1, source: ..., exported_at: ...}
+    manifest.yaml       optional: what the batch declares about itself (v2:
+                        contract_version, angles, date_order, coverage_from,
+                        windows, data_end, ... - see models.Manifest)
+    holidays.yaml       optional: bank holidays in the batch's window
+    export_manifest.csv optional: file, rows - the exporter's own counts
     interactions.csv    interaction_id, account_ref, started_at, channel        (required)
                         branch, recorded, direction, status, call_key,
                         correspondence_id, talk_seconds, banker_code, unit_code (optional)
     call_segments.csv   call_key, seq, file_name [, recorded_at]
-    messages.csv        correspondence_id, message_id, sent_at, direction, body [, subject]
+    messages.csv        correspondence_id, message_id, sent_at, direction [, body, subject]
 
 `account_ref` is whatever identifies the account in the export (e.g.
 "17/335145"); it is turned into a keyed digest at import and printed nowhere.
 Only the columns above are read - any other column in a file is dropped and
-listed in the import report, so a name or ID column that rode along in an
-export never reaches the dataset.
+listed in the import report. A column whose name says it holds a person's
+identity (an ID number, a phone, a name, a user name) is not merely dropped:
+it fails the import, because such a file must not be on this machine at all.
 
 channel: call | message | branch | other
 direction: inbound | outbound | (empty)
@@ -32,6 +37,14 @@ from callqa.journey.importers.build import (
     build_dataset,
 )
 from callqa.journey.importers.common import AudioSource
+from callqa.journey.importers.manifest import (
+    check_declared_layers,
+    check_row_counts,
+    day_first_of,
+    declared_row_counts,
+    load_holidays,
+    load_manifest,
+)
 from callqa.journey.models import ImportReport
 from callqa.journey.timeparse import (
     TimeParseError,
@@ -41,9 +54,9 @@ from callqa.journey.timeparse import (
     try_parse_dt,
     tz_suffix,
 )
-from callqa.resources import load_yaml
 
 SOURCE = "journey-contract-v1"
+SOURCE_V2 = "journey-contract-v2"
 
 ALLOWED = {
     "interactions.csv": {"interaction_id", "account_ref", "started_at", "channel", "branch",
@@ -60,14 +73,41 @@ REQUIRED = {
 }
 _CHANNELS = {"call", "message", "branch", "other"}
 _TRUE = {"1", "yes", "y", "true", "כן"}
+# Column names that say the file carries a person's identity. The match is on
+# the whole normalised name (lower case, separators dropped), so "national_id"
+# and "National ID" fail while "unit_code" or "banker_code" do not.
+FORBIDDEN_COLUMNS = {
+    "nationalid", "idnumber", "identitynumber", "identity", "teudatzehut", "tz", "ssn",
+    "passport", "phone", "phonenumber", "mobile", "cellphone", "telephone", "msisdn",
+    "name", "fullname", "firstname", "lastname", "customername", "username", "user",
+    "email", "emailaddress", "address",
+    "תז", "תעודתזהות", "מספרזהות", "טלפון", "נייד", "מספרטלפון", "שם", "שםלקוח", "שםפרטי",
+    "שםמשפחה", "שםמלא", "שםמשתמש", "דואל", "אימייל", "כתובת",
+}
+# Files a batch folder may hold besides the tables; anything else is reported.
+KNOWN_FILES = {"manifest.yaml", "holidays.yaml", "export_manifest.csv", "checks.csv",
+               "interactions.csv", "call_segments.csv", "messages.csv", "readme.md",
+               "readme.txt"}
 
 
-def _rows(folder: Path, name: str, report: ImportReport) -> list[dict[str, str]]:
+def _norm_name(column: str) -> str:
+    return "".join(ch for ch in column.lower() if ch.isalnum() or "֐" <= ch <= "׿")
+
+
+def _rows(folder: Path, name: str, report: ImportReport,
+          rows_read: dict[str, int] | None = None) -> list[dict[str, str]]:
     path = folder / name
     if not path.exists():
         return []
     reader = _csv_reader(_read_text_any_encoding(path))
     header = [_visible(c or "").strip().lower() for c in (reader.fieldnames or [])]
+    forbidden = [c for c in header if _norm_name(c) in FORBIDDEN_COLUMNS]
+    if forbidden:
+        # Reported by column name only - never a value from it.
+        report.add("forbidden_columns", "error",
+                   f"{name} carries a column that names a person's identity, which must "
+                   f"not be exported to this tool: {', '.join(forbidden)}")
+        return []
     missing = REQUIRED[name] - set(header)
     if missing:
         report.add("missing_columns", "error",
@@ -84,7 +124,21 @@ def _rows(folder: Path, name: str, report: ImportReport) -> list[dict[str, str]]
         row = {k: v for k, v in row.items() if k in ALLOWED[name]}
         if any(row.values()):
             out.append(row)
+    if rows_read is not None:
+        rows_read[name] = len(out)
     return out
+
+
+def _unknown_files(folder: Path, report: ImportReport) -> None:
+    """A file the contract does not know is said, not skipped: it may be the
+    one table the exporter misnamed."""
+    names = sorted(p.name for p in folder.iterdir()
+                   if p.is_file() and p.name.lower() not in KNOWN_FILES
+                   and not p.name.startswith("."))
+    if names:
+        report.add("unknown_files", "info",
+                   "files in the batch folder that are no table of the contract; not read",
+                   count=len(names), examples=names[:5])
 
 
 def _split_ref(ref: str) -> tuple[str, str]:
@@ -114,13 +168,14 @@ def _date_order(rows: list[dict[str, str]], column: str, name: str, report: Impo
     return True if detected is None else detected
 
 
-def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | None = None
+def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | None = None,
+                       rows_read: dict[str, int] | None = None
                        ) -> tuple[list[RawInteraction], list[RawSegment], list[RawMessage]]:
     interactions: list[RawInteraction] = []
     bad = 0
     ambiguous: list[str] = []
     tz = 0
-    rows = _rows(folder, "interactions.csv", report)
+    rows = _rows(folder, "interactions.csv", report, rows_read)
     order = _date_order(rows, "started_at", "interactions.csv", report, day_first)
     for n, row in enumerate(rows, start=2):
         tz += tz_suffix(row.get("started_at"))
@@ -167,7 +222,7 @@ def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | 
             i.direction = {"i": "inbound", "o": "outbound"}.get(i.direction, "unknown")
 
     segments: list[RawSegment] = []
-    rows = _rows(folder, "call_segments.csv", report)
+    rows = _rows(folder, "call_segments.csv", report, rows_read)
     order = _date_order(rows, "recorded_at", "call_segments.csv", report, day_first)
     for row in rows:
         seq = None
@@ -181,7 +236,7 @@ def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | 
                                                             day_first=order)))
 
     messages: list[RawMessage] = []
-    rows = _rows(folder, "messages.csv", report)
+    rows = _rows(folder, "messages.csv", report, rows_read)
     order = _date_order(rows, "sent_at", "messages.csv", report, day_first)
     bad_msg = 0
     for row in rows:
@@ -201,20 +256,39 @@ def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | 
 
 
 def import_contract(folder: str | Path, *, audio: str | Path | None = None,
-                    redact_messages: bool = True) -> Built:
+                    redact_messages: bool = True, atlas: bool = False) -> Built:
+    """`atlas` says whether an Atlas source accompanies the batch (the caller
+    knows; it is attached afterwards), so a manifest that declares the Atlas
+    layer can be checked against it."""
     folder = Path(folder)
     report = ImportReport(source=SOURCE)
-    manifest = folder / "manifest.yaml"
-    if manifest.exists():
-        data = load_yaml(manifest) or {}
-        version = int(data.get("contract_version", 1)) if isinstance(data, dict) else 1
-        if version != 1:
-            report.add("contract_version", "error",
-                       f"contract version {version} is not supported (this reads v1)")
+    manifest = load_manifest(folder, report)
+    if not folder.is_dir():
+        report.add("no_interactions", "error", f"batch folder not found: {folder}")
+        return build_dataset(SOURCE, [], [], [], report)
+    _unknown_files(folder, report)
     if not (folder / "interactions.csv").exists():
         report.add("no_interactions", "error", "interactions.csv is missing")
-    interactions, segments, messages = read_contract_rows(folder, report)
+    rows_read: dict[str, int] = {}
+    interactions, segments, messages = read_contract_rows(
+        folder, report, day_first=day_first_of(manifest), rows_read=rows_read)
+    check_row_counts(declared_row_counts(folder, report), rows_read, report)
+    present = {"vendor"}
+    if atlas:
+        present.add("atlas")
+    if audio:
+        present.add("vendor")
+    check_declared_layers(manifest, present, report)
     source = AudioSource.open(audio) if audio else None
-    return build_dataset(SOURCE, interactions, segments, messages, report, audio=source,
+    built = build_dataset(SOURCE, interactions, segments, messages, report, audio=source,
                          redact_messages=redact_messages)
+    ds = built.dataset
+    ds.holidays = load_holidays(folder, report)
+    if manifest is not None:
+        ds.manifest = manifest
+        ds.contract_version = manifest.contract_version
+        ds.data_end = manifest.data_end
+        if manifest.contract_version == 2:
+            ds.source = SOURCE_V2
+    return built
 
