@@ -607,7 +607,8 @@ def cmd_executive_report(args: argparse.Namespace) -> int:
     from callqa.rubric import load_rubric
 
     config = _load_config(args)
-    make_private_root(config.paths.output_dir)
+    # The arguments are checked before anything is created on disk: a wrong
+    # date must not leave an output folder behind.
     try:
         filters = BatchFilters(
             date_from=_parse_day(args.date_from, "--from"),
@@ -620,6 +621,7 @@ def cmd_executive_report(args: argparse.Namespace) -> int:
     if filters.date_from and filters.date_to and filters.date_from > filters.date_to:
         logger.error("--from is after --to")
         return EXIT_FAILED
+    make_private_root(config.paths.output_dir)
     rubric = load_rubric()
     status = _write_executive_report(config, rubric, filters, with_text=not args.no_quotes,
                                      name=args.name, title=args.title)
@@ -1035,7 +1037,23 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     args = build_parser().parse_args(argv)
     _setup_logging(getattr(args, "verbose", False), getattr(args, "log_file", None))
-    return args.func(args)
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("הופסק.", file=sys.stderr)
+        return 130
+    except Exception as exc:  # noqa: BLE001 - the last line of defence: one sentence, no traceback
+        # The operator sees one sentence in Hebrew with the cause; the full
+        # traceback goes to the log file (or the console only with -v), so a
+        # failure never scrolls a stack trace across a bank operator's screen.
+        logging.getLogger("callqa").debug("unexpected error", exc_info=True)
+        command = " ".join(a for a in (getattr(args, "command", None),
+                                       getattr(args, "journey_command", None)) if a)
+        cause = str(exc).strip() or exc.__class__.__name__
+        print(f"callqa {command}: הפקודה נכשלה - {cause}", file=sys.stderr)
+        if not getattr(args, "verbose", False):
+            print("(להרצה עם -v ולקובץ היומן יש את הפירוט המלא)", file=sys.stderr)
+        return EXIT_FAILED
 
 
 if __name__ == "__main__":

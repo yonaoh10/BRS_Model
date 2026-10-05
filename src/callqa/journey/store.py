@@ -57,9 +57,24 @@ def resolve_dataset_id(config: Config, dataset_id: str | None) -> str:
     return latest.read_text(encoding="utf-8").strip()
 
 
+def list_dataset_ids(config: Config) -> list[str]:
+    """The ids of the datasets in the workspace, newest first."""
+    root = journey_root(config)
+    if not root.exists():
+        return []
+    return sorted((p.name for p in root.iterdir() if (p / "dataset.json").exists()),
+                  reverse=True)
+
+
 def load_dataset(config: Config, dataset_id: str | None = None) -> JourneyDataset:
     ds = resolve_dataset_id(config, dataset_id)
     path = dataset_dir(config, ds) / "dataset.json"
+    if not path.exists():
+        known = list_dataset_ids(config)
+        hint = (f"; datasets here: {', '.join(known[:5])}" if known
+                else "; no dataset has been imported into this workspace yet")
+        raise FileNotFoundError(f"no dataset with id {ds} (ids look like ds-YYYYMMDD-xxxxxxxx)"
+                                + hint)
     return JourneyDataset.model_validate_json(path.read_text(encoding="utf-8"))
 
 
