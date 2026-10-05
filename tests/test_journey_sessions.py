@@ -223,6 +223,68 @@ def test_exported_sessions_that_the_rows_do_not_rebuild_are_reported(tmp_path):
     assert issue.count == 1 and ds.atlas_rules.sessions_from == "export"
 
 
+def _sessions_only(folder):
+    atlas = build_atlas(folder)
+    (atlas / "ATLR_ROWS.csv").unlink()
+    return atlas
+
+
+def test_an_exported_session_without_its_rows_is_unknown_not_open(tmp_path):
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    attach_atlas(ds, _sessions_only(tmp_path / "atlas"))
+    assert ds.atlas_rules.sessions_from == "export"
+    kinds = {s.kind for s in ds.atlas_sessions}
+    assert kinds == {"unknown"} and not any(s.peek for s in ds.atlas_sessions)
+    assert not any(i.code == "atlas_n_ops_differ" for i in ds.report.issues)
+
+
+def test_first_op_and_peek_come_from_the_export_when_it_has_them(tmp_path):
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    atlas = _sessions_only(tmp_path / "atlas")
+    lines = (atlas / "ATLR_SESS.csv").read_text(encoding="utf-8").splitlines()
+    lines[0] += ",FIRST_OP,PEEK"
+    lines[1] += ",201,0"
+    lines[2] += ",011,1"
+    (atlas / "ATLR_SESS.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    attach_atlas(ds, atlas)
+    a, b = sorted(ds.atlas_sessions, key=lambda s: s.start)
+    assert (a.first_op, a.peek) == ("201", False) and (b.first_op, b.peek) == ("11", True)
+
+
+def test_n_ops_that_the_rows_do_not_account_for_is_reported(tmp_path):
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    atlas = build_atlas(tmp_path / "atlas")
+    text = (atlas / "ATLR_SESS.csv").read_text(encoding="utf-8")
+    (atlas / "ATLR_SESS.csv").write_text(text.replace("B0001,109,3,1,1", "B0001,109,5,1,1"),
+                                         encoding="utf-8")
+    attach_atlas(ds, atlas)
+    issue = next(i for i in ds.report.issues if i.code == "atlas_n_ops_differ")
+    assert issue.count == 1 and issue.severity == "warning"
+
+
+def test_a_row_on_the_second_two_sessions_share_stays_in_the_earlier_one(tmp_path):
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    atlas = build_atlas(tmp_path / "atlas")
+    # a third session of banker B0001 that opens on the very second the first ends
+    with (atlas / "ATLR_SESS.csv").open("a", encoding="utf-8") as f:
+        f.write("1,3,02JUL2026:10:15:00,02JUL2026:10:16:00,B0001,109,2,,0\n")
+    with (atlas / "ATLR_ROWS.csv").open("a", encoding="utf-8") as f:
+        f.write("6,1,02JUL2026:10:15:00,109,B0001,201,מצב לקוח\n"
+                "7,1,02JUL2026:10:16:00,109,B0001,011,תנועות אחרונות\n")
+    attach_atlas(ds, atlas)
+    by_no = {s.session_id.rsplit("-", 1)[1]: s for s in ds.atlas_sessions}
+    assert len(by_no["1"].ops) == 4 and len(by_no["3"].ops) == 1      # ATL_R02 B3
+    # two rows sit on that second: the first session's own last row and the
+    # opening row of the third; both stay with the earlier session
+    issue = next(i for i in ds.report.issues if i.code == "atlas_boundary_rows")
+    assert issue.count == 2
+    assert next(i for i in ds.report.issues if i.code == "atlas_n_ops_differ").count == 2
+
+
 def test_coverage_from_is_a_day(tmp_path):
     xlsx, zip_path = build_workbook(tmp_path / "in")
     ds = import_workbook(xlsx, audio=zip_path).dataset

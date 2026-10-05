@@ -35,7 +35,7 @@ from callqa.journey.analysis import (
 )
 from callqa.journey.findings import build_opinion
 from callqa.journey.models import ContentLayer, JourneyDataset
-from callqa.journey.rules import RuleSettings, StoryFacts
+from callqa.journey.rules import RuleSettings, StoryFacts, settings_for
 from callqa.journey.session_analysis import SessionAnalysis, analyse_sessions
 from callqa.journey.sessions import SESSION_KIND_HE, UNIT_CLASS_HE
 from callqa.journey.store import dataset_dir, load_content, load_dataset, resolve_dataset_id
@@ -720,9 +720,10 @@ def report_name(name: str | None) -> str:
     return stem
 
 
-def settings_of(config: Config) -> RuleSettings:
-    return RuleSettings(callback_business_days=config.journey.callback_business_days,
-                        quiet_days=config.journey.quiet_days)
+def settings_of(config: Config, dataset: JourneyDataset | None = None) -> RuleSettings:
+    """The rule settings of a run: the config's, plus what the dataset's own
+    batch declared (its holidays, its data window) when it is given."""
+    return settings_for(config.journey, dataset)
 
 
 def _journey_quality(config: Config, facts: list[StoryFacts], tax: Taxonomy):  # noqa: ANN202
@@ -757,7 +758,7 @@ def _analyse(config: Config, ds_id: str):  # noqa: ANN202
         cards=content.cards if content else None,
         judgements=content.judgements if content else None,
         verdicts=content.verdicts if content else None,
-        settings=settings_of(config), min_rate_n=config.journey.min_rate_n,
+        settings=settings_of(config, dataset), min_rate_n=config.journey.min_rate_n,
         min_firm_n=config.journey.min_firm_n)
     return dataset, content, tax, units, analysis, facts
 

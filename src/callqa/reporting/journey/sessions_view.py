@@ -36,7 +36,7 @@ from callqa.reporting.journey import charts
 STATUS_HE = {"closed": "נסגר", "open": "פתוח", "unclear": "לא ברור"}
 DIRECTION_HE = {"inbound": "נכנסת", "outbound": "יוצאת", "unknown": ""}
 KIND_CLS = {"execute": "ch-bar-ok", "info": "ch-bar", "unclassified": "ch-bar-muted",
-            "open": "ch-bar-muted", "not_customer": "ch-bar-muted"}
+            "open": "ch-bar-muted", "not_customer": "ch-bar-muted", "unknown": "ch-bar-muted"}
 # rows of the explorers carried in the page; beyond, the CSV has them all
 MAX_ROWS = 20000
 _NUM_RE = re.compile(r"(-?\d[\d,.]*%?)")
@@ -103,7 +103,34 @@ def definitions(rules: AtlasRules) -> list[tuple[str, str]]:
         ("כיסוי", f"היום הראשון בלוג: {cover}. הלוג שומר כשלושה חודשים אחורה, ולכן כל המדדים "
                   "נמדדים רק על סיפורים שהתחילו מהיום הזה ואילך - כדי שחשבון בלי נתונים לא "
                   "ייספר כחשבון בלי פעילות."),
+        ("שורה על גבול בין סשנים", _boundary_rule(rules)),
+        ("שוויונות וקצוות", "פעולה של הבנק באותה שנייה של המועד האחרון או של חזרת הלקוח נספרת "
+                           "כלפני (השוויון לטובת הבנק); ניסיון שננטש של הלקוח נספר כחזרה; פעולה "
+                           "במהלך הפנייה האחרונה נספרת כאחריה (כמו ב־ATL_R02, שמשווה את תחילת "
+                           "הסשן לתחילת הפנייה); הזמן עד הפעולה הראשונה נמדד מהפנייה לסשן "
+                           "שהתחיל אחריה ממש, לא באותה שנייה. סשן שהייצוא מונה בו פעולות אבל "
+                           "שורות הלוג שלו לא סופקו מסומן 'לא ידוע' ואינו נספר לא כהצצה ולא "
+                           "כסשן בלי ביצוע."),
+        ("כלל הכלי למספרים", "שיעור מוצג רק כשהבסיס הוא 10 מקרים ומעלה; מתחת ל־30 הוא מסומן "
+                             "ראשוני. זה כלל של הכלי, לא של הבנק: הבנק מדפיס k מתוך n ליד כל "
+                             "שיעור, וכך גם כאן."),
     ]
+
+
+def _boundary_rule(rules: AtlasRules) -> str:
+    """Which rule put a log row that sits on the second a session opens: the
+    export keeps the bank's own assignment (ATL_R02 B3, the earlier session);
+    sessions built here from the rows follow ATL_R01 (the opening code starts
+    the new one). The rule in force is named, so the two paths are never
+    read as one."""
+    if rules.sessions_from == "export":
+        return (f"הסשנים נלקחו מהייצוא של הבנק: שורת לוג שנופלת בשנייה שבה סשן נפתח (קוד "
+                f"{rules.start_op}) שייכת לסשן המוקדם מבין השניים, כמו ב־ATL_R02. פער בין מספר "
+                "הפעולות שהייצוא מונה לשורות שנקראו מדווח בטבלת הבדיקות.")
+    if rules.sessions_from == "rows":
+        return (f"הסשנים נבנו כאן משורות הלוג לפי ATL_R01: קוד {rules.start_op} פותח סשן חדש "
+                "גם באותה שנייה, והשורה שייכת לסשן שהיא פותחת.")
+    return "אין סשנים באצווה הזאת."
 
 
 # ------------------------------------------------------------------ chapter
@@ -207,7 +234,7 @@ def contact_atlas(row: ContactRow | None, sessions: list[dict]) -> dict | None:
         return None
     mine = [s for s in sessions if s["contact"] == row.n]
     strongest = next((SESSION_KIND_HE[k] for k in ("execute", "info", "unclassified", "open",
-                                                   "not_customer")
+                                                   "not_customer", "unknown")
                       if any(s["kind_key"] == k for s in mine)), "")
     return {"n": row.n_sess, "bankers": row.n_bankers, "minutes": _f(row.banker_min),
             "strongest": strongest, "sessions": mine,

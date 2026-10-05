@@ -297,6 +297,9 @@ class JourneyConfig(StrictModel):
     callback_business_days: int = Field(default=2, ge=1, le=30)
     # No contact for this many days after the bank's last action = settled.
     quiet_days: int = Field(default=7, ge=1)
+    # Bank holidays (dates) that are not business days either; a batch's
+    # holidays.yaml adds to this list.
+    holidays: list[date] = Field(default_factory=list)
     # Rates are shown only for at least min_rate_n cases; below min_firm_n a
     # finding is labelled preliminary.
     min_rate_n: int = Field(default=10, ge=1)

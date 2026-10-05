@@ -48,7 +48,7 @@ from callqa.journey.llm.tasks import (
     story_prompt,
 )
 from callqa.journey.models import ContentLayer, InteractionCard, ReturnJudgement, StoryVerdict
-from callqa.journey.rules import RuleSettings, apply_rules
+from callqa.journey.rules import RuleSettings, apply_rules, settings_for
 from callqa.journey.store import dataset_dir, load_dataset, resolve_dataset_id, save_content
 from callqa.journey.timeline import Contact, StoryTimeline, build_timelines
 from callqa.journey.transcript_view import (
@@ -369,13 +369,13 @@ def run_content(config: Config, dataset_id: str | None = None, *, mock: bool = F
                   units=load_units(config.journey.units),
                   lexicon=load_lexicon(config.journey.lexicon), profile=prof, engine=eng,
                   cache=AnswerCache(dataset_dir(config, ds_id) / "content_cache"),
-                  settings=RuleSettings(callback_business_days=config.journey.callback_business_days,
-                                        quiet_days=config.journey.quiet_days),
+                  settings=settings_for(config.journey, dataset),
                   stats=stats)
-    data_end = max((i.at for i in dataset.interactions), default=None)
-    ops_end = max((op.at for s in dataset.atlas_sessions for op in s.ops), default=None)
-    ctx.settings.data_end = max(x for x in (data_end, ops_end) if x is not None) \
-        if (data_end or ops_end) else None
+    if ctx.settings.data_end is None:      # the batch did not declare its window
+        data_end = max((i.at for i in dataset.interactions), default=None)
+        ops_end = max((op.at for s in dataset.atlas_sessions for op in s.ops), default=None)
+        ctx.settings.data_end = max(x for x in (data_end, ops_end) if x is not None) \
+            if (data_end or ops_end) else None
     timelines = build_timelines(dataset)
     if order:
         rank = {k: i for i, k in enumerate(order)}

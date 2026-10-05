@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter, defaultdict
+from dataclasses import replace
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -35,6 +36,8 @@ OBJECTIVE_HE = {
     "bank_initiated": "ביוזמת הבנק", "answered_execute": "נענתה בלי הקלטה, ובוצעה פעולה בחשבון",
     "answered_info": "נענתה בלי הקלטה, ובנקאי רק צפה בחשבון",
     "answered_no_trace": "נענתה בלי הקלטה, בלי פעילות בנקאי",
+    "no_trace_unknown_answer": "בלי הקלטה ובלי נתון מענה, בלי פעילות בנקאי (החשבון מכוסה)",
+    "branch_visit": "פנייה בסניף",
     "unrecorded_no_cover": "בלי הקלטה ובלי כיסוי אטלס",
 }
 
@@ -159,7 +162,9 @@ def analyse(dataset: JourneyDataset, *, taxonomy: Taxonomy, units: Units,
     ops_end = max((op.at for s in dataset.atlas_sessions for op in s.ops), default=None)
     if ops_end and ops_end > data_end:
         data_end = ops_end
-    settings = settings or RuleSettings()
+    # A copy: the caller's settings are never written to (the same object may
+    # serve another batch, where this batch's end would be wrong).
+    settings = replace(settings) if settings else RuleSettings()
     settings.data_end = settings.data_end or data_end
     failure_cats = taxonomy.failure_categories
 

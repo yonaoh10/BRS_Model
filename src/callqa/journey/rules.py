@@ -11,14 +11,24 @@ objective_class of a return (the contact's own facts)
                            banker performed an operation on the account
     answered_info          ... after which a banker only looked
     answered_no_trace      ... with no banker activity behind it (full Atlas cover)
+    no_trace_unknown_answer a call with no recording, whose answer is unknown, with
+                           no banker activity behind it although the account is
+                           fully covered
+    branch_visit           a contact at the branch counter (no recording by nature)
     unrecorded_no_cover    a call with no recording and no Atlas cover to read
 
 Promises (made by the bank, found by the language model in the transcript)
 are judged here: kept when the bank acted - an outbound contact, or an Atlas
 operation that executes something - before the customer came back and within
-`callback_business_days` Sunday-to-Thursday days; broken when the customer
-came back first, or the deadline passed with the account covered; unknown
-otherwise.
+`callback_business_days` Sunday-to-Thursday days (bank holidays, when the
+batch names them, do not count either); broken when the customer came back
+first, or the deadline passed with the account covered; unknown otherwise.
+
+Edge semantics, stated once (ATL_R02 keeps the same ties): a bank action at
+the very second of the deadline or of the customer's return counts as before
+it (ties go to the bank); an abandoned attempt by the customer counts as a
+return; an operation during the last contact counts as after it (R02 compares
+S_START to the contact's start).
 
 A story's end status is closed / open / unclear, with its basis: content
 (what was said), inference (the bank executed something after the last
@@ -28,7 +38,7 @@ contact and nothing followed for `quiet_days`), or none.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from callqa.journey.models import (
     InteractionCard,
@@ -47,6 +57,22 @@ class RuleSettings:
     callback_business_days: int = 2
     quiet_days: int = 7
     data_end: datetime | None = None          # the last moment the data covers
+    holidays: frozenset[date] = frozenset()   # bank holidays: not business days
+
+
+def settings_for(journey, dataset=None) -> RuleSettings:  # noqa: ANN001
+    """The rule settings of a run from the `journey` config section, plus what
+    the dataset's own batch declared (its holidays, the last moment its
+    sources cover) when one is given. The one place both the analysis and
+    the content stage build their settings from."""
+    holidays = set(journey.holidays)
+    data_end = None
+    if dataset is not None:
+        holidays |= set(dataset.holidays)
+        data_end = dataset.data_end
+    return RuleSettings(callback_business_days=journey.callback_business_days,
+                        quiet_days=journey.quiet_days, data_end=data_end,
+                        holidays=frozenset(holidays))
 
 
 @dataclass
@@ -64,12 +90,15 @@ def objective_class(c: Contact, covered: bool) -> str:
         return "bank_initiated"
     if c.has_content:
         return "content"
+    if c.kind == "branch":
+        return "branch_visit"
     if c.kind in ("unrecorded_answered", "unrecorded_unknown") and covered:
         if any(s.has_execute for s in c.sessions):
             return "answered_execute"
         if c.sessions:
             return "answered_info"
-        return "answered_no_trace" if c.kind == "unrecorded_answered" else "unrecorded_no_cover"
+        return ("answered_no_trace" if c.kind == "unrecorded_answered"
+                else "no_trace_unknown_answer")
     return "unrecorded_no_cover"
 
 
@@ -110,7 +139,7 @@ def promise_time(made_in: Contact, evidence=None):  # noqa: ANN001, ANN201
 def check_promise(tl: StoryTimeline, made_in: Contact, kind: str, settings: RuleSettings,
                   evidence=None) -> PromiseCheck:
     made_at = promise_time(made_in, evidence)
-    due = add_business_days(made_at, settings.callback_business_days)
+    due = add_business_days(made_at, settings.callback_business_days, settings.holidays)
     nxt = tl.next_contact_after(made_at, inbound_only=True)
     horizon = min(due, nxt.at) if nxt else due
     acted = _bank_acted(tl, made_at, horizon)

@@ -82,6 +82,7 @@ monitoring:
 journey:
   callback_business_days: 2   # a promise is kept if the bank acts within this many Sun-Thu days
   quiet_days: 7               # no contact this long after the bank acted = the story closed
+  holidays: []                # bank holidays (YYYY-MM-DD) that are not business days either
   min_rate_n: 10              # rates are shown only on at least this many cases
   min_firm_n: 30              # below this a figure is marked preliminary
   redact_messages: true       # message bodies go through the redactor at import

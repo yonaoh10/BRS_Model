@@ -96,7 +96,7 @@ def cmd_journey_atlas_check(args: argparse.Namespace) -> int:
     and unit class, and the page of numbers. With --expect, every figure is
     compared with the published one, and a difference fails the command."""
     from callqa.journey.session_analysis import compare_expected, rows_by_category
-    from callqa.journey.sessions import SESSION_KIND_HE, UNIT_CLASS_HE
+    from callqa.journey.sessions import OP_CATEGORY_HE, SESSION_KIND_HE, UNIT_CLASS_HE
     from callqa.journey.store import resolve_dataset_id
     from callqa.reporting.journey.render import _analyse, session_analysis_of
     from callqa.resources import load_yaml
@@ -120,7 +120,7 @@ def cmd_journey_atlas_check(args: argparse.Namespace) -> int:
     print("sessions of covered stories by unit: " + " / ".join(
         f"{UNIT_CLASS_HE[k]} {v:,}" for k, v in a.classes.items()))
     print("log rows by code category: " + " / ".join(
-        f"{SESSION_KIND_HE[k]} {v:,}" for k, v in rows_by_category(dataset).items()))
+        f"{OP_CATEGORY_HE[k]} {v:,}" for k, v in rows_by_category(dataset).items()))
     for h in a.head:
         print(f"  {h.item:>2}. {h.finding_he}: {h.value_txt}")
     if not args.expect:

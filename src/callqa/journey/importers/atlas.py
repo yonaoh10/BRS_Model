@@ -62,6 +62,7 @@ COLUMNS = {
     "unit": ("s_unit", "unit_no", "unit_code"),
     "n_ops": ("n_ops",),
     "peek": ("peek",),
+    "first_op": ("first_op", "first_op_key"),
     "op_at": ("ts_dt", "at"),
     "op": ("op_key", "op_code"),
     "op_desc": ("op_desc", "description"),
@@ -244,7 +245,8 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
                 banker_code=_get(row, "banker") or "?", unit_code=_code(_get(row, "unit")) or "?",
                 start=start, end=end or start, n_ops=n_ops,
                 matched_interaction_id=seq_to_iid.get((acc, _get(row, "int_seq"))),
-                peek=_get(row, "peek") in ("1", "1.0"))
+                first_op=_code(_get(row, "first_op")),
+                peek=_get(row, "peek").lower() in ("1", "1.0", "true"))
         if unmapped:
             report.add("atlas_sessions_unmapped", "warning",
                        "Atlas sessions of accounts that could not be tied to a story",
@@ -257,17 +259,32 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
         for group in by_acc_banker.values():
             group.sort(key=lambda x: x.start)
         orphan_ops = 0
+        boundary_rows = 0
         for r in rows:
-            home = next((x for x in by_acc_banker.get((r.account, r.banker), [])
-                         if x.start <= r.at <= x.end), None)
-            if home is None:
+            homes = [x for x in by_acc_banker.get((r.account, r.banker), [])
+                     if x.start <= r.at <= x.end]
+            if not homes:
                 orphan_ops += 1
                 continue
-            home.ops.append(op_of(r))
+            if len(homes) > 1:
+                boundary_rows += 1       # the second one session ends and the next opens
+            homes[0].ops.append(op_of(r))
         if orphan_ops:
             report.add("atlas_ops_outside_sessions", "info",
                        "Atlas operations that fall in no session of their banker",
                        count=orphan_ops)
+        if boundary_rows:
+            report.add("atlas_boundary_rows", "info",
+                       "log rows on a second shared by two sessions of one banker, kept in "
+                       "the earlier one (ATL_R02 B3); ATL_R01 would open the new session "
+                       "with them", count=boundary_rows)
+        if rows:
+            differ_ops = [x for x in by_key.values() if x.n_ops and x.n_ops != len(x.ops)]
+            if differ_ops:
+                report.add("atlas_n_ops_differ", "warning",
+                           "exported sessions whose N_OPS differs from the log rows read "
+                           "into them (rows missing from the export, or assigned to "
+                           "another session)", count=len(differ_ops))
         _compare(report, by_key, built)
         sessions = list(by_key.values())
     elif built:

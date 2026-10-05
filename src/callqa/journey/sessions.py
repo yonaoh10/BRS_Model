@@ -37,8 +37,8 @@ UNIT_CLASS_HE = {"center": "מרכז הבנקאות", "back": "תפעול עור
                  "other": "סניף או יחידה אחרים"}
 SESSION_KIND_HE = {"execute": "ביצוע או שינוי", "info": "מידע ושאילתות",
                    "unclassified": "פעולה שלא סווגה", "open": "פתיחת מסך בלבד",
-                   "not_customer": "לא על הלקוח"}
-OP_CATEGORY_HE = SESSION_KIND_HE
+                   "not_customer": "לא על הלקוח", "unknown": "לא ידוע (שורות הלוג לא סופקו)"}
+OP_CATEGORY_HE = {k: v for k, v in SESSION_KIND_HE.items() if k != "unknown"}
 
 
 @dataclass(frozen=True)

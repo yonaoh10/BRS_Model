@@ -318,7 +318,8 @@ def analyse_sessions(dataset: JourneyDataset, timelines: list[StoryTimeline], un
             if i.recorded and i.call_key and i.call_key in dataset.calls:
                 row.segments = len(dataset.calls[i.call_key].segments)
             if c.direction == "inbound" or c.kind == "abandoned":
-                nxt = min((s.start for s in tl.sessions if s.start >= c.at), default=None)
+                # strictly after the contact's second, as first_move_after (ATL_R02 B5)
+                nxt = min((s.start for s in tl.sessions if s.start > c.at), default=None)
                 if nxt is not None:
                     row.resp_hours = (nxt - c.at).total_seconds() / 3600
             if c.kind == "abandoned":
@@ -612,7 +613,7 @@ def _checks(dataset: JourneyDataset, a: SessionAnalysis) -> list[dict]:
 
 def rows_by_category(dataset: JourneyDataset) -> dict[str, int]:
     counts = Counter(op.op_category for s in dataset.atlas_sessions for op in s.ops)
-    return {k: counts.get(k, 0) for k in SESSION_KIND_HE}
+    return {k: counts.get(k, 0) for k in OP_CATEGORY_HE}
 
 
 def compare_expected(a: SessionAnalysis, dataset: JourneyDataset, expected: dict) -> list[str]:

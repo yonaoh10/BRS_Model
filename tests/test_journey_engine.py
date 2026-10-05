@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
-from callqa.journey.analysis import analyse
+from callqa.journey.analysis import OBJECTIVE_HE, analyse
 from callqa.journey.importers.atlas import attach_atlas
 from callqa.journey.importers.workbook import import_workbook
 from callqa.journey.models import (
@@ -115,6 +115,38 @@ def test_deadline_counts_business_days_only():
     p = check_promise(tl, tl.contacts[0], "callback", RuleSettings(callback_business_days=2))
     assert p.due.weekday() == 0          # Monday: Friday and Saturday were skipped
     assert p.outcome == "broken"
+
+
+def test_bank_holidays_are_not_business_days_either():
+    # promise on Sunday 5.7; Monday and Tuesday declared holidays -> due Thursday
+    ds = _story_dataset([{"at": timedelta(0), "recorded": True},
+                         {"at": timedelta(days=3, hours=2)}])          # Wednesday
+    tl = build_timelines(ds)[0]
+    plain = check_promise(tl, tl.contacts[0], "callback", RuleSettings(callback_business_days=2))
+    assert plain.due.date() == date(2026, 7, 7) and plain.outcome == "unknown"
+    holi = RuleSettings(callback_business_days=2,
+                        holidays=frozenset({date(2026, 7, 6), date(2026, 7, 7)}))
+    p = check_promise(tl, tl.contacts[0], "callback", holi)
+    assert p.due.date() == date(2026, 7, 9) and p.outcome == "broken"
+
+
+def test_analyse_never_writes_into_the_callers_settings(tmp_path):
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    settings = RuleSettings(holidays=frozenset({date(2026, 7, 6)}))
+    analyse(ds, taxonomy=load_taxonomy(), units=load_units(), settings=settings)
+    assert settings.data_end is None and settings.holidays == frozenset({date(2026, 7, 6)})
+
+
+def test_a_covered_unknown_answer_and_a_branch_visit_have_their_own_labels():
+    ds = _story_dataset([{"at": timedelta(0)},
+                         {"at": timedelta(hours=1), "answer": "unknown"},
+                         {"at": timedelta(hours=2), "channel": "branch"}])
+    tl = build_timelines(ds)[0]
+    assert objective_class(tl.contacts[1], True) == "no_trace_unknown_answer"
+    assert objective_class(tl.contacts[1], False) == "unrecorded_no_cover"
+    assert objective_class(tl.contacts[2], True) == "branch_visit"
+    assert all(k in OBJECTIVE_HE for k in ("no_trace_unknown_answer", "branch_visit"))
 
 
 def test_no_cover_no_verdict():

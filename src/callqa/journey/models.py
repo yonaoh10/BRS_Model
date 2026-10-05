@@ -14,7 +14,7 @@ Channels:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -81,13 +81,15 @@ class AtlasOp(BaseModel):
     description: str = ""
 
 
-SessionKind = Literal["execute", "info", "unclassified", "open", "not_customer"]
+SessionKind = Literal["execute", "info", "unclassified", "open", "not_customer", "unknown"]
 # A session's kind is its strongest operation (ATL_R02): execute, then info,
 # then an unclassified code; a session with nothing but the screen opening is a
 # peek ("open"), and one with nothing but the banker's own entry report (990)
-# is not about the customer.
+# is not about the customer. "unknown" is a session the export lists with
+# operations whose log rows were not supplied: nothing can be said about what
+# the banker did, so it is neither "open" nor "no execute".
 SESSION_KIND_ORDER: tuple[SessionKind, ...] = ("execute", "info", "unclassified", "open",
-                                               "not_customer")
+                                               "not_customer", "unknown")
 
 
 class AtlasSession(BaseModel):
@@ -114,8 +116,12 @@ class AtlasSession(BaseModel):
     @property
     def kind(self) -> SessionKind:
         """ATL_R02 S_CAT: execute > info > unclassified > open; not_customer
-        only when the session holds nothing else. No rows read = open, as R02
-        counts a session without classified rows."""
+        only when the session holds nothing else. An exported session that
+        says it had operations but whose rows were not supplied is unknown;
+        one with no operations at all is open, as R02 counts a session
+        without classified rows."""
+        if not self.ops and self.n_ops > 0:
+            return "unknown"
         cats = {op.op_category for op in self.ops}
         for kind in ("execute", "info", "unclassified"):
             if kind in cats:
@@ -210,6 +216,11 @@ class JourneyDataset(BaseModel):
     atlas_sessions: list[AtlasSession] = Field(default_factory=list)
     atlas_rules: AtlasRules = Field(default_factory=AtlasRules)
     report: ImportReport
+    # What the batch declared about itself (manifest.yaml / holidays.yaml):
+    # the last moment its sources cover, and the bank holidays in its window.
+    # Empty = not declared, and the analysis falls back to what the data shows.
+    data_end: datetime | None = None
+    holidays: list[date] = Field(default_factory=list)
 
     def story(self, story_key: str) -> Story:
         for s in self.stories:
