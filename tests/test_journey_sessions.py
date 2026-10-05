@@ -312,6 +312,34 @@ def test_an_empty_atlas_folder_is_a_warning_not_a_failure(tmp_path):
     assert {s.atlas_coverage for s in ds.stories} == {"none"}
 
 
+def test_atlas_banker_names_become_running_codes_shared_with_the_contacts(tmp_path):
+    from callqa.journey.pseudo import BankerCodes
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    built = import_workbook(xlsx, audio=zip_path)
+    atlas = build_atlas(tmp_path / "atlas")
+    for name in ("ATLR_SESS.csv", "ATLR_ROWS.csv"):
+        text = (atlas / name).read_text(encoding="utf-8")
+        (atlas / name).write_text(text.replace("B0002", "cohen_d"), encoding="utf-8")
+    registry = BankerCodes()
+    assert registry.code_for("cohen_d") == "B10001"      # seen first, in the contacts
+    attach_atlas(built.dataset, atlas, bankers=registry)
+    bankers = {s.banker_code for s in built.dataset.atlas_sessions}
+    assert bankers == {"B0001", "B10001"}                 # the export's code kept, the name replaced
+    assert registry.name_like == 1 and registry.rows() == [("B10001", "cohen_d")]
+    assert "cohen" not in built.dataset.model_dump_json()
+
+
+def test_unknown_atlas_units_are_counted_against_the_batch_unit_table(tmp_path):
+    from callqa.journey.models import UnitRow
+    from callqa.journey.vocab import Units, load_units
+    xlsx, zip_path = build_workbook(tmp_path / "in")
+    ds = import_workbook(xlsx, audio=zip_path).dataset
+    rows = [UnitRow(unit_key="u109", code_space="T1604", snif_id="109", kind="center")]
+    attach_atlas(ds, build_atlas(tmp_path / "atlas"), units=Units.from_rows(rows, load_units()))
+    issue = next(i for i in ds.report.issues if i.code == "atlas_units_unknown")
+    assert issue.severity == "warning" and issue.examples == ["83"]
+
+
 def test_coverage_from_is_a_day(tmp_path):
     xlsx, zip_path = build_workbook(tmp_path / "in")
     ds = import_workbook(xlsx, audio=zip_path).dataset

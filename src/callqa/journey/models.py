@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 CONTRACT_VERSION = 1
 
-Channel = Literal["call", "message", "branch", "other"]
+Channel = Literal["call", "message", "chat", "whatsapp", "branch", "other"]
 Direction = Literal["inbound", "outbound", "unknown"]
 Answer = Literal["answered", "abandoned", "unknown"]
 OpCategory = Literal["open", "info", "execute", "not_customer", "unclassified"]
@@ -48,6 +48,27 @@ class CallAudio(BaseModel):
         return bool(self.segments) and not self.missing_segments
 
 
+class CentreFacts(BaseModel):
+    """What the call-centre table (T4418) and the CRM identity table (T4425)
+    say about one contact, carried raw: codes the bank has not decoded are
+    kept as text and never interpreted here (contract v2)."""
+
+    direction_code: str | None = None          # CALL_DIRECTION_CODE as exported ('I', 'O', '2', 'C')
+    churn_call_code: str | None = None         # CHURN_CALL_CODE
+    call_status_code: str | None = None
+    call_source_code: str | None = None
+    employee_target_type_code: str | None = None
+    cti_at: datetime | None = None             # the matched T4418 time
+    match_gap_sec: float | None = None         # |CTI time - listed time|
+    caller_is_owner: bool | None = None        # T4425: the caller is an owner of the account
+    service_mode_code: str | None = None       # T4444.SERVICE_MODE_CODE
+    phone_meeting_ind: bool | None = None
+    manui_moked_ind: bool | None = None
+    chat_id: str | None = None
+    whatsapp_id: str | None = None
+    story_id: str | None = None                # the vendor's / the bank's own story number
+
+
 class Interaction(BaseModel):
     interaction_id: str      # unique in the dataset
     story_key: str
@@ -60,9 +81,10 @@ class Interaction(BaseModel):
     call_id: str | None = None
     correspondence_id: str | None = None
     talk_seconds: float | None = None
-    banker_code: str | None = None
+    banker_code: str | None = None   # a running code (B0001...), never the bank's user name
     unit_code: str | None = None
     source_row: int | None = None   # row in the source, for the audit trail only
+    facts: CentreFacts | None = None  # contract v2: the call-centre table's own columns
 
 
 class Message(BaseModel):
@@ -72,6 +94,45 @@ class Message(BaseModel):
     direction: Direction
     subject: str = ""
     body: str = ""
+    # contract v2 (T4453): an automatic message is not the bank acting on a
+    # promise; the channel code tells SMS from mail from WhatsApp; call_key
+    # is the one documented link from a message to a call.
+    send_method: Literal["MAN", "AUTO", ""] = ""
+    channel_msg_code: str | None = None
+    template_code: str | None = None
+    call_key: str | None = None
+    banker_code: str | None = None
+    unit_code: str | None = None
+
+
+UnitKind = Literal["center", "team", "cluster", "back_office", "branch", "live", "ipb",
+                   "business", "mortgage", "digital_support", "credit", "region", "hq",
+                   "other", "unknown"]
+CodeSpace = Literal["T1604", "T1017"]
+
+
+class UnitRow(BaseModel):
+    """One organisational unit as the batch's units.csv describes it. Two
+    code spaces exist at the bank - SNIF_ID (T1604, what Atlas and the
+    account carry) and ORG_UNIT_CODE (T1017, what the CRM carries) - and
+    the crosswalk between them has not been measured, so a row says which
+    space it is in and the two are never merged by the tool."""
+
+    unit_key: str
+    code_space: CodeSpace
+    snif_id: str | None = None
+    org_unit_code: str | None = None
+    name: str = ""
+    kind: UnitKind = "unknown"
+    parent_unit_key: str | None = None
+    cluster: str | None = None
+    team: str | None = None
+    region: str | None = None
+    in_closure: bool = False
+    merged_into: str | None = None
+    valid_from: date | None = None
+    valid_to: date | None = None
+    crosswalk_basis: Literal["measured", "hypothesis", "none"] = "none"
 
 
 class AtlasOp(BaseModel):
@@ -222,6 +283,9 @@ class ImportCounts(BaseModel):
     multi_file_calls: int = 0
     atlas_sessions: int = 0
     atlas_ops: int = 0
+    chats: int = 0                   # chat and WhatsApp contacts (contract v2)
+    units: int = 0                   # rows of units.csv
+    bankers_rewritten: int = 0       # banker values replaced by a running code
 
 
 class ImportIssue(BaseModel):
@@ -267,6 +331,7 @@ class JourneyDataset(BaseModel):
     manifest: Manifest | None = None
     data_end: datetime | None = None
     holidays: list[date] = Field(default_factory=list)
+    units: list[UnitRow] = Field(default_factory=list)   # the batch's units.csv, when given
 
     def story(self, story_key: str) -> Story:
         for s in self.stories:

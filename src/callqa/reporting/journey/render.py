@@ -39,7 +39,7 @@ from callqa.journey.rules import RuleSettings, StoryFacts, settings_for
 from callqa.journey.session_analysis import SessionAnalysis, analyse_sessions
 from callqa.journey.sessions import SESSION_KIND_HE, UNIT_CLASS_HE
 from callqa.journey.store import dataset_dir, load_content, load_dataset, resolve_dataset_id
-from callqa.journey.vocab import Taxonomy, Units, load_taxonomy, load_units
+from callqa.journey.vocab import Taxonomy, Units, load_taxonomy, units_of
 from callqa.reporting.common import jinja_env
 from callqa.reporting.executive import numfmt
 from callqa.reporting.executive.charts import SHOW_CALLS_HE
@@ -752,7 +752,7 @@ def _analyse(config: Config, ds_id: str):  # noqa: ANN202
     dataset = load_dataset(config, ds_id)
     content = load_content(config, ds_id)
     tax = load_taxonomy(config.journey.taxonomy)
-    units = load_units(config.journey.units)
+    units = units_of(dataset, config.journey.units)
     analysis, facts = analyse(
         dataset, taxonomy=tax, units=units,
         cards=content.cards if content else None,

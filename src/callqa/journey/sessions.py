@@ -75,7 +75,7 @@ def unit_class(units: Units, code: str | None, own_branch: str | None) -> UnitCl
     office; every other unit - a branch or a headquarters unit - is the
     account's own branch when its number is the account's branch, else other."""
     kind = units.kind(code, own_branch)
-    if kind == "center":
+    if kind in ("center", "team", "cluster"):
         return "center"
     if kind == "back_office":
         return "back"

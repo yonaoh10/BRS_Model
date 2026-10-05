@@ -59,6 +59,10 @@ class Contact:
 
     @property
     def has_content(self) -> bool:
+        # a chat or WhatsApp thread has content only when its messages came
+        # along (contract v2 may ship the thread, or only the fact of it)
+        if self.kind in ("chat", "whatsapp"):
+            return bool(self.messages)
         return self.kind in ("recorded_call", "message")
 
     @property
@@ -121,7 +125,7 @@ def touch_points(c: Contact, rules: AtlasRules) -> list[TouchPoint]:
         if c.direction == "inbound":
             return [TouchPoint(c.at, c.at, c.at + talk + mins(rules.call_in_after))]
         return [unknown(c.at)]
-    if i.channel == "message" and c.messages:
+    if i.channel in ("message", "chat", "whatsapp") and c.messages:
         points = []
         for m in c.messages:
             if m.direction == "outbound":

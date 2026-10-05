@@ -59,7 +59,7 @@ from callqa.journey.transcript_view import (
     load_lexicon,
     message_view,
 )
-from callqa.journey.vocab import Taxonomy, Units, load_taxonomy, load_units
+from callqa.journey.vocab import Taxonomy, Units, load_taxonomy, units_of
 from callqa.models import RedactedTranscript
 
 logger = logging.getLogger(__name__)
@@ -366,7 +366,7 @@ def run_content(config: Config, dataset_id: str | None = None, *, mock: bool = F
     stats = ContentStats()
     ctx = Context(config=config, output_dir=config.paths.output_dir,
                   taxonomy=load_taxonomy(config.journey.taxonomy),
-                  units=load_units(config.journey.units),
+                  units=units_of(dataset, config.journey.units),
                   lexicon=load_lexicon(config.journey.lexicon), profile=prof, engine=eng,
                   cache=AnswerCache(dataset_dir(config, ds_id) / "content_cache"),
                   settings=settings_for(config.journey, dataset),

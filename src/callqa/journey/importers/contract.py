@@ -45,6 +45,7 @@ from callqa.journey.importers.manifest import (
     load_holidays,
     load_manifest,
 )
+from callqa.journey.importers.units import read_units
 from callqa.journey.models import ImportReport
 from callqa.journey.timeparse import (
     TimeParseError,
@@ -58,21 +59,41 @@ from callqa.journey.timeparse import (
 SOURCE = "journey-contract-v1"
 SOURCE_V2 = "journey-contract-v2"
 
+# The call-centre table's own columns (T4418 / T4425 / T4444), contract v2:
+# carried raw on the contact, decoded nowhere here.
+FACT_COLUMNS = ("direction_code", "churn_call_code", "call_status_code", "call_source_code",
+                "employee_target_type_code", "cti_at", "match_gap_sec", "caller_is_owner",
+                "service_mode_code", "phone_meeting_ind", "manui_moked_ind", "chat_id",
+                "whatsapp_id", "story_id")
+MESSAGE_V2_COLUMNS = ("send_method", "channel_msg_code", "message_status_code", "read_at",
+                      "template_code", "main_category_code", "sub_category_code",
+                      "customer_mood", "ai_correspondence_ind", "banker_code", "unit_code",
+                      "call_key")
 ALLOWED = {
     "interactions.csv": {"interaction_id", "account_ref", "started_at", "channel", "branch",
                          "recorded", "direction", "status", "call_key", "correspondence_id",
-                         "talk_seconds", "banker_code", "unit_code"},
-    "call_segments.csv": {"call_key", "seq", "file_name", "recorded_at"},
+                         "talk_seconds", "banker_code", "unit_code", *FACT_COLUMNS},
+    "call_segments.csv": {"call_key", "seq", "file_name", "recorded_at", "duration_seconds"},
     "messages.csv": {"correspondence_id", "message_id", "sent_at", "direction", "body",
-                     "subject"},
+                     "subject", *MESSAGE_V2_COLUMNS},
 }
 REQUIRED = {
     "interactions.csv": {"interaction_id", "account_ref", "started_at", "channel"},
     "call_segments.csv": {"call_key", "file_name"},
     "messages.csv": {"correspondence_id", "message_id", "sent_at", "direction"},
 }
-_CHANNELS = {"call", "message", "branch", "other"}
-_TRUE = {"1", "yes", "y", "true", "כן"}
+_CHANNELS = {"call", "message", "chat", "whatsapp", "branch", "other"}
+_TRUE = {"1", "1.0", "yes", "y", "true", "כן"}
+_FALSE = {"0", "0.0", "no", "n", "false", "לא"}
+
+
+def _flag(value: str) -> bool | None:
+    v = (value or "").strip().lower()
+    if v in _TRUE:
+        return True
+    if v in _FALSE:
+        return False
+    return None
 # Column names that say the file carries a person's identity. The match is on
 # the whole normalised name (lower case, separators dropped), so "national_id"
 # and "National ID" fail while "unit_code" or "banker_code" do not.
@@ -86,8 +107,8 @@ FORBIDDEN_COLUMNS = {
 }
 # Files a batch folder may hold besides the tables; anything else is reported.
 KNOWN_FILES = {"manifest.yaml", "holidays.yaml", "export_manifest.csv", "checks.csv",
-               "interactions.csv", "call_segments.csv", "messages.csv", "readme.md",
-               "readme.txt"}
+               "interactions.csv", "call_segments.csv", "messages.csv", "units.csv",
+               "readme.md", "readme.txt"}
 
 
 def _norm_name(column: str) -> str:
@@ -198,13 +219,18 @@ def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | 
         except ValueError:
             pass
         status = row.get("status", "").lower()
+        facts = {k: row[k] for k in FACT_COLUMNS if row.get(k)}
+        if "cti_at" in facts:
+            cti = try_parse_dt(facts["cti_at"], day_first=order)
+            facts["cti_at"] = cti.isoformat() if cti else ""
         interactions.append(RawInteraction(
             row=n, branch=branch or ref_branch, account=account, at=at, channel=channel,
             source_id=source_id, direction=row.get("direction", "").lower() or "unknown",
             answer=status if status in ("answered", "abandoned") else "unknown",
             talk_seconds=talk, banker_code=row.get("banker_code") or None,
             unit_code=row.get("unit_code") or None,
-            recorded=row.get("recorded", "").lower() in _TRUE if row.get("recorded") else None))
+            recorded=_flag(row.get("recorded", "")) if row.get("recorded") else None,
+            facts={k: v for k, v in facts.items() if v}))
     if ambiguous:
         report.add("ambiguous_numeric_date", "error",
                    "interactions.csv: started_at holds a number that could be an Excel day "
@@ -247,7 +273,13 @@ def read_contract_rows(folder: Path, report: ImportReport, *, day_first: bool | 
         messages.append(RawMessage(correspondence_id=row["correspondence_id"].upper(),
                                    message_id=row["message_id"], at=at,
                                    direction=row.get("direction", ""),
-                                   subject=row.get("subject", ""), body=row.get("body", "")))
+                                   subject=row.get("subject", ""), body=row.get("body", ""),
+                                   send_method=row.get("send_method", "").upper()[:4],
+                                   channel_msg_code=row.get("channel_msg_code") or None,
+                                   template_code=row.get("template_code") or None,
+                                   call_key=(row.get("call_key") or "").lower() or None,
+                                   banker_code=row.get("banker_code") or None,
+                                   unit_code=row.get("unit_code") or None))
     if bad_msg:
         report.add("bad_message_time", "warning",
                    "messages whose sent_at could not be read (left out of the threads)",
@@ -284,6 +316,7 @@ def import_contract(folder: str | Path, *, audio: str | Path | None = None,
                          redact_messages=redact_messages)
     ds = built.dataset
     ds.holidays = load_holidays(folder, report)
+    ds.units = read_units(folder, report)
     if manifest is not None:
         ds.manifest = manifest
         ds.contract_version = manifest.contract_version

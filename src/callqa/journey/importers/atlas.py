@@ -35,9 +35,10 @@ from pathlib import Path
 from callqa.ingestion import _csv_reader, _read_text_any_encoding, _visible
 from callqa.journey.importers.common import text
 from callqa.journey.models import AtlasOp, AtlasRules, AtlasSession, JourneyDataset
+from callqa.journey.pseudo import BankerCodes
 from callqa.journey.sessions import AtlasRow, build_sessions
 from callqa.journey.timeparse import try_parse_dt
-from callqa.journey.vocab import load_atlas_codes, normalise_op_code
+from callqa.journey.vocab import Units, load_atlas_codes, normalise_op_code
 from callqa.journey.xlsx import read_xlsx
 
 TABLES = {
@@ -135,14 +136,22 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
                  join_tolerance_sec: float = 60.0,
                  coverage_start: datetime | None = None,
                  rules: AtlasRules | None = None,
-                 codes: dict[str, str] | None = None) -> None:
+                 codes: dict[str, str] | None = None,
+                 bankers: BankerCodes | None = None,
+                 units: Units | None = None) -> None:
     """Add Atlas facts to the dataset in place: contact direction, answer and
     talk time; banker sessions with their operations; per-story coverage.
 
     Sessions come from the export's own table (ATLR_SESS) when it has one -
     checked against the sessions its log rows make - or are built from the
-    log rows (ATLR_ROWS / atlas_ops) by the ATL_R01 rules."""
+    log rows (ATLR_ROWS / atlas_ops) by the ATL_R01 rules.
+
+    `bankers` is the batch's registry of running banker codes (shared with
+    the contact import, so one banker is one code across layers); a banker
+    value that is no running code is replaced through it. `units` is the
+    unit table to check codes against: a code it does not know is counted."""
     report = dataset.report
+    bankers = bankers if bankers is not None else BankerCodes()
     tables, unknown_files = _read_tables(Path(source))
     rules = (rules or AtlasRules()).model_copy()
     if coverage_start is not None:
@@ -237,7 +246,7 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
         if at is None or acc not in story_of_acc:
             orphan_rows += 1
             continue
-        rows.append(AtlasRow(account=acc, at=at, banker=_get(row, "banker") or "?",
+        rows.append(AtlasRow(account=acc, at=at, banker=bankers.code_for(_get(row, "banker")) or "?",
                              unit=_code(_get(row, "unit")) or "?", op=_code(_get(row, "op")),
                              description=_get(row, "op_desc")[:120], order=n))
     if orphan_rows:
@@ -286,7 +295,8 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
                 n_ops = 0
             by_key[(acc, sid)] = AtlasSession(
                 session_id=f"{skey[:8]}-{sid}", story_key=skey,
-                banker_code=_get(row, "banker") or "?", unit_code=_code(_get(row, "unit")) or "?",
+                banker_code=bankers.code_for(_get(row, "banker")) or "?",
+                unit_code=_code(_get(row, "unit")) or "?",
                 start=start, end=end or start, n_ops=n_ops,
                 matched_interaction_id=seq_to_iid.get((acc, _get(row, "int_seq"))),
                 first_op=_code(_get(row, "first_op")),
@@ -356,6 +366,15 @@ def attach_atlas(dataset: JourneyDataset, source: str | Path, *,
         if rules.sessions_from == "rows" or not sess.peek:
             sess.peek = sess.n_ops == 1 and sess.first_op == rules.start_op
     dataset.atlas_sessions = sorted(sessions, key=lambda x: (x.story_key, x.start))
+    if units is not None:
+        unknown_units = sorted({x.unit_code for x in sessions
+                                if x.unit_code not in ("", "?") and not units.known(x.unit_code)})
+        if unknown_units:
+            report.add("atlas_units_unknown", "warning" if units.strict else "info",
+                       "Atlas unit numbers that no unit table lists"
+                       + (" (shown as 'unit not identified')" if units.strict
+                          else " (taken to be branches, as the editable list assumes)"),
+                       count=len(unknown_units), examples=unknown_units[:5])
     unclassified = {op.op_code for x in sessions for op in x.ops
                     if op.op_category == "unclassified"}
     if unclassified:

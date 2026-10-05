@@ -25,7 +25,12 @@ COUNT_LABELS = [
     ("messages", "messages"),
     ("atlas_sessions", "Atlas banker sessions"),
     ("atlas_ops", "Atlas operations"),
+    ("chats", "chat / WhatsApp contacts"),
+    ("units", "units listed (units.csv)"),
+    ("bankers_rewritten", "banker values replaced by a running code"),
 ]
+# Counts printed only when non-zero: layers a batch may simply not carry.
+OPTIONAL_COUNTS = ("atlas_sessions", "atlas_ops", "chats", "units", "bankers_rewritten")
 
 
 def _config(args: argparse.Namespace):
@@ -39,7 +44,7 @@ def print_report(report, out=None) -> None:
     width = max(len(label) for _k, label in COUNT_LABELS)
     for key, label in COUNT_LABELS:
         value = counts.get(key, 0)
-        if key.startswith("atlas") and not value:
+        if key in OPTIONAL_COUNTS and not value:
             continue
         print(f"  {label.ljust(width)}  {value:>7,}", file=out)
     for column_file, cols in report.dropped_columns.items():
@@ -52,7 +57,7 @@ def print_report(report, out=None) -> None:
 
 def cmd_journey_import(args: argparse.Namespace) -> int:
     from callqa.journey.importers.atlas import attach_atlas
-    from callqa.journey.pseudo import write_private_map
+    from callqa.journey.pseudo import write_private_bankers, write_private_map
     from callqa.journey.store import private_dir, save_dataset
     from callqa.journey.xlsx import XlsxError
 
@@ -69,7 +74,7 @@ def cmd_journey_import(args: argparse.Namespace) -> int:
         if args.atlas:
             from callqa.journey.importers.manifest import rules_from_manifest
             from callqa.journey.sessions import rules_from_config
-            from callqa.journey.vocab import load_atlas_codes
+            from callqa.journey.vocab import load_atlas_codes, units_of
             manifest = built.dataset.manifest
             w = manifest.windows if manifest else None
             attach_atlas(built.dataset, args.atlas,
@@ -77,7 +82,9 @@ def cmd_journey_import(args: argparse.Namespace) -> int:
                                              else config.journey.atlas.join_tolerance_sec),
                          rules=rules_from_manifest(manifest,
                                                    rules_from_config(config.journey.atlas)),
-                         codes=load_atlas_codes(config.journey.atlas.codes))
+                         codes=load_atlas_codes(config.journey.atlas.codes),
+                         bankers=built.bankers,
+                         units=units_of(built.dataset, config.journey.units))
     except (XlsxError, FileNotFoundError, OSError, ValueError) as exc:
         print(f"import failed: {exc}", file=sys.stderr)
         return EXIT_FAILED
@@ -92,6 +99,7 @@ def cmd_journey_import(args: argparse.Namespace) -> int:
         return EXIT_SUCCESS
     folder = save_dataset(config, dataset)
     write_private_map(private_dir(config, dataset.dataset_id), built.private_rows)
+    write_private_bankers(private_dir(config, dataset.dataset_id), built.bankers)
     print(f"dataset {dataset.dataset_id} written to {folder}")
     return EXIT_SUCCESS
 

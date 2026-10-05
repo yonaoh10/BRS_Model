@@ -22,6 +22,7 @@ from callqa.journey.importers.common import (
 )
 from callqa.journey.models import (
     CallAudio,
+    CentreFacts,
     ImportReport,
     Interaction,
     JourneyDataset,
@@ -29,7 +30,42 @@ from callqa.journey.models import (
     Segment,
     Story,
 )
-from callqa.journey.pseudo import account_key, number_stories
+from callqa.journey.pseudo import BankerCodes, account_key, number_stories
+from callqa.journey.timeparse import try_parse_dt
+
+WRITTEN = ("message", "chat", "whatsapp")     # channels whose content is a thread of messages
+_TRUE = {"1", "1.0", "yes", "y", "true", "כן"}
+_FALSE = {"0", "0.0", "no", "n", "false", "לא"}
+
+
+def _centre_facts(raw: dict[str, str]) -> CentreFacts | None:
+    """The call-centre columns of a v2 row as the model carries them; codes
+    stay text, flags become booleans, the matched time a datetime."""
+    if not raw:
+        return None
+
+    def flag(key: str) -> bool | None:
+        v = raw.get(key, "").strip().lower()
+        return True if v in _TRUE else False if v in _FALSE else None
+
+    def num(key: str) -> float | None:
+        try:
+            return float(raw[key]) if raw.get(key) else None
+        except ValueError:
+            return None
+
+    return CentreFacts(
+        direction_code=raw.get("direction_code") or None,
+        churn_call_code=raw.get("churn_call_code") or None,
+        call_status_code=raw.get("call_status_code") or None,
+        call_source_code=raw.get("call_source_code") or None,
+        employee_target_type_code=raw.get("employee_target_type_code") or None,
+        cti_at=try_parse_dt(raw.get("cti_at")) if raw.get("cti_at") else None,
+        match_gap_sec=num("match_gap_sec"), caller_is_owner=flag("caller_is_owner"),
+        service_mode_code=raw.get("service_mode_code") or None,
+        phone_meeting_ind=flag("phone_meeting_ind"), manui_moked_ind=flag("manui_moked_ind"),
+        chat_id=raw.get("chat_id") or None, whatsapp_id=raw.get("whatsapp_id") or None,
+        story_id=raw.get("story_id") or None)
 
 
 @dataclass
@@ -49,6 +85,7 @@ class RawInteraction:
     banker_code: str | None = None
     unit_code: str | None = None
     recorded: bool | None = None
+    facts: dict[str, str] = field(default_factory=dict)   # contract v2 FACT_COLUMNS, raw
 
 
 @dataclass
@@ -67,12 +104,19 @@ class RawMessage:
     direction: str
     subject: str = ""
     body: str = ""
+    send_method: str = ""
+    channel_msg_code: str | None = None
+    template_code: str | None = None
+    call_key: str | None = None
+    banker_code: str | None = None
+    unit_code: str | None = None
 
 
 @dataclass
 class Built:
     dataset: JourneyDataset
     private_rows: list[tuple[int, str, str, str]] = field(default_factory=list)
+    bankers: BankerCodes = field(default_factory=BankerCodes)   # raw banker value -> B code
 
 
 def _direction(value: str) -> str:
@@ -125,8 +169,12 @@ def _merge_duplicates(rows: list[RawInteraction]) -> tuple[list[RawInteraction],
 def build_dataset(source: str, interactions: list[RawInteraction], segments: list[RawSegment],
                   messages: list[RawMessage], report: ImportReport, *,
                   audio: AudioSource | None = None, redact_messages: bool = True,
-                  created: datetime | None = None) -> Built:
+                  created: datetime | None = None, bankers: BankerCodes | None = None) -> Built:
+    """`bankers` is the registry of running banker codes for this batch; the
+    same one is handed to the Atlas attachment so one banker is one code
+    across the layers. Omitted = a fresh one."""
     created = created or datetime.now(UTC).replace(tzinfo=None)
+    bankers = bankers if bankers is not None else BankerCodes()
 
     # --- calls and their files -------------------------------------------
     by_call: dict[str, list[RawSegment]] = defaultdict(list)
@@ -195,9 +243,10 @@ def build_dataset(source: str, interactions: list[RawInteraction], segments: lis
                 recorded = True
                 file_only += 1
             base = call_id
-        elif raw.channel == "message":
+        elif raw.channel in WRITTEN:
             corr = raw.source_id
-            base = safe_ref("um", raw.source_id or f"row{raw.row}")
+            base = safe_ref("um" if raw.channel == "message" else raw.channel[:4],
+                            raw.source_id or f"row{raw.row}")
         else:
             base = safe_ref(raw.channel[:3] or "int", raw.source_id or f"row{raw.row}")
         iid = base
@@ -208,11 +257,11 @@ def build_dataset(source: str, interactions: list[RawInteraction], segments: lis
         used_ids.add(iid)
         out_interactions.append(Interaction(
             interaction_id=iid, story_key=skey, at=raw.at, channel=raw.channel,
-            recorded=recorded if raw.channel == "call" else raw.channel == "message",
+            recorded=recorded if raw.channel == "call" else raw.channel in WRITTEN,
             direction=raw.direction, answer=raw.answer, call_key=call_key,
             call_id=call_id if recorded else None, correspondence_id=corr,
-            talk_seconds=raw.talk_seconds, banker_code=raw.banker_code,
-            unit_code=raw.unit_code, source_row=raw.row))
+            talk_seconds=raw.talk_seconds, banker_code=bankers.code_for(raw.banker_code),
+            unit_code=raw.unit_code, source_row=raw.row, facts=_centre_facts(raw.facts)))
     if file_only:
         report.add("file_not_in_mapping", "warning",
                    "calls whose file is named on the interaction row but missing from "
@@ -227,14 +276,18 @@ def build_dataset(source: str, interactions: list[RawInteraction], segments: lis
             from callqa.redaction import redact_text
             body, _ = redact_text(body)
             subject, _ = redact_text(subject)
-        out_messages.append(Message(message_id=m.message_id, correspondence_id=m.correspondence_id,
-                                    at=m.at, direction=_direction(m.direction),
-                                    subject=subject, body=body))
+        out_messages.append(Message(
+            message_id=m.message_id, correspondence_id=m.correspondence_id, at=m.at,
+            direction=_direction(m.direction), subject=subject, body=body,
+            send_method=m.send_method if m.send_method in ("MAN", "AUTO") else "",
+            channel_msg_code=m.channel_msg_code, template_code=m.template_code,
+            call_key=m.call_key, banker_code=bankers.code_for(m.banker_code),
+            unit_code=m.unit_code))
     corr_first_dir: dict[str, str] = {}
     for m in sorted(out_messages, key=lambda m: m.at):
         corr_first_dir.setdefault(m.correspondence_id.upper(), m.direction)
     for i in out_interactions:
-        if i.channel == "message" and i.direction == "unknown" and i.correspondence_id:
+        if i.channel in WRITTEN and i.direction == "unknown" and i.correspondence_id:
             i.direction = corr_first_dir.get(i.correspondence_id.upper(), "unknown")
 
     # --- audio presence ----------------------------------------------------
@@ -305,9 +358,16 @@ def build_dataset(source: str, interactions: list[RawInteraction], segments: lis
     c.recorded_calls = sum(1 for i in out_interactions if i.channel == "call" and i.recorded)
     c.unrecorded_calls = c.calls - c.recorded_calls
     c.correspondences = sum(1 for i in out_interactions if i.channel == "message")
+    c.chats = sum(1 for i in out_interactions if i.channel in ("chat", "whatsapp"))
     c.messages = len(out_messages)
     c.audio_files_mapped = sum(len(call.segments) for call in calls.values())
     c.multi_file_calls = sum(1 for call in calls.values() if len(call.segments) > 1)
+    c.bankers_rewritten = bankers.rewritten
+    if bankers.name_like:
+        report.add("banker_names_rejected", "warning",
+                   "banker values that look like a person's name or user name; each was "
+                   "replaced by a running code (the mapping stays in the private folder) - "
+                   "the export should carry codes, not names", count=bankers.name_like)
 
     ds_id = dataset_id(created.strftime("%Y%m%d"),
                        sorted(f"{i.story_key}|{i.at.isoformat()}|{i.interaction_id}"
@@ -319,4 +379,4 @@ def build_dataset(source: str, interactions: list[RawInteraction], segments: lis
         calls=calls, messages=sorted(out_messages, key=lambda m: (m.at, m.message_id)),
         report=report)
     rows = [(numbers[k], k, b, a) for k, (b, a) in private.items()]
-    return Built(dataset=dataset, private_rows=rows)
+    return Built(dataset=dataset, private_rows=rows, bankers=bankers)

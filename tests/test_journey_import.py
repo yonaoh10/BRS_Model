@@ -386,6 +386,58 @@ def test_exporter_row_counts_and_stray_files_are_checked(tmp_path):
     assert next(i for i in ds.report.issues if i.code == "unknown_files").examples == ["ATLR_INT.csv"]
 
 
+def test_contract_v2_carries_the_centre_facts_chats_message_details_and_units(tmp_path):
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "manifest.yaml").write_text("contract_version: 2\n", encoding="utf-8")
+    (folder / "interactions.csv").write_text(
+        "interaction_id,account_ref,started_at,channel,direction,call_key,direction_code,"
+        "churn_call_code,call_status_code,cti_at,match_gap_sec,caller_is_owner,chat_id,"
+        "story_id,banker_code,unit_code\n"
+        "i1,17/335145,2026-08-01 10:00:00,call,inbound,abc123abc123,2,0,3,"
+        "2026-08-01 10:00:05,5,1,,033,B0007,109\n"
+        "i2,17/335145,2026-08-02 10:00:00,whatsapp,inbound,,,,,,,,wa-77,033,dana.cohen,109\n",
+        encoding="utf-8")
+    (folder / "messages.csv").write_text(
+        "correspondence_id,message_id,sent_at,direction,body,send_method,channel_msg_code,"
+        "call_key,banker_code\n"
+        "COR-1,UM-1,2026-08-01 11:00:00,outbound,שלום,AUTO,SMS,abc123abc123,dana.cohen\n",
+        encoding="utf-8")
+    (folder / "units.csv").write_text(
+        "unit_key,code_space,snif_id,org_unit_code,name,kind,crosswalk_basis\n"
+        "u109,T1604,109,,מרכז הבנקאות,centre,none\n"
+        "u083,T1604,083,,סניף הרצליה,branch,none\n"
+        "t12,T1017,,40012,צוות ב - אשכול נעמן,team,hypothesis\n"
+        "bad,X9,1,,,,\n", encoding="utf-8")
+    ds = import_contract(folder).dataset
+    codes = _codes(ds)
+    assert ds.report.ok and ds.contract_version == 2
+    i1, i2 = sorted(ds.interactions, key=lambda i: i.at)
+    f = i1.facts
+    assert (f.direction_code, f.churn_call_code, f.call_status_code) == ("2", "0", "3")
+    assert f.cti_at == datetime(2026, 8, 1, 10, 0, 5) and f.match_gap_sec == 5
+    assert f.caller_is_owner is True and f.story_id == "033"
+    assert i2.channel == "whatsapp" and i2.facts.chat_id == "wa-77" and i2.recorded
+    assert ds.report.counts.chats == 1
+    # bankers: a running code stays; a user name gets a code of its own series
+    # (B10001...), which cannot collide with the export's B0001.. codes
+    assert i1.banker_code == "B0007" and i2.banker_code == "B10001"
+    assert ds.messages[0].banker_code == "B10001"         # the same person, the same code
+    assert codes["banker_names_rejected"] == 1 and ds.report.counts.bankers_rewritten == 1
+    assert "dana" not in ds.model_dump_json()
+    m = ds.messages[0]
+    assert (m.send_method, m.channel_msg_code, m.call_key) == ("AUTO", "SMS", "abc123abc123")
+    # units: two code spaces, never merged; a bad row counted
+    assert ds.report.counts.units == 3 and codes["units_rows_skipped"] == 1
+    kinds = {u.unit_key: (u.code_space, u.kind) for u in ds.units}
+    assert kinds["u109"] == ("T1604", "center") and kinds["t12"] == ("T1017", "team")
+    from callqa.journey.vocab import units_of
+    units = units_of(ds)
+    assert units.strict and units.kind("109", None) == "center"
+    assert units.kind("083", "83") == "own_branch" and units.name("83") == "סניף הרצליה"
+    assert units.kind("555", None) == "unknown"            # listed nowhere: not a branch
+
+
 def test_contract_missing_required_column_is_an_error(tmp_path):
     folder = tmp_path / "c"
     folder.mkdir()

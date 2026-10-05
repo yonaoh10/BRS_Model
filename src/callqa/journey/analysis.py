@@ -29,6 +29,7 @@ GAP_BUCKETS = [(1, "עד שעה"), (4, "1–4 שעות"), (24, "באותה ימ�
 KIND_HE = {
     "recorded_call": "שיחה מוקלטת", "message": "התכתבות", "abandoned": "שיחה שננטשה",
     "unrecorded_answered": "שיחה שנענתה בלי הקלטה", "unrecorded_unknown": "שיחה בלי הקלטה",
+    "chat": "צ'אט", "whatsapp": "וואטסאפ",
     "branch": "פנייה בסניף", "other": "אחר",
 }
 OBJECTIVE_HE = {
